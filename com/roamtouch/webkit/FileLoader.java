@@ -19,8 +19,8 @@ package roamtouch.webkit;
 import com.android.internal.R;
 
 import android.content.res.AssetManager;
-import android.net.http.EventHandler;
-import android.net.http.Headers;
+import roamtouch.net.http.EventHandler;
+import roamtouch.net.http.Headers;
 import android.util.Log;
 import android.util.TypedValue;
 

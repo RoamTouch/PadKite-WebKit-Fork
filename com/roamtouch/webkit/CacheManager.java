@@ -17,8 +17,8 @@
 package roamtouch.webkit;
 
 import android.content.Context;
-import android.net.http.AndroidHttpClient;
-import android.net.http.Headers;
+import roamtouch.net.http.AndroidHttpClient;
+import roamtouch.net.http.Headers;
 import android.os.FileUtils;
 import android.util.Log;
 import java.io.File;

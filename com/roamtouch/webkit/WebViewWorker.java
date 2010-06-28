@@ -20,7 +20,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
-import android.net.http.Headers;
+import roamtouch.net.http.Headers;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
