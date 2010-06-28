@@ -18,7 +18,7 @@ package roamtouch.webkit;
 
 import android.net.ParseException;
 import android.net.WebAddress;
-import android.net.http.AndroidHttpClient;
+import roamtouch.net.http.AndroidHttpClient;
 import android.util.Log;
 
 

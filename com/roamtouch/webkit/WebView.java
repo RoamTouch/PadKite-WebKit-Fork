@@ -40,7 +40,7 @@ import android.graphics.Region;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
-import android.net.http.SslCertificate;
+import roamtouch.net.http.SslCertificate;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;

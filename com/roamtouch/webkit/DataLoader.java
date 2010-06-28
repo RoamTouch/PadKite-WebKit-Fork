@@ -16,7 +16,7 @@
 
 package roamtouch.webkit;
 
-import android.net.http.EventHandler;
+import roamtouch.net.http.EventHandler;
 
 import com.android.internal.R;
 
@@ -72,6 +72,6 @@ class DataLoader extends StreamLoader {
     }
 
     @Override
-    protected void buildHeaders(android.net.http.Headers h) {
+    protected void buildHeaders(roamtouch.net.http.Headers h) {
     }
 }
