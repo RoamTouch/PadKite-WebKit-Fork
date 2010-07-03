@@ -5917,6 +5917,12 @@ public class WebView extends AbsoluteLayout
         if (nativeHasCursorNode() && !nativeCursorIsTextInput()) {
             playSoundEffect(SoundEffectConstants.CLICK);
         }
+
+		//ROAMTOUCH TEST CODE
+		//WebHitTestResult result = nativeGetHitTestResultAtPoint(contentX, contentY, mNavSlop) ;
+		//result.dump() ;
+		
+			
 	}
 
     /*

@@ -123,6 +123,8 @@ public:
     }
     bool isTextField(const CachedFrame*) const;
     bool isTextInput() const { return mType == TEXT_INPUT_CACHEDNODETYPE; }
+    //ROAMTOUCH CHANGE
+    bool isText() const { return mIsText; }
     bool isTransparent() const { return mIsTransparent; }
     bool isUnclipped() const { return mIsUnclipped; }
     // localXXX functions are used only for drawing cursor rings
@@ -159,6 +161,8 @@ public:
     void setIsFocus(bool isFocus) { mIsFocus = isFocus; }
     void setIsInLayer(bool isInLayer) { mIsInLayer = isInLayer; }
     void setIsParentAnchor(bool isAnchor) { mIsParentAnchor = isAnchor; }
+    //ROAMTOUCH CHANGE
+    void setIsText(bool isTextField) { mIsText = isTextField; }
     void setIsTransparent(bool isTransparent) { mIsTransparent = isTransparent; }
     void setIsUnclipped(bool unclipped) { mIsUnclipped = unclipped; }
     void setLast() { mLast = true; }
@@ -200,6 +204,8 @@ private:
     bool mIsHidden : 1;
     bool mIsInLayer : 1;
     bool mIsParentAnchor : 1;
+    //ROAMTOUCH CHANGE
+    bool mIsText : 1;
     bool mIsTransparent : 1;
     bool mIsUnclipped : 1;
     bool mLast : 1;             // true if this is the last node in a group
