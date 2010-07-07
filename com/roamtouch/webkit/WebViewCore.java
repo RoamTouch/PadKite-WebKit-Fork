@@ -864,6 +864,9 @@ final class WebViewCore {
         static final int ADD_PACKAGE_NAMES = 184;
         static final int ADD_PACKAGE_NAME = 185;
         static final int REMOVE_PACKAGE_NAME = 186;
+        //ROAMTOUCH CHANGE >>
+        static final int EXECUTE_SELECTION_COMMAND = 187;
+        //ROAMTOUCH CHANGE <<        
 
         // private message ids
         private static final int DESTROY =     200;
@@ -1357,6 +1360,12 @@ final class WebViewCore {
                             BrowserFrame.sJavaBridge.removePackageName(
                                     (String) msg.obj);
                             break;
+                        //ROAMTOUCH CHANGE >>
+                        case EXECUTE_SELECTION_COMMAND:
+                            Point pos = (Point)msg.obj;
+                            nativeExecuteSelectionCommand(pos.x, pos.y, (int)msg.arg1);
+                            break;
+                        //ROAMTOUCH CHANGE <<    
                     }
                 }
             };
@@ -2443,6 +2452,14 @@ final class WebViewCore {
                     data).sendToTarget();
         }
     }
+    //ROAMTOUCH CHANGE >>
+    //Called by JNI
+    private void updateClipboard(String data) {
+        Message.obtain(mWebView.mPrivateHandler
+                , WebView.UPDATE_CLIPBOARD, data)
+                .sendToTarget();
+    }
+    //ROAMTOUCH CHANGE <<
 
     // called by JNI
     private void centerFitRect(int x, int y, int width, int height) {
@@ -2469,4 +2486,8 @@ final class WebViewCore {
     private native boolean nativeValidNodeAndBounds(int frame, int node,
             Rect bounds);
 
+    //ROAMTOUCH CHANGE >>
+    private native void     nativeExecuteSelectionCommand(int x, int y, int command);
+    //ROAMTOUCH CHANGE <<
+    
 }
