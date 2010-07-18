@@ -6673,6 +6673,23 @@ public class WebView extends AbsoluteLayout
                 case RESUME_WEBCORE_PRIORITY:
                     WebViewCore.resumePriority();
                     WebViewCore.resumeUpdatePicture(mWebViewCore);
+                case UPDATE_CLIPBOARD:
+                    String str = (String) msg.obj;
+                    if (DebugFlags.WEB_VIEW) {
+                        Log.v(LOGTAG, "UPDATE_CLIPBOARD " + str);
+                    }
+                    try {
+                        IClipboard clip = IClipboard.Stub.asInterface(
+                                ServiceManager.getService("clipboard"));
+                                clip.setClipboardText(str);
+                        //RoamTouch Change        
+                        mCallbackProxy.onClipBoardUpdate("text/plain");
+                    } catch (android.os.RemoteException e) {
+                        Log.e(LOGTAG, "Clipboard failed", e);
+                    }
+                    break;
+                case RESUME_WEBCORE_UPDATE:
+                    WebViewCore.resumeUpdate(mWebViewCore);
                     break;
 
                 case LONG_PRESS_CENTER:

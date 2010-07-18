@@ -112,6 +112,8 @@ class CallbackProxy extends Handler {
     private static final int ADD_HISTORY_ITEM                    = 135;
     private static final int HISTORY_INDEX_CHANGED               = 136;
     private static final int AUTH_CREDENTIALS                    = 137;
+    //RoamTouch Change
+    private static final int CLIPBOARD_UPDATED                   = 138;
 
     // Message triggered by the client to resume execution
     private static final int NOTIFY                              = 200;
@@ -750,6 +752,11 @@ class CallbackProxy extends Handler {
                 mWebView.setHttpAuthUsernamePassword(
                         host, realm, username, password);
                 break;
+            case CLIPBOARD_UPDATED:
+                if (mWebChromeClient != null) {
+                    mWebChromeClient.onClipBoardUpdate((String)msg.obj);
+                }
+                break;
         }
     }
 
@@ -1373,6 +1380,20 @@ class CallbackProxy extends Handler {
         Message hideMessage = obtainMessage(GEOLOCATION_PERMISSIONS_HIDE_PROMPT);
         sendMessage(hideMessage);
     }
+
+    //RoamTouch Change - begin
+    /**
+     * Called by WebView to notify the browser that the clipboard has beed updated with
+     * new content.
+     */
+    public void onClipBoardUpdate(String type) {
+        if (mWebChromeClient == null) {
+            return;
+        }
+        sendMessage(obtainMessage(CLIPBOARD_UPDATED, type));
+
+    }
+    //RoamTouch Change - end
 
     /**
      * Called by WebViewCore when we have a message to be added to the JavaScript
