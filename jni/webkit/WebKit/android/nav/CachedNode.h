@@ -102,6 +102,7 @@ public:
     void fixUpCursorRects(const CachedFrame* frame);
     const WebCore::String& getExport() const { return mExport; }
     bool hasCursorRing() const { return mHasCursorRing; }
+    const WebCore::String& getToolTip() const { return mToolTip; } //RoamTouch Change
     bool hasMouseOver() const { return mHasMouseOver; }
     void hideCursor(CachedFrame* );
     WebCore::IntRect hitBounds(const CachedFrame* ) const;
@@ -151,6 +152,7 @@ public:
     void setDataIndex(int index) { mDataIndex = index; }
     void setDisabled(bool disabled) { mDisabled = disabled; }
     void setExport(const WebCore::String& exported) { mExport = exported; }
+    void setToolTip(const WebCore::String& toolTip) { mToolTip = toolTip; }
     void setHasCursorRing(bool hasRing) { mHasCursorRing = hasRing; }
     void setHasMouseOver(bool hasMouseOver) { mHasMouseOver = hasMouseOver; }
     void setHitBounds(const WebCore::IntRect& bounds) { mHitBounds = bounds; }
@@ -181,6 +183,8 @@ public:
 private:
     friend class CacheBuilder;
     WebCore::String mExport;
+    WebCore::String mToolTip; //RoamTouch Change
+    WebCore::String mName;
     WebCore::IntRect mBounds;
     WebCore::IntRect mHitBounds;
     WebCore::IntRect mOriginalAbsoluteBounds;
