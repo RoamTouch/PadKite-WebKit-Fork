@@ -112,8 +112,11 @@ class CallbackProxy extends Handler {
     private static final int ADD_HISTORY_ITEM                    = 135;
     private static final int HISTORY_INDEX_CHANGED               = 136;
     private static final int AUTH_CREDENTIALS                    = 137;
-    //RoamTouch Change
+    //RoamTouch Change  - begin
     private static final int CLIPBOARD_UPDATED                   = 138;
+    private static final int REQUEST_LISTBOX_SINGLECHOICE        = 139;
+    private static final int REQUEST_LISTBOX_MULTICHOICE         = 140;
+    //RoamTouch Change  - end
 
     // Message triggered by the client to resume execution
     private static final int NOTIFY                              = 200;
@@ -752,11 +755,29 @@ class CallbackProxy extends Handler {
                 mWebView.setHttpAuthUsernamePassword(
                         host, realm, username, password);
                 break;
+            //RoamTouch change - begin    
             case CLIPBOARD_UPDATED:
                 if (mWebChromeClient != null) {
                     mWebChromeClient.onClipBoardUpdate((String)msg.obj);
                 }
                 break;
+            case REQUEST_LISTBOX_SINGLECHOICE:
+                if (mWebChromeClient != null) {
+                    String[] array = msg.getData().getStringArray("array");
+                    boolean[] enabledArray = msg.getData().getBooleanArray("enabledArray");
+                    int selection = msg.getData().getInt("selection");
+                    mWebChromeClient.onListBoxRequest(array, enabledArray, selection);
+                }
+                break;
+            case REQUEST_LISTBOX_MULTICHOICE:
+                if (mWebChromeClient != null) {
+                    String[] array = msg.getData().getStringArray("array");
+                    boolean[] enabledArray = msg.getData().getBooleanArray("enabledArray");
+                    int[] selectedArray = msg.getData().getIntArray("selectedArray");
+                    mWebChromeClient.onListBoxRequest(array, enabledArray, selectedArray);
+                }
+                break;
+            //RoamTouch change - end
         }
     }
 
@@ -1393,6 +1414,40 @@ class CallbackProxy extends Handler {
         sendMessage(obtainMessage(CLIPBOARD_UPDATED, type));
 
     }
+
+    /**
+     * Called by WebView to notify the browser to create a single choice listbox when
+     * a <select> element is clicked in the webpage
+     */
+    void requestListBox(String[] array, boolean[] enabledArray, int selection) {
+        if (mWebChromeClient == null) {
+            return;
+        }
+
+        Message msg = obtainMessage(REQUEST_LISTBOX_SINGLECHOICE);
+        msg.getData().putStringArray("array", array);
+        msg.getData().putBooleanArray("enabledArray", enabledArray);
+        msg.getData().putInt("selection", selection);
+        sendMessage(msg);
+    }
+
+    /**
+     * Called by WebView to notify the browser to create a multi-choice listbox when
+     * a <select> element is clicked in the webpage
+     */
+    void requestListBox(String[] array, boolean[]enabledArray, int[]
+            selectedArray) {
+        if (mWebChromeClient == null) {
+            return;
+        }
+
+        Message msg = obtainMessage(REQUEST_LISTBOX_MULTICHOICE);
+        msg.getData().putStringArray("array", array);
+        msg.getData().putBooleanArray("enabledArray", enabledArray);
+        msg.getData().putIntArray("selectedArray", selectedArray);
+        sendMessage(msg);
+    }
+
     //RoamTouch Change - end
 
     /**
