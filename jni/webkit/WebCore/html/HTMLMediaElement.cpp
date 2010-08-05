@@ -394,6 +394,13 @@ String HTMLMediaElement::currentSrc() const
     return m_currentSrc;
 }
 
+//RoamTouch Change - begin
+String HTMLMediaElement::currentType() const
+{
+    return m_currentType;
+}
+//RoamTouch Change - end
+
 HTMLMediaElement::NetworkState HTMLMediaElement::networkState() const
 {
     return m_networkState;
@@ -575,6 +582,7 @@ void HTMLMediaElement::loadResource(const KURL& initialURL, ContentType& content
     m_networkState = NETWORK_LOADING;
 
     m_currentSrc = url;
+    m_currentType = contentType.type();
 
     if (m_sendProgressEvents) 
         startProgressEventTimer();
@@ -1832,8 +1840,13 @@ String HTMLMediaElement::initialURL()
 {
     KURL initialSrc = document()->completeURL(getAttribute(srcAttr));
     
-    if (!initialSrc.isValid())
-        initialSrc = selectNextSourceChild(0, DoNothing);
+    if (!initialSrc.isValid()) {
+        ContentType contentType ;
+        initialSrc = selectNextSourceChild(&contentType, DoNothing);
+        m_currentType = contentType.type();
+    } else {
+        m_currentType = getAttribute(typeAttr); //RoamTouch change
+    }
 
     m_currentSrc = initialSrc.string();
 
