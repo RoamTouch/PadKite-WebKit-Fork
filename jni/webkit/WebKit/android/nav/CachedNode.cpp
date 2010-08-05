@@ -241,6 +241,7 @@ void CachedNode::init(WebCore::Node* node)
     mNode = node;
     mParentIndex = mDataIndex = -1;
     mType = android::NORMAL_CACHEDNODETYPE;
+    mToolTip = WebCore::String();
 }
 
 bool CachedNode::isTextField(const CachedFrame* frame) const

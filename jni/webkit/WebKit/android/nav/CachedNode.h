@@ -102,7 +102,6 @@ public:
     void fixUpCursorRects(const CachedFrame* frame);
     const WebCore::String& getExport() const { return mExport; }
     bool hasCursorRing() const { return mHasCursorRing; }
-    const WebCore::String& getToolTip() const { return mToolTip; } //RoamTouch Change
     bool hasMouseOver() const { return mHasMouseOver; }
     void hideCursor(CachedFrame* );
     WebCore::IntRect hitBounds(const CachedFrame* ) const;
@@ -124,8 +123,12 @@ public:
     }
     bool isTextField(const CachedFrame*) const;
     bool isTextInput() const { return mType == TEXT_INPUT_CACHEDNODETYPE; }
-    //ROAMTOUCH CHANGE
+    //ROAMTOUCH CHANGE - begin
     bool isText() const { return mIsText; }
+    bool isVideo() const { return mIsVideo; }
+    const WebCore::String& getToolTip() const { return mToolTip; }
+    const WebCore::IntSize& getVideoSize() const { return mVideoSize; }
+    //ROAMTOUCH CHANGE - end
     bool isTransparent() const { return mIsTransparent; }
     bool isUnclipped() const { return mIsUnclipped; }
     // localXXX functions are used only for drawing cursor rings
@@ -152,7 +155,6 @@ public:
     void setDataIndex(int index) { mDataIndex = index; }
     void setDisabled(bool disabled) { mDisabled = disabled; }
     void setExport(const WebCore::String& exported) { mExport = exported; }
-    void setToolTip(const WebCore::String& toolTip) { mToolTip = toolTip; }
     void setHasCursorRing(bool hasRing) { mHasCursorRing = hasRing; }
     void setHasMouseOver(bool hasMouseOver) { mHasMouseOver = hasMouseOver; }
     void setHitBounds(const WebCore::IntRect& bounds) { mHitBounds = bounds; }
@@ -163,8 +165,12 @@ public:
     void setIsFocus(bool isFocus) { mIsFocus = isFocus; }
     void setIsInLayer(bool isInLayer) { mIsInLayer = isInLayer; }
     void setIsParentAnchor(bool isAnchor) { mIsParentAnchor = isAnchor; }
-    //ROAMTOUCH CHANGE
+    //ROAMTOUCH CHANGE - begin
     void setIsText(bool isTextField) { mIsText = isTextField; }
+    void setIsVideo(bool isVideo) { mIsVideo = isVideo; }
+    void setVideoSize(WebCore::IntSize size) { mVideoSize = size; }
+    void setToolTip(const WebCore::String& toolTip) { mToolTip = toolTip; }
+    //ROAMTOUCH CHANGE - end
     void setIsTransparent(bool isTransparent) { mIsTransparent = isTransparent; }
     void setIsUnclipped(bool unclipped) { mIsUnclipped = unclipped; }
     void setLast() { mLast = true; }
@@ -185,6 +191,7 @@ private:
     WebCore::String mExport;
     WebCore::String mToolTip; //RoamTouch Change
     WebCore::String mName;
+    WebCore::IntSize mVideoSize;
     WebCore::IntRect mBounds;
     WebCore::IntRect mHitBounds;
     WebCore::IntRect mOriginalAbsoluteBounds;
@@ -192,6 +199,7 @@ private:
     void* mNode; // WebCore::Node*, only used to match pointers
     void* mParentGroup; // WebCore::Node*, only used to match pointers
     int mDataIndex; // child frame if a frame; input data index; or -1
+    void* mInfo; //RoamTouch Change
     int mIndex; // index of itself, to find first in array (document)
     int mNavableRects; // FIXME: could be bitfield once I limit max number of rects
     int mParentIndex;
@@ -208,8 +216,10 @@ private:
     bool mIsHidden : 1;
     bool mIsInLayer : 1;
     bool mIsParentAnchor : 1;
-    //ROAMTOUCH CHANGE
+    //ROAMTOUCH CHANGE - begin
     bool mIsText : 1;
+    bool mIsVideo : 1;
+    //ROAMTOUCH CHANGE - end
     bool mIsTransparent : 1;
     bool mIsUnclipped : 1;
     bool mLast : 1;             // true if this is the last node in a group
