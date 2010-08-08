@@ -18,7 +18,7 @@
  * package-level logging flag
  */
 
-package android.net.http;
+package roamtouch.net.http;
 
 import android.os.SystemClock;
 
