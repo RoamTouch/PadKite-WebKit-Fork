@@ -1,6 +1,6 @@
 # See system/core/logcat/event.logtags for a description of the format of this file.
 
-option java_package android.webkit;
+option java_package roamtouch.webkit;
 
 # browser stats for diary study
 70101 browser_zoom_level_change (start level|1|5),(end level|1|5),(time|2|3)

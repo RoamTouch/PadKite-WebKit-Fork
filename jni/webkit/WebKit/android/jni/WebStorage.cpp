@@ -159,10 +159,10 @@ static JNINativeMethod gWebStorageMethods[] = {
 
 int register_webstorage(JNIEnv* env)
 {
-    jclass webStorage = env->FindClass("android/webkit/WebStorage");
-    LOG_ASSERT(webStorage, "Unable to find class android.webkit.WebStorage");
+    jclass webStorage = env->FindClass("roamtouch/webkit/WebStorage");
+    LOG_ASSERT(webStorage, "Unable to find class roamtouch.webkit.WebStorage");
 
-    return jniRegisterNativeMethods(env, "android/webkit/WebStorage",
+    return jniRegisterNativeMethods(env, "roamtouch/webkit/WebStorage",
             gWebStorageMethods, NELEM(gWebStorageMethods));
 }
 

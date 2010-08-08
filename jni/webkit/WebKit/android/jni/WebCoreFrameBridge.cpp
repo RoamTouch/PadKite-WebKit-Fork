@@ -210,7 +210,7 @@ WebFrame::WebFrame(JNIEnv* env, jobject obj, jobject historyList, WebCore::Page*
     mJavaFrame->mObj = env->NewWeakGlobalRef(obj);
     mJavaFrame->mHistoryList = env->NewWeakGlobalRef(historyList);
     mJavaFrame->mStartLoadingResource = env->GetMethodID(clazz, "startLoadingResource",
-            "(ILjava/lang/String;Ljava/lang/String;Ljava/util/HashMap;[BJIZZZLjava/lang/String;Ljava/lang/String;)Landroid/webkit/LoadListener;");
+            "(ILjava/lang/String;Ljava/lang/String;Ljava/util/HashMap;[BJIZZZLjava/lang/String;Ljava/lang/String;)Lroamtouch/webkit/LoadListener;");
     mJavaFrame->mLoadStarted = env->GetMethodID(clazz, "loadStarted",
             "(Ljava/lang/String;Landroid/graphics/Bitmap;IZ)V");
     mJavaFrame->mTransitionToCommitted = env->GetMethodID(clazz, "transitionToCommitted",
@@ -234,9 +234,9 @@ WebFrame::WebFrame(JNIEnv* env, jobject obj, jobject historyList, WebCore::Page*
     mJavaFrame->mHandleUrl = env->GetMethodID(clazz, "handleUrl",
             "(Ljava/lang/String;)Z");
     mJavaFrame->mCreateWindow = env->GetMethodID(clazz, "createWindow",
-            "(ZZ)Landroid/webkit/BrowserFrame;");
+            "(ZZ)Lroamtouch/webkit/BrowserFrame;");
     mJavaFrame->mCloseWindow = env->GetMethodID(clazz, "closeWindow",
-            "(Landroid/webkit/WebViewCore;)V");
+            "(Lroamtouch/webkit/WebViewCore;)V");
     mJavaFrame->mDecidePolicyForFormResubmission = env->GetMethodID(clazz,
             "decidePolicyForFormResubmission", "(I)V");
     mJavaFrame->mRequestFocus = env->GetMethodID(clazz, "requestFocus",
@@ -887,7 +887,7 @@ static void CreateFrame(JNIEnv* env, jobject obj, jobject javaview, jobject jAss
     // the Java side. So we can't enforce CSS MIMETYPE.
     page->settings()->setEnforceCSSMIMETypeInStrictMode(false);
     editorC->setPage(page);
-    page->setGroupName("android.webkit");
+    page->setGroupName("roamtouch.webkit");
 
     // Create a WebFrame to access the Java BrowserFrame associated with this page
     WebFrame* webFrame = new WebFrame(env, obj, historyList, page);
@@ -1592,7 +1592,7 @@ static JNINativeMethod gBrowserFrameNativeMethods[] = {
     /* name, signature, funcPtr */
     { "nativeCallPolicyFunction", "(II)V",
         (void*) CallPolicyFunction },
-    { "nativeCreateFrame", "(Landroid/webkit/WebViewCore;Landroid/content/res/AssetManager;Landroid/webkit/WebBackForwardList;)V",
+    { "nativeCreateFrame", "(Lroamtouch/webkit/WebViewCore;Landroid/content/res/AssetManager;Lroamtouch/webkit/WebBackForwardList;)V",
         (void*) CreateFrame },
     { "nativeDestroyFrame", "()V",
         (void*) DestroyFrame },
@@ -1639,12 +1639,12 @@ static JNINativeMethod gBrowserFrameNativeMethods[] = {
 
 int register_webframe(JNIEnv* env)
 {
-    jclass clazz = env->FindClass("android/webkit/BrowserFrame");
+    jclass clazz = env->FindClass("roamtouch/webkit/BrowserFrame");
     LOG_ASSERT(clazz, "Cannot find BrowserFrame");
     gFrameField = env->GetFieldID(clazz, "mNativeFrame", "I");
     LOG_ASSERT(gFrameField, "Cannot find mNativeFrame on BrowserFrame");
 
-    return jniRegisterNativeMethods(env, "android/webkit/BrowserFrame",
+    return jniRegisterNativeMethods(env, "roamtouch/webkit/BrowserFrame",
             gBrowserFrameNativeMethods, NELEM(gBrowserFrameNativeMethods));
 }
 

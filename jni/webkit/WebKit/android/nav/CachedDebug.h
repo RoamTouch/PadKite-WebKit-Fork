@@ -54,7 +54,7 @@
 #ifdef DUMP_NAV_CACHE_USING_PRINTF
 #include <stdio.h>
 extern FILE* gNavCacheLogFile;
-#define NAV_CACHE_LOG_FILE "/data/data/com.android.browser/navlog"
+#define NAV_CACHE_LOG_FILE "/data/data/com.roamtouch.swifteebrowser/navlog"
 #define DUMP_NAV_LOGD(...) do { if (gNavCacheLogFile) \
     fprintf(gNavCacheLogFile, __VA_ARGS__); else LOGD(__VA_ARGS__); } while (false)
 #define DUMP_NAV_LOGX(format, ...) do { if (gNavCacheLogFile) \

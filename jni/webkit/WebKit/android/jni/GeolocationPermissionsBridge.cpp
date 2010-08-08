@@ -98,7 +98,7 @@ static JNINativeMethod gGeolocationPermissionsMethods[] = {
 
 int register_geolocation_permissions(JNIEnv* env)
 {
-    const char* kGeolocationPermissionsClass = "android/webkit/GeolocationPermissions";
+    const char* kGeolocationPermissionsClass = "roamtouch/webkit/GeolocationPermissions";
     jclass geolocationPermissions = env->FindClass(kGeolocationPermissionsClass);
     LOG_ASSERT(geolocationPermissions, "Unable to find class");
 
