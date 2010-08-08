@@ -42,7 +42,7 @@ extern FILE* gRenderTreeFile;
 #define DUMP_RENDER_LOGD(...) ((void)0)
 #endif /* ANDROID_DOM_LOGGING */
 
-#define DISPLAY_TREE_LOG_FILE "/sdcard/displayTree.txt"
-#define LAYERS_TREE_LOG_FILE "/sdcard/layersTree.plist"
+#define DISPLAY_TREE_LOG_FILE "/data/data/com.roamtouch.swifteebrowser/displayTree.txt"
+#define LAYERS_TREE_LOG_FILE "/data/data/com.roamtouch.swifteebrowser/layersTree.plist"
 
 #endif /* ANDROIDLOG_H_ */

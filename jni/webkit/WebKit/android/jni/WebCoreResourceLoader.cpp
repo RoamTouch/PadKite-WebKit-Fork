@@ -121,7 +121,7 @@ bool WebCoreResourceLoader::willLoadFromCache(const WebCore::KURL& url, int64_t 
     JNIEnv* env = JSC::Bindings::getJNIEnv();
     WebCore::String urlStr = url.string();
     jstring jUrlStr = env->NewString(urlStr.characters(), urlStr.length());
-    jclass resourceLoader = env->FindClass("android/webkit/LoadListener");
+    jclass resourceLoader = env->FindClass("roamtouch/webkit/LoadListener");
     bool val = env->CallStaticBooleanMethod(resourceLoader, 
             gResourceLoader.mWillLoadFromCacheMethodID, jUrlStr, identifier);
     checkException(env);
@@ -318,14 +318,14 @@ static JNINativeMethod gResourceloaderMethods[] = {
 
 int register_resource_loader(JNIEnv* env)
 {
-    jclass resourceLoader = env->FindClass("android/webkit/LoadListener");
+    jclass resourceLoader = env->FindClass("roamtouch/webkit/LoadListener");
     LOG_FATAL_IF(resourceLoader == NULL, 
-        "Unable to find class android/webkit/LoadListener");
+        "Unable to find class roamtouch/webkit/LoadListener");
     
     gResourceLoader.mObject = 
         env->GetFieldID(resourceLoader, "mNativeLoader", "I");
     LOG_FATAL_IF(gResourceLoader.mObject == NULL, 
-        "Unable to find android/webkit/LoadListener.mNativeLoader");
+        "Unable to find roamtouch/webkit/LoadListener.mNativeLoader");
     
     gResourceLoader.mCancelMethodID = 
         env->GetMethodID(resourceLoader, "cancel", "()V");
@@ -347,7 +347,7 @@ int register_resource_loader(JNIEnv* env)
     LOG_FATAL_IF(gResourceLoader.mWillLoadFromCacheMethodID == NULL, 
         "Could not find static method willLoadFromCache on LoadListener");
 
-    return jniRegisterNativeMethods(env, "android/webkit/LoadListener", 
+    return jniRegisterNativeMethods(env, "roamtouch/webkit/LoadListener", 
                      gResourceloaderMethods, NELEM(gResourceloaderMethods));
 }
 

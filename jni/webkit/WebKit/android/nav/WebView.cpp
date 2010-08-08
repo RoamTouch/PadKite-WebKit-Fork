@@ -135,7 +135,7 @@ struct JavaGlue {
 WebView(JNIEnv* env, jobject javaWebView, int viewImpl) :
     m_ring((WebViewCore*) viewImpl)
 {
-    jclass clazz = env->FindClass("android/webkit/WebView");
+    jclass clazz = env->FindClass("roamtouch/webkit/WebView");
  //   m_javaGlue = new JavaGlue;
     m_javaGlue.m_obj = env->NewWeakGlobalRef(javaWebView);
     m_javaGlue.m_scrollBy = GetJMethod(env, clazz, "setContentScrollBy", "(IIZ)Z");
@@ -2025,12 +2025,12 @@ static JNINativeMethod gJavaWebViewMethods[] = {
 
 int register_webview(JNIEnv* env)
 {
-    jclass clazz = env->FindClass("android/webkit/WebView");
-    LOG_ASSERT(clazz, "Unable to find class android/webkit/WebView");
+    jclass clazz = env->FindClass("roamtouch/webkit/WebView");
+    LOG_ASSERT(clazz, "Unable to find class roamtouch/webkit/WebView");
     gWebViewField = env->GetFieldID(clazz, "mNativeClass", "I");
-    LOG_ASSERT(gWebViewField, "Unable to find android/webkit/WebView.mNativeClass");
+    LOG_ASSERT(gWebViewField, "Unable to find roamtouch/webkit/WebView.mNativeClass");
 
-    return jniRegisterNativeMethods(env, "android/webkit/WebView", gJavaWebViewMethods, NELEM(gJavaWebViewMethods));
+    return jniRegisterNativeMethods(env, "roamtouch/webkit/WebView", gJavaWebViewMethods, NELEM(gJavaWebViewMethods));
 }
 
 } // namespace android

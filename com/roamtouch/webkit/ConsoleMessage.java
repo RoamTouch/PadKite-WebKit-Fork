@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package android.webkit;
+package roamtouch.webkit;
 
 /**
  * Public class representing a JavaScript console message from WebCore. This could be a issued
