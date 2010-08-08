@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package android.net.http;
+package roamtouch.net.http;
 
 
 /**
@@ -113,7 +113,7 @@ public interface EventHandler {
      * @param len The length of valid content in data
      *
      * Note: chunked and compressed encodings are handled within
-     * android.net.http.  Decoded data is passed through this
+     * roamtouch.net.http.  Decoded data is passed through this
      * interface.
      */
     public void data(byte[] data, int len);

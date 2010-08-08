@@ -14,13 +14,13 @@
  * limitations under the License.
  */
 
-package android.net.http;
+package roamtouch.net.http;
 
 import android.net.ParseException;
 import android.net.WebAddress;
 import android.security.Md5MessageDigest;
 import junit.framework.Assert;
-import android.webkit.CookieManager;
+import roamtouch.webkit.CookieManager;
 
 import org.apache.commons.codec.binary.Base64;
 

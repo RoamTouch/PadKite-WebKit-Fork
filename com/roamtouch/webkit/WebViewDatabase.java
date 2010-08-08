@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package android.webkit;
+package roamtouch.webkit;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -30,8 +30,8 @@ import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteException;
 import android.database.sqlite.SQLiteStatement;
 import android.util.Log;
-import android.webkit.CookieManager.Cookie;
-import android.webkit.CacheManager.CacheResult;
+import roamtouch.webkit.CookieManager.Cookie;
+import roamtouch.webkit.CacheManager.CacheResult;
 
 public class WebViewDatabase {
     private static final String DATABASE_FILE = "webview.db";

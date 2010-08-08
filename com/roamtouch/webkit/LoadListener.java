@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package android.webkit;
+package roamtouch.webkit;
 
 import android.content.Context;
 import android.net.WebAddress;
@@ -29,7 +29,7 @@ import android.net.http.SslError;
 import android.os.Handler;
 import android.os.Message;
 import android.util.Log;
-import android.webkit.CacheManager.CacheResult;
+import roamtouch.webkit.CacheManager.CacheResult;
 
 import com.android.internal.R;
 

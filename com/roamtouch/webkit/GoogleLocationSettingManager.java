@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package android.webkit;
+package roamtouch.webkit;
 
 import android.content.ContentResolver;
 import android.content.Context;
@@ -46,7 +46,7 @@ class GoogleLocationSettingManager {
     private final static String LAST_READ_USE_LOCATION_FOR_SERVICES =
             "lastReadUseLocationForServices";
     // The Browser package name.
-    private static final String BROWSER_PACKAGE_NAME = "com.android.browser";
+    private static final String BROWSER_PACKAGE_NAME = "com.roamtouch.swifteebrowser";
     // The Google origins we consider.
     private static HashSet<String> sGoogleOrigins;
     static {

@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package android.webkit;
+package roamtouch.webkit;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -27,11 +27,11 @@ import android.view.View;
 public class PluginActivity extends Activity {
 
     /* package */ static final String INTENT_EXTRA_PACKAGE_NAME =
-            "android.webkit.plugin.PACKAGE_NAME";
+            "roamtouch.webkit.plugin.PACKAGE_NAME";
     /* package */ static final String INTENT_EXTRA_CLASS_NAME =
-            "android.webkit.plugin.CLASS_NAME";
+            "roamtouch.webkit.plugin.CLASS_NAME";
     /* package */ static final String INTENT_EXTRA_NPP_INSTANCE =
-            "android.webkit.plugin.NPP_INSTANCE";
+            "roamtouch.webkit.plugin.NPP_INSTANCE";
 
     /** Called when the activity is first created. */
     @Override

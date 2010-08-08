@@ -18,7 +18,7 @@
  * Hangs onto idle live connections for a little while
  */
 
-package android.net.http;
+package roamtouch.net.http;
 
 import org.apache.http.HttpHost;
 

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package android.webkit;
+package roamtouch.webkit;
 
 import android.app.AlertDialog;
 import android.content.Context;
@@ -60,8 +60,8 @@ import android.view.ViewParent;
 import android.view.ViewTreeObserver;
 import android.view.animation.AlphaAnimation;
 import android.view.inputmethod.InputMethodManager;
-import android.webkit.WebTextView.AutoCompleteAdapter;
-import android.webkit.WebViewCore.EventHub;
+import roamtouch.webkit.WebTextView.AutoCompleteAdapter;
+import roamtouch.webkit.WebViewCore.EventHub;
 import android.widget.AbsoluteLayout;
 import android.widget.Adapter;
 import android.widget.AdapterView;
@@ -130,18 +130,18 @@ import java.util.Map;
  * own behavior. These are:</p>
  *
  * <ul>
- *   <li>Creating and setting a {@link android.webkit.WebChromeClient} subclass.
+ *   <li>Creating and setting a {@link roamtouch.webkit.WebChromeClient} subclass.
  *       This class is called when something that might impact a
  *       browser UI happens, for instance, progress updates and
  *       JavaScript alerts are sent here.
  *   </li>
- *   <li>Creating and setting a {@link android.webkit.WebViewClient} subclass.
+ *   <li>Creating and setting a {@link roamtouch.webkit.WebViewClient} subclass.
  *       It will be called when things happen that impact the
  *       rendering of the content, eg, errors or form submissions. You
  *       can also intercept URL loading here.</li>
- *   <li>Via the {@link android.webkit.WebSettings} class, which contains
+ *   <li>Via the {@link roamtouch.webkit.WebSettings} class, which contains
  *       miscellaneous configuration. </li>
- *   <li>With the {@link android.webkit.WebView#addJavascriptInterface} method.
+ *   <li>With the {@link roamtouch.webkit.WebView#addJavascriptInterface} method.
  *       This lets you bind Java objects into the WebView so they can be
  *       controlled from the web pages JavaScript.</li>
  * </ul>
@@ -179,7 +179,7 @@ import java.util.Map;
  * cache, cookie store etc - it does not share the Browser
  * applications data. Cookies are managed on a separate thread, so
  * operations like index building don't block the UI
- * thread. Follow the instructions in {@link android.webkit.CookieSyncManager}
+ * thread. Follow the instructions in {@link roamtouch.webkit.CookieSyncManager}
  * if you want to use cookies in your application.
  * </p>
  *
@@ -3336,13 +3336,13 @@ public class WebView extends AbsoluteLayout
         if (getSettings().getNavDump()) {
             switch (keyCode) {
                 case KeyEvent.KEYCODE_4:
-                    // "/data/data/com.android.browser/displayTree.txt"
+                    // "/data/data/com.roamtouch.swifteebrowser/displayTree.txt"
                     nativeDumpDisplayTree(getUrl());
                     break;
                 case KeyEvent.KEYCODE_5:
                 case KeyEvent.KEYCODE_6:
                     // 5: dump the dom tree to the file
-                    // "/data/data/com.android.browser/domTree.txt"
+                    // "/data/data/com.roamtouch.swifteebrowser/domTree.txt"
                     // 6: dump the dom tree to the adb log
                     mWebViewCore.sendMessage(EventHub.DUMP_DOMTREE,
                             (keyCode == KeyEvent.KEYCODE_5) ? 1 : 0, 0);
@@ -3350,7 +3350,7 @@ public class WebView extends AbsoluteLayout
                 case KeyEvent.KEYCODE_7:
                 case KeyEvent.KEYCODE_8:
                     // 7: dump the render tree to the file
-                    // "/data/data/com.android.browser/renderTree.txt"
+                    // "/data/data/com.roamtouch.swifteebrowser/renderTree.txt"
                     // 8: dump the render tree to the adb log
                     mWebViewCore.sendMessage(EventHub.DUMP_RENDERTREE,
                             (keyCode == KeyEvent.KEYCODE_7) ? 1 : 0, 0);

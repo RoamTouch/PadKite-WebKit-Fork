@@ -18,9 +18,9 @@
  * A test EventHandler: Logs everything received
  */
 
-package android.net.http;
+package roamtouch.net.http;
 
-import android.net.http.Headers;
+import roamtouch.net.http.Headers;
 
 /**
  * {@hide}

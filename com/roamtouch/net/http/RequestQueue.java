@@ -19,7 +19,7 @@
  * Queues requests as necessary
  */
 
-package android.net.http;
+package roamtouch.net.http;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;

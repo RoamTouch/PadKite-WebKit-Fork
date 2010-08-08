@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-package android.webkit;
+package roamtouch.webkit;
 
 import android.net.http.EventHandler;
 import android.net.http.RequestHandle;
 import android.util.Log;
-import android.webkit.CacheManager.CacheResult;
+import roamtouch.webkit.CacheManager.CacheResult;
 
 import java.util.HashMap;
 import java.util.Map;

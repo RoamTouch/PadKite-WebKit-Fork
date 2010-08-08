@@ -18,7 +18,7 @@
  * Supplies Requests to a Connection
  */
 
-package android.net.http;
+package roamtouch.net.http;
 
 import org.apache.http.HttpHost;
 

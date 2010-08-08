@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package android.net.http;
+package roamtouch.net.http;
 
 import org.apache.http.util.CharArrayBuffer;
 import org.apache.http.protocol.HTTP;
