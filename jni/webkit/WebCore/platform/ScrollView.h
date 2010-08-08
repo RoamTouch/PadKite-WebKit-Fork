@@ -89,8 +89,13 @@ public:
     void scrollbarModes(ScrollbarMode& horizontalMode, ScrollbarMode& verticalMode) const;
     ScrollbarMode horizontalScrollbarMode() const { ScrollbarMode horizontal, vertical; scrollbarModes(horizontal, vertical); return horizontal; }
     ScrollbarMode verticalScrollbarMode() const { ScrollbarMode horizontal, vertical; scrollbarModes(horizontal, vertical); return vertical; }
-    virtual void setCanHaveScrollbars(bool flag);
+    virtual void setCanHaveScrollbars(bool);
     bool canHaveScrollbars() const { return horizontalScrollbarMode() != ScrollbarAlwaysOff || verticalScrollbarMode() != ScrollbarAlwaysOff; }
+
+    // By default you only receive paint events for the area that is visible. In the case of using a
+    // tiled backing store, this method can be set, so that the view paints the entire contents.
+    bool paintsEntireContents() const { return m_paintsEntireContents; }
+    void setPaintsEntireContents(bool);
 
     // Overridden by FrameView to create custom CSS scrollbars if applicable.
     virtual PassRefPtr<Scrollbar> createScrollbar(ScrollbarOrientation);
@@ -207,6 +212,7 @@ public:
 
     // Widget override.  Handles painting of the contents of the view as well as the scrollbars.
     virtual void paint(GraphicsContext*, const IntRect&);
+    void paintScrollbars(GraphicsContext*, const IntRect&);
 
     // Widget overrides to ensure that our children's visibility status is kept up to date when we get shown and hidden.
     virtual void show();
@@ -217,6 +223,7 @@ public:
     static const int noPanScrollRadius = 15;
     void addPanScrollIcon(const IntPoint&);
     void removePanScrollIcon();
+    void paintPanScrollIcon(GraphicsContext*);
 
     virtual bool isPointInScrollbarCorner(const IntPoint&);
     virtual bool scrollbarCornerPresent() const;
@@ -234,11 +241,15 @@ protected:
     
     virtual void contentsResized() = 0;
     virtual void visibleContentsResized() = 0;
-    
+
     // These methods are used to create/destroy scrollbars.
     void setHasHorizontalScrollbar(bool);
     void setHasVerticalScrollbar(bool);
 
+    IntRect scrollCornerRect() const;
+    virtual void updateScrollCorner();
+    virtual void paintScrollCorner(GraphicsContext*, const IntRect& cornerRect);
+    
 private:
     RefPtr<Scrollbar> m_horizontalScrollbar;
     RefPtr<Scrollbar> m_verticalScrollbar;
@@ -265,6 +276,8 @@ private:
     IntPoint m_panScrollIconPoint;
     bool m_drawPanScrollIcon;
     bool m_useFixedLayout;
+
+    bool m_paintsEntireContents;
 
     void init();
     void destroy();
@@ -299,19 +312,9 @@ private:
     NSScrollView<WebCoreFrameScrollView>* scrollView() const;
 #endif
 
-#if PLATFORM(QT)
-public:
-    void adjustWidgetsPreventingBlittingCount(int delta);
-private:
-    bool rootPreventsBlitting() const { return root()->m_widgetsPreventingBlitting > 0; }
-    unsigned m_widgetsPreventingBlitting;
-#else
-    bool rootPreventsBlitting() const { return false; }
-#endif
-
 #if PLATFORM(GTK)
 public:
-    void setGtkAdjustments(GtkAdjustment* hadj, GtkAdjustment* vadj);
+    void setGtkAdjustments(GtkAdjustment* hadj, GtkAdjustment* vadj, bool resetValues = true);
     GtkAdjustment* m_horizontalAdjustment;
     GtkAdjustment* m_verticalAdjustment;
     void setScrollOffset(const IntSize& offset) { m_scrollOffset = offset; }
@@ -330,7 +333,9 @@ private:
 public:
     bool platformProhibitsScrolling();
 #ifdef ANDROID_CAPTURE_OFFSCREEN_PAINTS
-    void platformOffscreenContentRectangle(const IntRect& );
+    // capture parts of rect not contained by vis
+    void platformOffscreenContentRectangle(const IntRect& vis,
+        const IntRect& rect);
 #endif
 #endif
 }; // class ScrollView

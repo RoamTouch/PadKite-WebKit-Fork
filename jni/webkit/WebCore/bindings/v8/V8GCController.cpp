@@ -204,35 +204,11 @@ public:
     // has the drawback that the wrappers are "entangled/unentangled" for each
     // GC even though their entaglement most likely is still the same.
     if (type == V8ClassIndex::MESSAGEPORT) {
-        // Get the port and its entangled port.
+        // Mark each port as in-use if it's entangled. For simplicity's sake, we assume all ports are remotely entangled,
+        // since the Chromium port implementation can't tell the difference.
         MessagePort* port1 = static_cast<MessagePort*>(object);
-        MessagePort* port2 = port1->locallyEntangledPort();
-
-        // If we are remotely entangled, then mark this object as reachable
-        // (we can't determine reachability directly as the remote object is
-        // out-of-proc).
-        if (port1->isEntangled() && !port2)
+        if (port1->isEntangled())
             wrapper.ClearWeak();
-
-        if (port2) {
-            // As ports are always entangled in pairs only perform the entanglement
-            // once for each pair (see ASSERT in MessagePort::unentangle()).
-            if (port1 < port2) {
-                v8::Handle<v8::Value> port1Wrapper = V8DOMWrapper::convertToV8Object(V8ClassIndex::MESSAGEPORT, port1);
-                v8::Handle<v8::Value> port2Wrapper = V8DOMWrapper::convertToV8Object(V8ClassIndex::MESSAGEPORT, port2);
-                ASSERT(port1Wrapper->IsObject());
-                v8::Handle<v8::Object>::Cast(port1Wrapper)->SetInternalField(V8Custom::kMessagePortEntangledPortIndex, port2Wrapper);
-                ASSERT(port2Wrapper->IsObject());
-                v8::Handle<v8::Object>::Cast(port2Wrapper)->SetInternalField(V8Custom::kMessagePortEntangledPortIndex, port1Wrapper);
-            }
-        } else {
-            // Remove the wrapper entanglement when a port is not entangled.
-            if (V8DOMWrapper::domObjectHasJSWrapper(port1)) {
-                v8::Handle<v8::Value> wrapper = V8DOMWrapper::convertToV8Object(V8ClassIndex::MESSAGEPORT, port1);
-                ASSERT(wrapper->IsObject());
-                v8::Handle<v8::Object>::Cast(wrapper)->SetInternalField(V8Custom::kMessagePortEntangledPortIndex, v8::Undefined());
-            }
-        }
     }
 }
 };
@@ -263,16 +239,6 @@ bool operator<(const GrouperItem& a, const GrouperItem& b)
 
 typedef Vector<GrouperItem> GrouperList;
 
-#if PLATFORM(ANDROID)
-// Sort GrouperList by the group id. Node* is only involved to sort within
-// a group id, so it will be fine.
-// TODO(andreip): used by std::stable_sort function. We can implement
-// the std::sort function and remove this one.
-static bool compareGrouperItem(const GrouperItem& a, const GrouperItem& b) {
-  return a.groupId() < b.groupId();
-}
-#endif
-
 class ObjectGrouperVisitor : public DOMWrapperMap<Node>::Visitor {
 public:
     ObjectGrouperVisitor()
@@ -296,14 +262,21 @@ public:
             groupId = reinterpret_cast<uintptr_t>(node->document());
         else {
             Node* root = node;
-            while (root->parent())
-                root = root->parent();
+            if (node->isAttributeNode()) {
+                root = static_cast<Attr*>(node)->ownerElement();
+                // If the attribute has no element, no need to put it in the group,
+                // because it'll always be a group of 1.
+                if (!root)
+                    return;
+            } else {
+                while (root->parent())
+                    root = root->parent();
 
-            // If the node is alone in its DOM tree (doesn't have a parent or any
-            // children) then the group will be filtered out later anyway.
-            if (root == node && !node->hasChildNodes())
-                return;
-
+                // If the node is alone in its DOM tree (doesn't have a parent or any
+                // children) then the group will be filtered out later anyway.
+                if (root == node && !node->hasChildNodes() && !node->hasAttributes())
+                    return;
+            }
             groupId = reinterpret_cast<uintptr_t>(root);
         }
         m_grouper.append(GrouperItem(groupId, node, wrapper));
@@ -311,13 +284,8 @@ public:
 
     void applyGrouping()
     {
-#if PLATFORM(ANDROID)
-  // TODO(andreip): implement std::sort() and get rid of this.
-  std::stable_sort<GrouperItem>(m_grouper.begin(), m_grouper.end(), compareGrouperItem);
-#else
         // Group by sorting by the group id.
         std::sort(m_grouper.begin(), m_grouper.end());
-#endif
 
         // FIXME Should probably work in iterators here, but indexes were easier for my simple mind.
         for (size_t i = 0; i < m_grouper.size(); ) {
@@ -342,7 +310,6 @@ public:
             Vector<v8::Persistent<v8::Value> > group;
             group.reserveCapacity(nextKeyIndex - i);
             for (; i < nextKeyIndex; ++i) {
-                Node* node = m_grouper[i].node();
                 v8::Persistent<v8::Value> wrapper = m_grouper[i].wrapper();
                 if (!wrapper.IsEmpty())
                     group.append(wrapper);
@@ -421,16 +388,29 @@ ACTIVE_DOM_OBJECT_TYPES(MAKE_CASE)
 
         if (type == V8ClassIndex::MESSAGEPORT) {
             MessagePort* port1 = static_cast<MessagePort*>(object);
-            MessagePort* port2 = port1->locallyEntangledPort();
-            if (port1->isEntangled() && !port2) {
-                // We marked this port as reachable in GCPrologueVisitor.  Undo this now since the
-                // port could be not reachable in the future if it gets disentangled (and also
-                // GCPrologueVisitor expects to see all handles marked as weak).
+            // We marked this port as reachable in GCPrologueVisitor.  Undo this now since the
+            // port could be not reachable in the future if it gets disentangled (and also
+            // GCPrologueVisitor expects to see all handles marked as weak).
+            if (!wrapper.IsWeak() && !wrapper.IsNearDeath())
                 wrapper.MakeWeak(port1, &DOMDataStore::weakActiveDOMObjectCallback);
-            }
         }
     }
 };
+
+int V8GCController::workingSetEstimateMB = 0;
+
+namespace {
+
+int getMemoryUsageInMB()
+{
+#if PLATFORM(CHROMIUM)
+    return ChromiumBridge::memoryUsageMB();
+#else
+    return 0;
+#endif
+}
+
+}  // anonymous namespace
 
 void V8GCController::gcEpilogue()
 {
@@ -440,6 +420,8 @@ void V8GCController::gcEpilogue()
     // again.
     GCEpilogueVisitor epilogueVisitor;
     visitActiveDOMObjectsInCurrentThread(&epilogueVisitor);
+
+    workingSetEstimateMB = getMemoryUsageInMB();
 
 #ifndef NDEBUG
     // Check all survivals are weak.
@@ -453,5 +435,20 @@ void V8GCController::gcEpilogue()
     enumerateGlobalHandles();
 #endif
 }
+
+void V8GCController::checkMemoryUsage()
+{
+#if PLATFORM(CHROMIUM)
+    // These values are appropriate for Chromium only.
+    const int lowUsageMB = 256;  // If memory usage is below this threshold, do not bother forcing GC.
+    const int highUsageMB = 1024;  // If memory usage is above this threshold, force GC more aggresively.
+    const int highUsageDeltaMB = 128;  // Delta of memory usage growth (vs. last workingSetEstimateMB) to force GC when memory usage is high.
+
+    int memoryUsageMB = getMemoryUsageInMB();
+    if ((memoryUsageMB > lowUsageMB && memoryUsageMB > 2 * workingSetEstimateMB) || (memoryUsageMB > highUsageMB && memoryUsageMB > workingSetEstimateMB + highUsageDeltaMB))
+        v8::V8::LowMemoryNotification();
+#endif
+}
+
 
 }  // namespace WebCore

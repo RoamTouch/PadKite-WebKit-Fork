@@ -528,7 +528,7 @@ VisiblePosition ReplaceSelectionCommand::positionAtEndOfInsertedContent()
 VisiblePosition ReplaceSelectionCommand::positionAtStartOfInsertedContent()
 {
     // Return the inserted content's first VisiblePosition.
-    return VisiblePosition(nextCandidate(positionBeforeNode(m_firstNodeInserted.get())));
+    return VisiblePosition(nextCandidate(positionInParentBeforeNode(m_firstNodeInserted.get())));
 }
 
 // Remove style spans before insertion if they are unnecessary.  It's faster because we'll 
@@ -695,8 +695,17 @@ void ReplaceSelectionCommand::mergeEndIfNeeded()
     
     VisiblePosition destination = mergeForward ? endOfInsertedContent.next() : endOfInsertedContent;
     VisiblePosition startOfParagraphToMove = mergeForward ? startOfParagraph(endOfInsertedContent) : endOfInsertedContent.next();
+   
+    // Merging forward could result in deleting the destination anchor node.
+    // To avoid this, we add a placeholder node before the start of the paragraph.
+    if (endOfParagraph(startOfParagraphToMove) == destination) {
+        RefPtr<Node> placeholder = createBreakElement(document());
+        insertNodeBefore(placeholder, startOfParagraphToMove.deepEquivalent().node());
+        destination = VisiblePosition(Position(placeholder.get(), 0));
+    }
 
     moveParagraph(startOfParagraphToMove, endOfParagraph(startOfParagraphToMove), destination);
+    
     // Merging forward will remove m_lastLeafInserted from the document.
     // FIXME: Maintain positions for the start and end of inserted content instead of keeping nodes.  The nodes are
     // only ever used to create positions where inserted content starts/ends.  Also, we sometimes insert content
@@ -705,6 +714,10 @@ void ReplaceSelectionCommand::mergeEndIfNeeded()
         m_lastLeafInserted = destination.previous().deepEquivalent().node();
         if (!m_firstNodeInserted->inDocument())
             m_firstNodeInserted = endingSelection().visibleStart().deepEquivalent().node();
+        // If we merged text nodes, m_lastLeafInserted could be null. If this is the case,
+        // we use m_firstNodeInserted.
+        if (!m_lastLeafInserted)
+            m_lastLeafInserted = m_firstNodeInserted;
     }
 }
 
@@ -739,9 +752,7 @@ void ReplaceSelectionCommand::doApply()
     bool startIsInsideMailBlockquote = nearestMailBlockquote(insertionPos.node());
     
     if ((selectionStartWasStartOfParagraph && selectionEndWasEndOfParagraph && !startIsInsideMailBlockquote) ||
-        startBlock == currentRoot ||
-        (startBlock && startBlock->renderer() && startBlock->renderer()->isListItem()) ||
-        selectionIsPlainText)
+        startBlock == currentRoot || isListItem(startBlock) || selectionIsPlainText)
         m_preventNesting = false;
     
     if (selection.isRange()) {
@@ -794,7 +805,7 @@ void ReplaceSelectionCommand::doApply()
         Node* br = endingSelection().start().node(); 
         ASSERT(br->hasTagName(brTag)); 
         // Insert content between the two blockquotes, but remove the br (since it was just a placeholder). 
-        insertionPos = positionBeforeNode(br); 
+        insertionPos = positionInParentBeforeNode(br);
         removeNode(br);
     }
     
@@ -817,9 +828,9 @@ void ReplaceSelectionCommand::doApply()
         ASSERT(startBlock != currentRoot);
         VisiblePosition visibleInsertionPos(insertionPos);
         if (isEndOfBlock(visibleInsertionPos) && !(isStartOfBlock(visibleInsertionPos) && fragment.hasInterchangeNewlineAtEnd()))
-            insertionPos = positionAfterNode(startBlock);
+            insertionPos = positionInParentAfterNode(startBlock);
         else if (isStartOfBlock(visibleInsertionPos))
-            insertionPos = positionBeforeNode(startBlock);
+            insertionPos = positionInParentBeforeNode(startBlock);
     }
 
     // Paste into run of tabs splits the tab span.
@@ -858,11 +869,18 @@ void ReplaceSelectionCommand::doApply()
     RefPtr<Node> node = refNode->nextSibling();
     
     fragment.removeNode(refNode);
-    insertNodeAtAndUpdateNodesInserted(refNode, insertionPos);
+
+    Node* blockStart = enclosingBlock(insertionPos.node());
+    if (isListElement(refNode.get()) && blockStart->renderer()->isListItem())
+        refNode = insertAsListItems(refNode, blockStart, insertionPos);
+    else
+        insertNodeAtAndUpdateNodesInserted(refNode, insertionPos);
 
     // Mutation events (bug 22634) may have already removed the inserted content
     if (!refNode->inDocument())
         return;
+
+    bool plainTextFragment = isPlainTextMarkup(refNode.get());
 
     while (node) {
         Node* next = node->nextSibling();
@@ -874,6 +892,8 @@ void ReplaceSelectionCommand::doApply()
             return;
 
         refNode = node;
+        if (node && plainTextFragment)
+            plainTextFragment = isPlainTextMarkup(node.get());
         node = next;
     }
     
@@ -900,7 +920,7 @@ void ReplaceSelectionCommand::doApply()
     
     bool interchangeNewlineAtEnd = fragment.hasInterchangeNewlineAtEnd();
 
-    if (shouldRemoveEndBR(endBR, originalVisPosBeforeEndBR))
+    if (endBR && (plainTextFragment || shouldRemoveEndBR(endBR, originalVisPosBeforeEndBR)))
         removeNodeAndPruneAncestors(endBR);
     
     // Determine whether or not we should merge the end of inserted content with what's after it before we do
@@ -943,9 +963,15 @@ void ReplaceSelectionCommand::doApply()
         if (selectionEndWasEndOfParagraph || !isEndOfParagraph(endOfInsertedContent) || next.isNull()) {
             if (!isStartOfParagraph(endOfInsertedContent)) {
                 setEndingSelection(endOfInsertedContent);
-                // Use a default paragraph element (a plain div) for the empty paragraph, using the last paragraph
-                // block's style seems to annoy users.
-                insertParagraphSeparator(true);
+                Node* enclosingNode = enclosingBlock(endOfInsertedContent.deepEquivalent().node());
+                if (isListItem(enclosingNode)) {
+                    RefPtr<Node> newListItem = createListItemElement(document());
+                    insertNodeAfter(newListItem, enclosingNode);
+                    setEndingSelection(VisiblePosition(Position(newListItem, 0)));
+                } else
+                    // Use a default paragraph element (a plain div) for the empty paragraph, using the last paragraph
+                    // block's style seems to annoy users.
+                    insertParagraphSeparator(true);
 
                 // Select up to the paragraph separator that was added.
                 lastPositionToSelect = endingSelection().visibleStart().deepEquivalent();
@@ -1007,6 +1033,11 @@ void ReplaceSelectionCommand::doApply()
         }
     }
     
+    // If we are dealing with a fragment created from plain text
+    // no style matching is necessary.
+    if (plainTextFragment)
+        m_matchStyle = false;
+        
     completeHTMLReplacement(lastPositionToSelect);
 }
 
@@ -1087,6 +1118,39 @@ void ReplaceSelectionCommand::insertNodeBeforeAndUpdateNodesInserted(PassRefPtr<
     Node* nodeToUpdate = insertChild.get(); // insertChild will be cleared when passed
     insertNodeBefore(insertChild, refChild);
     updateNodesInserted(nodeToUpdate);
+}
+
+// If the user is inserting a list into an existing list, instead of nesting the list,
+// we put the list items into the existing list.
+Node* ReplaceSelectionCommand::insertAsListItems(PassRefPtr<Node> listElement, Node* insertionNode, const Position& p)
+{
+    while (listElement->hasChildNodes() && isListElement(listElement->firstChild()) && listElement->childNodeCount() == 1)
+        listElement = listElement->firstChild();
+
+    bool isStart = isStartOfParagraph(p);
+    bool isEnd = isEndOfParagraph(p);
+
+    Node* lastNode = insertionNode;
+    while (RefPtr<Node> listItem = listElement->firstChild()) {
+        ExceptionCode ec = 0;
+        listElement->removeChild(listItem.get(), ec);
+        ASSERT(!ec);
+        if (isStart)
+            insertNodeBefore(listItem, lastNode);
+        else if (isEnd) {
+            insertNodeAfter(listItem, lastNode);
+            lastNode = listItem.get();
+        } else {
+            // FIXME: If we're in the middle of a list item, we should split it into two separate
+            // list items and insert these nodes between them.  For now, just append the nodes.
+            insertNodeAfter(listItem, lastNode);
+            lastNode = listItem.get();
+        }
+    }
+    if (isStart)
+        lastNode = lastNode->previousSibling();
+    updateNodesInserted(lastNode);
+    return lastNode;
 }
 
 void ReplaceSelectionCommand::updateNodesInserted(Node *node)

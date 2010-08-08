@@ -42,12 +42,15 @@ namespace WebCore {
     class ScriptCallStack;
     class ScriptString;
 
-    class ConsoleMessage {
+    class ConsoleMessage : public Noncopyable {
     public:
         ConsoleMessage(MessageSource, MessageType, MessageLevel, const String& m, unsigned li, const String& u, unsigned g);        
         ConsoleMessage(MessageSource, MessageType, MessageLevel, ScriptCallStack*, unsigned g, bool storeTrace = false);
 
+#if ENABLE(INSPECTOR)
         void addToConsole(InspectorFrontend* frontend);
+        void updateRepeatCountInConsole(InspectorFrontend* frontend);
+#endif
         void incrementCount() { ++m_repeatCount; };
         bool isEqual(ScriptState*, ConsoleMessage* msg) const;
 
@@ -59,7 +62,10 @@ namespace WebCore {
         MessageType m_type;
         MessageLevel m_level;
         String m_message;
-        Vector<ScriptValue> m_wrappedArguments;
+#if ENABLE(INSPECTOR)
+        Vector<ScriptValue> m_arguments;
+        ScriptState* m_scriptState;
+#endif
         Vector<ScriptString> m_frames;
         unsigned m_line;
         String m_url;

@@ -30,8 +30,9 @@ namespace WebCore {
 
 float userIdleTime()
 {
-    // Needed for PageCache, which we currently have disabled.
-    return 0.0F;
+    // return an arbitrarily high userIdleTime so that releasing pages from the
+    // page cache isn't postponed.
+    return 1000.0F;
 }
 
 }  // namespace WebCore

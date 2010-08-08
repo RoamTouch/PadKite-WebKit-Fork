@@ -23,20 +23,25 @@
 #
 # Helper functions for the WebKit build.
 
+import commands
 import glob
 import os
+import platform
+import re
+import shutil
 import sys
 import urllib
 import urlparse
-
-import Logs
 
 def get_output(command):
     """
     Windows-compatible function for getting output from a command.
     """
-    f = os.popen(command)
-    return f.read().strip()
+    if sys.platform.startswith('win'):
+        f = os.popen(command)
+        return f.read().strip()
+    else:
+        return commands.getoutput(command)
     
 def get_excludes(root, patterns):
     """
@@ -100,10 +105,11 @@ def download_if_newer(url, destdir):
     
     return None
     
-def update_wx_deps(wk_root, msvc_version='msvc2008'):
+def update_wx_deps(conf, wk_root, msvc_version='msvc2008'):
     """
     Download and update tools needed to build the wx port.
     """
+    import Logs
     Logs.info('Ensuring wxWebKit dependencies are up-to-date.')
     
     wklibs_dir = os.path.join(wk_root, 'WebKitLibraries')
@@ -114,7 +120,10 @@ def update_wx_deps(wk_root, msvc_version='msvc2008'):
         sys.exit(1)
 
     # since this module is still experimental
-    #swig_module = download_if_newer('http://wxwebkit.wxcommunity.com/downloads/deps/swig.py', os.path.join(wk_root, 'WebKit', 'wx', 'bindings', 'python'))
+    wxpy_dir = os.path.join(wk_root, 'WebKit', 'wx', 'bindings', 'python')
+    swig_module = download_if_newer('http://wxwebkit.wxcommunity.com/downloads/deps/swig.py.txt', wxpy_dir)
+    if swig_module:
+        shutil.copy(os.path.join(wxpy_dir, 'swig.py.txt'), os.path.join(wxpy_dir, 'swig.py'))
 
     if sys.platform.startswith('win'):
         Logs.info('downloading deps package')
@@ -123,6 +132,10 @@ def update_wx_deps(wk_root, msvc_version='msvc2008'):
             os.system('unzip -o %s -d %s' % (archive, os.path.join(wklibs_dir, msvc_version)))
     
     elif sys.platform.startswith('darwin'):
+        # export the right compiler for building the dependencies
+        if platform.release().startswith('10'): # Snow Leopard
+            os.environ['CC'] = conf.env['CC'][0]
+            os.environ['CXX'] = conf.env['CXX'][0]
         os.system('%s/WebKitTools/wx/install-unix-extras' % wk_root)
         
 def includeDirsForSources(sources):
@@ -141,3 +154,35 @@ def flattenSources(sources):
         flat_sources.extend(group)
         
     return flat_sources
+
+def git_branch_name():
+    try:
+        branches = commands.getoutput("git branch --no-color")
+        match = re.search('^\* (.*)', branches, re.MULTILINE)
+        if match:
+            return ".%s" % match.group(1)
+    except:
+        pass
+
+    return ""
+
+def get_config(wk_root):
+    config_file = os.path.join(wk_root, 'WebKitBuild', 'Configuration')
+    config = 'Debug'
+
+    if os.path.exists(config_file):
+        config = open(config_file).read()
+
+    return config
+
+def svn_revision():
+    if os.system("git-svn info") == 0:
+        info = commands.getoutput("git-svn info ../..")
+    else:
+        info = commands.getoutput("svn info")
+    
+    for line in info.split("\n"):
+        if line.startswith("Revision: "):
+            return line.replace("Revision: ", "").strip()
+    
+    return ""

@@ -27,6 +27,7 @@
 #include "config.h"
 #include "PlatformScreen.h"
 
+#include "HostWindow.h"
 #include "IntRect.h"
 #include "FloatRect.h"
 #include "Frame.h"
@@ -39,7 +40,7 @@ namespace WebCore {
 // Returns info for the default monitor if widget is NULL
 static MONITORINFOEX monitorInfoForWidget(Widget* widget)
 {
-    HWND window = widget ? widget->root()->hostWindow()->platformWindow() : 0;
+    HWND window = widget ? widget->root()->hostWindow()->platformPageClient() : 0;
     HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY);
 
     MONITORINFOEX monitorInfo;
@@ -53,7 +54,7 @@ static DEVMODE deviceInfoForWidget(Widget* widget)
     DEVMODE deviceInfo;
     deviceInfo.dmSize = sizeof(DEVMODE);
     deviceInfo.dmDriverExtra = 0;
-#if PLATFORM(WINCE)
+#if OS(WINCE)
     if (!EnumDisplaySettings(0, ENUM_CURRENT_SETTINGS, &deviceInfo))
         deviceInfo.dmBitsPerPel = 16;
 #else
@@ -79,7 +80,7 @@ int screenDepthPerComponent(Widget* widget)
 
 bool screenIsMonochrome(Widget* widget)
 {
-#if PLATFORM(WINCE)
+#if OS(WINCE)
     // EnumDisplaySettings doesn't set dmColor in DEVMODE.
     return false;
 #else

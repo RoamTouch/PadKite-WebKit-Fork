@@ -18,6 +18,9 @@ background-position
 background-position-x
 background-position-y
 background-repeat
+background-repeat-x
+background-repeat-y
+background-size
 border
 border-bottom
 border-bottom-color
@@ -46,7 +49,6 @@ border-top-style
 border-top-width
 border-width
 bottom
-box-shadow
 caption-side
 clear
 clip
@@ -124,6 +126,7 @@ text-overline-color
 text-overline-mode
 text-overline-style
 text-overline-width
+text-rendering
 text-shadow
 text-transform
 text-underline
@@ -157,6 +160,9 @@ zoom
 -webkit-background-clip
 -webkit-background-composite
 -webkit-background-origin
+# -webkit-background-size differs from background-size only in the interpretation of
+# a single value: -webkit-background-size: l; is equivalent to background-size: l l;
+# whereas background-size: l; is equivalent to background-size: l auto;
 -webkit-background-size
 -webkit-binding
 -webkit-border-fit
@@ -177,7 +183,9 @@ zoom
 -webkit-box-orient
 -webkit-box-pack
 -webkit-box-reflect
+-webkit-box-shadow
 -webkit-box-sizing
+-webkit-color-correction
 -webkit-column-break-after
 -webkit-column-break-before
 -webkit-column-break-inside
@@ -190,6 +198,7 @@ zoom
 -webkit-column-width
 -webkit-columns
 -webkit-font-size-delta
+-webkit-font-smoothing
 -webkit-highlight
 -webkit-line-break
 -webkit-line-clamp
@@ -214,6 +223,8 @@ zoom
 -webkit-mask-position-x
 -webkit-mask-position-y
 -webkit-mask-repeat
+-webkit-mask-repeat-x
+-webkit-mask-repeat-y
 -webkit-mask-size
 -webkit-match-nearest-mail-blockquote-color
 -webkit-nbsp-mode

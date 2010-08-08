@@ -6,7 +6,7 @@ dnl WebKit and JavaScriptCore builds.
 # global states
 m4_define([initialized], [no])
 
-AC_DEFUN([BEFORE_AC_PROG_CXX],
+AC_DEFUN([INIT_C_CXX_FLAGS],
 [dnl
 # If CXXFLAGS and CFLAGS are unset, default to empty.
 # This is to tell automake not to include '-g' if CXXFLAGS is not set
@@ -19,11 +19,14 @@ if test -z "$CFLAGS"; then
 fi
 ])
 
-# check for pkg-config
 AC_DEFUN_ONCE([WEBKIT_INIT],
 [dnl
 dnl check if we have the required packages to have successful checks
 dnl
+# Make sure CXXFLAGS and CFLAGS are set before expanding AC_PROG_CXX to avoid
+# building with '-g -O2' on Release builds.
+AC_REQUIRE([INIT_C_CXX_FLAGS])
+
 # check for -fvisibility=hidden compiler support (GCC >= 4)
 saved_CFLAGS="$CFLAGS"
 CFLAGS="$CFLAGS -fvisibility=hidden -fvisibility-inlines-hidden"
@@ -36,6 +39,7 @@ CFLAGS="$saved_CFLAGS"
 AC_SUBST(SYMBOL_VISIBILITY)
 AC_SUBST(SYMBOL_VISIBILITY_INLINES)
 
+# check for pkg-config
 AC_PATH_PROG(PKG_CONFIG, pkg-config, no)
 if test "$PKG_CONFIG" = "no"; then
    AC_MSG_ERROR([Cannot find pkg-config, make sure it is installed in your PATH])
@@ -56,12 +60,10 @@ if test -z "$MV"; then
    AC_MSG_ERROR([You need 'mv' to compile WebKit])
 fi
 
+AC_REQUIRE([AC_PROG_CC])
+AC_REQUIRE([AC_PROG_CXX])
 AM_PROG_CC_STDC
 AM_PROG_CC_C_O
-# Make sure CXXFLAGS and CFLAGS are set before expanding AC_PROG_CXX to avoid
-# building with '-g -O2' on Release builds.
-AC_REQUIRE([BEFORE_AC_PROG_CXX])
-AC_REQUIRE([AC_PROG_CXX])
 AC_PROG_INSTALL
 AC_SYS_LARGEFILE
 
@@ -101,7 +103,7 @@ AC_DEFUN_ONCE([_WEBKIT_CHECK_GLIB],
 [dnl
 dnl check for glib
 # Version requirements
-GLIB_REQUIRED_VERSION=2.0
+GLIB_REQUIRED_VERSION=2.21.3
 GOBJECT_REQUIRED_VERSION=2.0
 GTHREAD_REQUIRED_VERSION=2.0
 
@@ -137,18 +139,17 @@ esac
 
 AC_MSG_RESULT([$with_unicode_backend])
 
-# https://bugs.webkit.org/show_bug.cgi?id=15914
-# Splitting ICU removal patch into smaller portions. We compile a hybrid version
-# with the WTF Unicode backend being based on GLib while text codecs and TextBreakIterator
-# keep the ICU dependency. That's why we temporarily add icu headers and libs for glib config case as well.
-if test "$with_unicode_backend" = "icu" -o "$with_unicode_backend" = "glib"; then
-	if test "$os_darwin" = "yes"; then
-		UNICODE_CFLAGS="-I\$(srcdir)/JavaScriptCore/icu -I\$(srcdir)/WebCore/icu"
+if test "$with_unicode_backend" = "icu"; then
+        case "$host" in
+            *-*-darwin*)
+		UNICODE_CFLAGS="-I$srcdir/JavaScriptCore/icu -I$srcdir/WebCore/icu"
 		UNICODE_LIBS="-licucore"
-	elif test "$os_win32" = "yes"; then
+                ;;
+            *-*-mingw*)
 		UNICODE_CFLAGS=""
 		UNICODE_LIBS="-licuin -licuuc"
-	else
+                ;;
+            *)
 		AC_PATH_PROG(icu_config, icu-config, no)
 		if test "$icu_config" = "no"; then
 			AC_MSG_ERROR([Cannot find icu-config. The ICU library is needed.])
@@ -158,19 +159,13 @@ if test "$with_unicode_backend" = "icu" -o "$with_unicode_backend" = "glib"; the
 		# necessarily want, like debugging and optimization flags
 		# See man (1) icu-config for more info.
 		UNICODE_CFLAGS=`$icu_config --cppflags`
-		UNICODE_LIBS=`$icu_config --ldflags`
-	fi
+		UNICODE_LIBS=`$icu_config --ldflags-libsonly`
+                ;;
+        esac
 fi
 
 if test "$with_unicode_backend" = "glib"; then
-	# https://bugs.webkit.org/show_bug.cgi?id=15914
-	# Splitting ICU removal patch into smaller portions, that's why we
-	# temporarily retrieve flags & libs info for glib into UNICODEGLIB
-	# instead of UNICODE variable, then concatenate.
-	# Patch 3/4 of the above issue will rename the variable back to UNICODE.
-	PKG_CHECK_MODULES([UNICODEGLIB], [glib-2.0 pango >= 1.21.0])
-	UNICODE_CFLAGS="$UNICODE_CFLAGS $UNICODEGLIB_CFLAGS"
-	UNICODE_LIBS="$UNICODE_LIBS $UNICODEGLIB_LIBS"
+	PKG_CHECK_MODULES([UNICODE], [glib-2.0 pango >= 1.21.0])
 fi
 
 AC_SUBST([UNICODE_CFLAGS])

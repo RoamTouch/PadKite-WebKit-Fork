@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -26,10 +26,16 @@
 // must include config.h first for webkit to fiddle with new/delete
 #include "config.h"
 
-#include "android_npapi.h"
 #include "CString.h"
 #include "JavaSharedClient.h"
 #include "PluginClient.h"
+#include "PluginPackage.h"
+#include "PluginView.h"
+#include "PluginWidgetAndroid.h"
+#include "SkString.h"
+#include "WebViewCore.h"
+
+#include "ANPSystem_npapi.h"
 
 static const char* gApplicationDataDir = NULL;
 
@@ -61,6 +67,22 @@ static const char* anp_getApplicationDataDirectory() {
     return gApplicationDataDir;
 }
 
+static WebCore::PluginView* pluginViewForInstance(NPP instance) {
+    if (instance && instance->ndata)
+        return static_cast<WebCore::PluginView*>(instance->ndata);
+    return PluginView::currentPluginView();
+}
+
+static jclass anp_loadJavaClass(NPP instance, const char* className) {
+    WebCore::PluginView* pluginView = pluginViewForInstance(instance);
+    PluginWidgetAndroid* pluginWidget = pluginView->platformPluginWidget();
+
+    jclass result;
+    result = pluginWidget->webViewCore()->getPluginClass(pluginView->plugin()->path(),
+                                                         className);
+    return result;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 #define ASSIGN(obj, name)   (obj)->name = anp_##name
@@ -69,4 +91,5 @@ void ANPSystemInterfaceV0_Init(ANPInterface* v) {
     ANPSystemInterfaceV0* i = reinterpret_cast<ANPSystemInterfaceV0*>(v);
 
     ASSIGN(i, getApplicationDataDirectory);
+    ASSIGN(i, loadJavaClass);
 }

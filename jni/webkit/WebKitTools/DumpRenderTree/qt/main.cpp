@@ -27,7 +27,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "DumpRenderTree.h"
+#include "DumpRenderTreeQt.h"
+
+#include <wtf/AlwaysInline.h>
 
 #include <qstringlist.h>
 #include <qapplication.h>
@@ -38,10 +40,17 @@
 #include <qwebsettings.h>
 #include <qwebdatabase.h>
 #include <qdesktopservices.h>
+#include <qtimer.h>
+#include <qwindowsstyle.h>
 
 #ifdef Q_WS_X11
 #include <qx11info_x11.h>
 #include <fontconfig/fontconfig.h>
+#endif
+
+#ifdef Q_OS_WIN
+#include <io.h>
+#include <fcntl.h>
 #endif
 
 #include <limits.h>
@@ -86,36 +95,46 @@ QString get_backtrace() {
     return s;
 }
 
-static void crashHandler(int sig)
+#ifndef Q_OS_WIN
+static NO_RETURN void crashHandler(int sig)
 {
     fprintf(stderr, "%s\n", strsignal(sig));
     fprintf(stderr, "%s\n", get_backtrace().toLatin1().constData());
     exit(128 + sig);
 }
+#endif
 
 int main(int argc, char* argv[])
 {
+#ifdef Q_OS_WIN
+    _setmode(1, _O_BINARY);
+    _setmode(2, _O_BINARY);
+#endif
+
 #ifdef Q_WS_X11
     FcInit();
     WebCore::DumpRenderTree::initializeFonts();
+#endif
+
 #if QT_VERSION >= 0x040500
     QApplication::setGraphicsSystem("raster");
 #endif
-#endif
+
+    QApplication::setStyle(new QWindowsStyle);
+
+    QFont f("Sans Serif");
+    f.setPointSize(9);
+    f.setWeight(QFont::Normal);
+    f.setStyle(QFont::StyleNormal);
+    QApplication::setFont(f);
+
     QApplication app(argc, argv);
 #ifdef Q_WS_X11
     QX11Info::setAppDpiY(0, 96);
     QX11Info::setAppDpiX(0, 96);
 #endif
 
-    QFont f("Sans Serif");
-    f.setPointSize(9);
-    f.setWeight(QFont::Normal);
-    f.setStyle(QFont::StyleNormal);
-    app.setFont(f);
-    app.setStyle(QLatin1String("Plastique"));
-
-
+#ifndef Q_OS_WIN
     signal(SIGILL, crashHandler);    /* 4:   illegal instruction (not reset when caught) */
     signal(SIGTRAP, crashHandler);   /* 5:   trace trap (not reset when caught) */
     signal(SIGFPE, crashHandler);    /* 8:   floating point exception */
@@ -125,41 +144,42 @@ int main(int argc, char* argv[])
     signal(SIGPIPE, crashHandler);   /* 13:  write on a pipe with no reader */
     signal(SIGXCPU, crashHandler);   /* 24:  exceeded CPU time limit */
     signal(SIGXFSZ, crashHandler);   /* 25:  exceeded file size limit */
+#endif
 
     QStringList args = app.arguments();
     if (args.count() < 2) {
-        qDebug() << "Usage: DumpRenderTree [-v] filename";
+        qDebug() << "Usage: DumpRenderTree [-v|--pixel-tests] filename";
         exit(0);
     }
 
-    // supress debug output from Qt if not started with -v
+    // Suppress debug output from Qt if not started with -v
     if (!args.contains(QLatin1String("-v")))
         qInstallMsgHandler(messageHandler);
 
     WebCore::DumpRenderTree dumper;
 
-    if (args.contains("--pixel-tests"))
+    if (args.contains(QLatin1String("--pixel-tests")))
         dumper.setDumpPixels(true);
 
     QString dbDir = QDesktopServices::storageLocation(QDesktopServices::DataLocation) + QDir::separator() + "qtwebkitdrt";
     QWebSettings::setOfflineStoragePath(dbDir);
     QWebDatabase::removeAllDatabases();
 
-    if (args.last() == QLatin1String("-")) {
-        dumper.open();
+    if (args.contains(QLatin1String("-"))) {
+        QObject::connect(&dumper, SIGNAL(ready()), &dumper, SLOT(readLine()), Qt::QueuedConnection);
+        QTimer::singleShot(0, &dumper, SLOT(readLine()));
     } else {
-        if (!args.last().startsWith("/")
-            && !args.last().startsWith("file:")
-            && !args.last().startsWith("http:")
-            && !args.last().startsWith("https:")) {
-            QString path = QDir::currentPath();
-            if (!path.endsWith('/'))
-                path.append('/');
-            args.last().prepend(path);
+        dumper.setSingleFileMode(true);
+        for (int i = 1; i < args.size(); ++i) {
+            if (!args.at(i).startsWith('-')) {
+                dumper.processLine(args.at(i));
+                break;
+            }
         }
-        dumper.open(QUrl(args.last()));
     }
+
     return app.exec();
+
 #ifdef Q_WS_X11
     FcConfigSetCurrent(0);
 #endif

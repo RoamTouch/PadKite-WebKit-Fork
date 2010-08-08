@@ -28,7 +28,7 @@ namespace JSC {
 
     class RegExpObject : public JSObject {
     public:
-        RegExpObject(PassRefPtr<Structure>, PassRefPtr<RegExp>);
+        RegExpObject(NonNullPassRefPtr<Structure>, NonNullPassRefPtr<RegExp>);
         virtual ~RegExpObject();
 
         void setRegExp(PassRefPtr<RegExp> r) { d->regExp = r; }
@@ -41,6 +41,7 @@ namespace JSC {
         JSValue exec(ExecState*, const ArgList&);
 
         virtual bool getOwnPropertySlot(ExecState*, const Identifier& propertyName, PropertySlot&);
+        virtual bool getOwnPropertyDescriptor(ExecState*, const Identifier&, PropertyDescriptor&);
         virtual void put(ExecState*, const Identifier& propertyName, JSValue, PutPropertySlot&);
 
         virtual const ClassInfo* classInfo() const { return &info; }
@@ -48,8 +49,11 @@ namespace JSC {
 
         static PassRefPtr<Structure> createStructure(JSValue prototype)
         {
-            return Structure::create(prototype, TypeInfo(ObjectType));
+            return Structure::create(prototype, TypeInfo(ObjectType, StructureFlags), AnonymousSlotCount);
         }
+
+    protected:
+        static const unsigned StructureFlags = OverridesGetOwnPropertySlot | JSObject::StructureFlags;
 
     private:
         bool match(ExecState*, const ArgList&);
@@ -57,7 +61,7 @@ namespace JSC {
         virtual CallType getCallData(CallData&);
 
         struct RegExpObjectData : FastAllocBase {
-            RegExpObjectData(PassRefPtr<RegExp> regExp, double lastIndex)
+            RegExpObjectData(NonNullPassRefPtr<RegExp> regExp, double lastIndex)
                 : regExp(regExp)
                 , lastIndex(lastIndex)
             {

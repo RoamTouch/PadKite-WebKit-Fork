@@ -24,28 +24,29 @@
 #define RenderSVGImage_h
 
 #if ENABLE(SVG)
-
-#include "TransformationMatrix.h"
+#include "AffineTransform.h"
 #include "FloatRect.h"
 #include "RenderImage.h"
+#include "SVGPreserveAspectRatio.h"
 #include "SVGRenderSupport.h"
 
 namespace WebCore {
 
     class SVGImageElement;
-    class SVGPreserveAspectRatio;
 
-    class RenderSVGImage : public RenderImage, SVGRenderBase {
+    class RenderSVGImage : public RenderImage, protected SVGRenderBase {
     public:
         RenderSVGImage(SVGImageElement*);
 
     private:
+        virtual const SVGRenderBase* toSVGRenderBase() const { return this; }
         virtual const char* renderName() const { return "RenderSVGImage"; }
         virtual bool isSVGImage() const { return true; }
 
-        virtual TransformationMatrix localToParentTransform() const { return m_localTransform; }
+        virtual const AffineTransform& localToParentTransform() const { return m_localTransform; }
 
         virtual FloatRect objectBoundingBox() const;
+        virtual FloatRect strokeBoundingBox() const { return m_localBounds; }
         virtual FloatRect repaintRectInLocalCoordinates() const;
 
         virtual IntRect clippedOverflowRectForRepaint(RenderBoxModelObject* repaintContainer);
@@ -55,10 +56,9 @@ namespace WebCore {
 
         virtual void absoluteRects(Vector<IntRect>&, int tx, int ty);
         virtual void absoluteQuads(Vector<FloatQuad>&);
-        virtual void addFocusRingRects(GraphicsContext*, int tx, int ty);
+        virtual void addFocusRingRects(Vector<IntRect>&, int tx, int ty);
 
         virtual void imageChanged(WrappedImagePtr, const IntRect* = 0);
-        void adjustRectsForAspectRatio(FloatRect& destRect, FloatRect& srcRect, SVGPreserveAspectRatio*);
         
         virtual void layout();
         virtual void paint(PaintInfo&, int parentX, int parentY);
@@ -68,10 +68,11 @@ namespace WebCore {
         virtual bool nodeAtFloatPoint(const HitTestRequest&, HitTestResult&, const FloatPoint& pointInParent, HitTestAction);
         virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, int x, int y, int tx, int ty, HitTestAction);
 
-        virtual TransformationMatrix localTransform() const { return m_localTransform; }
+        virtual AffineTransform localTransform() const { return m_localTransform; }
 
-        TransformationMatrix m_localTransform;
+        AffineTransform m_localTransform;
         FloatRect m_localBounds;
+        mutable FloatRect m_cachedLocalRepaintRect;
     };
 
 } // namespace WebCore

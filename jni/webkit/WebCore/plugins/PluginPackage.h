@@ -35,8 +35,10 @@
 #include "npruntime_internal.h"
 #include <wtf/HashMap.h>
 #include <wtf/RefCounted.h>
-#if defined(ANDROID_PLUGINS)
-#include <nativehelper/jni.h>
+
+#if OS(SYMBIAN)
+class QPluginLoader;
+class NPInterface;
 #endif
 
 namespace WebCore {
@@ -73,9 +75,17 @@ namespace WebCore {
         int compare(const PluginPackage&) const;
         PluginQuirkSet quirks() const { return m_quirks; }
         const PlatformModuleVersion& version() const { return m_moduleVersion; }
+#if OS(SYMBIAN)
+        NPInterface* npInterface() const { return m_npInterface; }
+#endif // OS(SYMBIAN)
 
     private:
         PluginPackage(const String& path, const time_t& lastModified);
+
+#if OS(SYMBIAN)
+        NPInterface* m_npInterface;
+        QPluginLoader* m_pluginLoader;
+#endif // OS(SYMBIAN)
         bool fetchInfo();
         bool isPluginBlacklisted();
         void determineQuirks(const String& mimeType);
@@ -110,11 +120,6 @@ namespace WebCore {
         Timer<PluginPackage> m_freeLibraryTimer;
 
         PluginQuirkSet m_quirks;
-
-#if defined(ANDROID_PLUGINS)
-        // Java Plugin object.
-        jobject m_pluginObject;
-#endif
     };
 
     struct PluginPackageHash {

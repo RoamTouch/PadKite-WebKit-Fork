@@ -47,6 +47,7 @@ namespace WebCore {
     class AuthenticationChallenge;
     class CachedFrame;
     class Color;
+    class DOMWrapperWorld;
     class DocumentLoader;
     class Element;
     class FormState;
@@ -60,22 +61,20 @@ namespace WebCore {
     class KURL;
     class NavigationAction;
     class PluginView;
+    class PolicyChecker;
     class ResourceError;
     class ResourceHandle;
     class ResourceLoader;
-    struct ResourceRequest;
+    class ResourceRequest;
     class ResourceResponse;
     class ScriptString;
+    class SecurityOrigin;
     class SharedBuffer;
     class SubstituteData;
     class String;
     class Widget;
 
-#ifdef ANDROID_HISTORY_CLIENT
-    class BackForwardList;
-#endif
-
-    typedef void (FrameLoader::*FramePolicyFunction)(PolicyAction);
+    typedef void (PolicyChecker::*FramePolicyFunction)(PolicyAction);
 
     class FrameLoaderClient {
     public:
@@ -118,6 +117,9 @@ namespace WebCore {
         virtual void dispatchDidCancelClientRedirect() = 0;
         virtual void dispatchWillPerformClientRedirect(const KURL&, double interval, double fireDate) = 0;
         virtual void dispatchDidChangeLocationWithinPage() = 0;
+        virtual void dispatchDidPushStateWithinPage() = 0;
+        virtual void dispatchDidReplaceStateWithinPage() = 0;
+        virtual void dispatchDidPopStateWithinPage() = 0;
         virtual void dispatchWillClose() = 0;
         virtual void dispatchDidReceiveIcon() = 0;
         virtual void dispatchDidStartProvisionalLoad() = 0;
@@ -167,11 +169,18 @@ namespace WebCore {
         virtual void updateGlobalHistoryRedirectLinks() = 0;
 
         virtual bool shouldGoToHistoryItem(HistoryItem*) const = 0;
-#ifdef ANDROID_HISTORY_CLIENT
-        virtual void dispatchDidAddHistoryItem(HistoryItem*) const = 0;
-        virtual void dispatchDidRemoveHistoryItem(HistoryItem*, int) const = 0;
-        virtual void dispatchDidChangeHistoryIndex(BackForwardList*) const = 0;
-#endif
+        virtual void dispatchDidAddBackForwardItem(HistoryItem*) const = 0;
+        virtual void dispatchDidRemoveBackForwardItem(HistoryItem*) const = 0;
+        virtual void dispatchDidChangeBackForwardIndex() const = 0;
+
+        // This frame has displayed inactive content (such as an image) from an
+        // insecure source.  Inactive content cannot spread to other frames.
+        virtual void didDisplayInsecureContent() = 0;
+
+        // The indicated security origin has run active content (such as a
+        // script) from an insecure source.  Note that the insecure content can
+        // spread to other frames in the same origin.
+        virtual void didRunInsecureContent(SecurityOrigin*) = 0;
 
         virtual ResourceError cancelledError(const ResourceRequest&) = 0;
         virtual ResourceError blockedError(const ResourceRequest&) = 0;
@@ -220,7 +229,7 @@ namespace WebCore {
         virtual ObjectContentType objectContentType(const KURL& url, const String& mimeType) = 0;
         virtual String overrideMediaType() const = 0;
 
-        virtual void windowObjectCleared() = 0;
+        virtual void dispatchDidClearWindowObjectInWorld(DOMWrapperWorld*) = 0;
         virtual void documentElementAvailable() = 0;
         virtual void didPerformFirstNavigation() const = 0; // "Navigation" here means a transition from one page to another that ends up in the back/forward list.
 
@@ -246,6 +255,13 @@ namespace WebCore {
 #endif
 
         virtual bool shouldUsePluginDocument(const String& /*mimeType*/) const { return false; }
+        virtual bool shouldLoadMediaElementURL(const KURL&) const { return true; }
+
+        virtual void didChangeScrollOffset() { }
+
+        virtual bool allowJavaScript(bool enabledPerSettings) { return enabledPerSettings; }
+        virtual bool allowPlugins(bool enabledPerSettings) { return enabledPerSettings; }
+        virtual bool allowImages(bool enabledPerSettings) { return enabledPerSettings; }
     };
 
 } // namespace WebCore

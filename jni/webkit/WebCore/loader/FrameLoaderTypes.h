@@ -81,6 +81,34 @@ namespace WebCore {
         ObjectContentNetscapePlugin,
         ObjectContentOtherPlugin
     };
+    
+    enum UnloadEventPolicy {
+        UnloadEventPolicyNone,
+        UnloadEventPolicyUnloadOnly,
+        UnloadEventPolicyUnloadAndPageHide
+    };
+
+    enum ReferrerPolicy {
+        SendReferrer,
+        NoReferrer
+    };
+    
+    enum SandboxFlag {
+        SandboxNone = 0,
+        SandboxNavigation = 1,
+        SandboxPlugins = 1 << 1,
+        SandboxOrigin = 1 << 2,
+        SandboxForms = 1 << 3,
+        SandboxScripts = 1 << 4,
+        SandboxAll = -1 // Mask with all bits set to 1.
+    };
+    
+    enum SecurityCheckPolicy {
+        SkipSecurityCheck,
+        DoSecurityCheck
+    };
+
+    typedef int SandboxFlags;
 }
 
 #endif

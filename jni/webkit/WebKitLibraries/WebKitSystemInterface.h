@@ -130,6 +130,7 @@ CFStringRef WKCopyFullFontName(CGFontRef font);
 
 void WKSetPatternBaseCTM(CGContextRef, CGAffineTransform);
 void WKSetPatternPhaseInUserSpace(CGContextRef, CGPoint);
+CGAffineTransform WKGetUserToBaseCTM(CGContextRef);
 
 #ifndef BUILDING_ON_TIGER
 void WKGetGlyphsForCharacters(CGFontRef, const UniChar[], CGGlyph[], size_t);
@@ -188,6 +189,9 @@ typedef enum {
 
 int WKQTMovieGetType(QTMovie* movie);
 
+BOOL WKQTMovieHasClosedCaptions(QTMovie* movie);
+void WKQTMovieSetShowClosedCaptions(QTMovie* movie, BOOL showClosedCaptions);
+
 unsigned WKQTIncludeOnlyModernMediaFileTypes(void);
 int WKQTMovieDataRate(QTMovie* movie);
 float WKQTMovieMaxTimeLoaded(QTMovie* movie);
@@ -207,6 +211,8 @@ typedef enum {
     WKMediaUIPartSliderThumb,
     WKMediaUIPartRewindButton,
     WKMediaUIPartSeekToRealtimeButton,
+    WKMediaUIPartShowClosedCaptionsButton,
+    WKMediaUIPartHideClosedCaptionsButton,
     WKMediaUIPartUnMuteButton,
     WKMediaUIPartPauseButton,
     WKMediaUIPartBackground,
@@ -216,19 +222,36 @@ typedef enum {
 
 typedef enum {
     WKMediaControllerThemeClassic   = 1,
-    WKMediaControllerThemeQT        = 2
+    WKMediaControllerThemeQuickTime = 2
 } WKMediaControllerThemeStyle;
 
 typedef enum {
     WKMediaControllerFlagDisabled = 1 << 0,
     WKMediaControllerFlagPressed = 1 << 1,
     WKMediaControllerFlagDrawEndCaps = 1 << 3,
+    WKMediaControllerFlagFocused = 1 << 4
 } WKMediaControllerThemeState;
 
+BOOL WKMediaControllerThemeAvailable(int themeStyle);
 BOOL WKHitTestMediaUIPart(int part, int themeStyle, CGRect bounds, CGPoint point);
 void WKMeasureMediaUIPart(int part, int themeStyle, CGRect *bounds, CGSize *naturalSize);
 void WKDrawMediaUIPart(int part, int themeStyle, CGContextRef context, CGRect rect, unsigned state);
 void WKDrawMediaSliderTrack(int themeStyle, CGContextRef context, CGRect rect, float timeLoaded, float currentTime, float duration, unsigned state);
+NSView *WKCreateMediaUIBackgroundView(void);
+
+typedef enum {
+    WKMediaUIControlTimeline,
+    WKMediaUIControlSlider,
+    WKMediaUIControlPlayPauseButton,
+    WKMediaUIControlExitFullscreenButton,
+    WKMediaUIControlRewindButton,
+    WKMediaUIControlFastForwardButton,
+    WKMediaUIControlVolumeUpButton,
+    WKMediaUIControlVolumeDownButton
+
+} WKMediaUIControlType;
+    
+NSControl *WKCreateMediaUIControl(int controlType);
 
 #if !defined(BUILDING_ON_TIGER) && !defined(BUILDING_ON_LEOPARD) && defined(__x86_64__)
 mach_port_t WKInitializeRenderServer(void);
@@ -258,8 +281,21 @@ void WKSetCAAnimationValueFunction(CAPropertyAnimation*, NSString* function);
 
 unsigned WKInitializeMaximumHTTPConnectionCountPerHost(unsigned preferredConnectionCount);
 
+void WKSetCONNECTProxyForStream(CFReadStreamRef, CFStringRef proxyHost, CFNumberRef proxyPort);
+void WKSetCONNECTProxyAuthorizationForStream(CFReadStreamRef, CFStringRef proxyAuthorizationString);
+CFHTTPMessageRef WKCopyCONNECTProxyResponse(CFReadStreamRef, CFURLRef responseURL);
+
 BOOL WKIsLatchingWheelEvent(NSEvent *);
-    
+
+#ifndef BUILDING_ON_TIGER
+void WKWindowSetAlpha(NSWindow *window, float alphaValue);
+void WKWindowSetScaledFrame(NSWindow *window, NSRect scaleFrame, NSRect nonScaledFrame);
+#endif
+
+#if !defined(BUILDING_ON_TIGER) && !defined(BUILDING_ON_LEOPARD)
+NSMutableArray *WKNoteOpenPanelFiles(NSArray *paths);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

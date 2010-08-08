@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
  *           (C) 2006, 2007 Graham Dennis (graham.dennis@gmail.com)
  *
  * Redistribution and use in source and binary forms, with or without
@@ -103,6 +103,7 @@
 #import <WebCore/Page.h>
 #import <WebCore/PlatformKeyboardEvent.h>
 #import <WebCore/Range.h>
+#import <WebCore/RuntimeApplicationChecks.h>
 #import <WebCore/SelectionController.h>
 #import <WebCore/SharedBuffer.h>
 #import <WebCore/SimpleFontData.h>
@@ -125,6 +126,7 @@
 using namespace WebCore;
 using namespace HTMLNames;
 using namespace WTF;
+using namespace std;
 
 @interface NSWindow (BorderViewAccess)
 - (NSView*)_web_borderView;
@@ -212,6 +214,9 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
 - (void)_setDrawsOwnDescendants:(BOOL)drawsOwnDescendants;
 - (void)_propagateDirtyRectsToOpaqueAncestors;
 - (void)_windowChangedKeyState;
+#if USE(ACCELERATED_COMPOSITING) && defined(BUILDING_ON_LEOPARD)
+- (void)_updateLayerGeometryFromView;
+#endif
 @end
 
 @interface NSApplication (WebNSApplicationDetails)
@@ -792,10 +797,26 @@ static NSURL* uniqueURLWithRelativePart(NSString *relativePart)
     [webView _setInsertionPasteboard:pasteboard];
 
     DOMRange *range = [self _selectedRange];
+    
+#if !defined(BUILDING_ON_TIGER) && !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
     DOMDocumentFragment *fragment = [self _documentFragmentFromPasteboard:pasteboard inContext:range allowPlainText:allowPlainText];
     if (fragment && [self _shouldInsertFragment:fragment replacingDOMRange:range givenAction:WebViewInsertActionPasted])
         [[self _frame] _replaceSelectionWithFragment:fragment selectReplacement:NO smartReplace:[self _canSmartReplaceWithPasteboard:pasteboard] matchStyle:NO];
-
+#else
+    // Mail is ignoring the frament passed to the delegate and creates a new one.
+    // We want to avoid creating the fragment twice.
+    if (applicationIsAppleMail()) {
+        if ([self _shouldInsertFragment:nil replacingDOMRange:range givenAction:WebViewInsertActionPasted]) {
+            DOMDocumentFragment *fragment = [self _documentFragmentFromPasteboard:pasteboard inContext:range allowPlainText:allowPlainText];
+            if (fragment)
+                [[self _frame] _replaceSelectionWithFragment:fragment selectReplacement:NO smartReplace:[self _canSmartReplaceWithPasteboard:pasteboard] matchStyle:NO];
+        }        
+    } else {
+        DOMDocumentFragment *fragment = [self _documentFragmentFromPasteboard:pasteboard inContext:range allowPlainText:allowPlainText];
+        if (fragment && [self _shouldInsertFragment:fragment replacingDOMRange:range givenAction:WebViewInsertActionPasted])
+            [[self _frame] _replaceSelectionWithFragment:fragment selectReplacement:NO smartReplace:[self _canSmartReplaceWithPasteboard:pasteboard] matchStyle:NO];
+    }
+#endif
     [webView _setInsertionPasteboard:nil];
     [webView release];
 }
@@ -979,8 +1000,7 @@ static NSURL* uniqueURLWithRelativePart(NSString *relativePart)
 {
     // FIXME: this can fail if the dataSource is nil, which happens when the WebView is tearing down from the window closing.
     WebHTMLView *view = (WebHTMLView *)[[[[_private->dataSource _webView] mainFrame] frameView] documentView];
-    ASSERT(view);
-    ASSERT([view isKindOfClass:[WebHTMLView class]]);
+    ASSERT(!view || [view isKindOfClass:[WebHTMLView class]]);
     return view;
 }
 
@@ -1148,8 +1168,11 @@ static void _updateMouseoverTimerCallback(CFRunLoopTimerRef timer, void *info)
 {
     NSPoint origin = [[self superview] bounds].origin;
     if (!NSEqualPoints(_private->lastScrollPosition, origin)) {
-        if (Frame* coreFrame = core([self _frame]))
-            coreFrame->eventHandler()->sendScrollEvent();
+        if (Frame* coreFrame = core([self _frame])) {
+            if (FrameView* coreView = coreFrame->view())
+                coreView->scrollPositionChanged();
+        }
+    
         [_private->completionController endRevertingChange:NO moveLeft:NO];
         
         WebView *webView = [self _webView];
@@ -1649,10 +1672,10 @@ static void _updateMouseoverTimerCallback(CFRunLoopTimerRef timer, void *info)
         urlStringSize.height = [urlFont ascender] - [urlFont descender];
         imageSize.height += urlStringSize.height;
         if (urlStringSize.width > MAX_DRAG_LABEL_WIDTH) {
-            imageSize.width = MAX(MAX_DRAG_LABEL_WIDTH + DRAG_LABEL_BORDER_X * 2.0f, MIN_DRAG_LABEL_WIDTH_BEFORE_CLIP);
+            imageSize.width = max(MAX_DRAG_LABEL_WIDTH + DRAG_LABEL_BORDER_X * 2, MIN_DRAG_LABEL_WIDTH_BEFORE_CLIP);
             clipURLString = YES;
         } else {
-            imageSize.width = MAX(labelSize.width + DRAG_LABEL_BORDER_X * 2.0f, urlStringSize.width + DRAG_LABEL_BORDER_X * 2.0f);
+            imageSize.width = max(labelSize.width + DRAG_LABEL_BORDER_X * 2, urlStringSize.width + DRAG_LABEL_BORDER_X * 2);
         }
     }
     NSImage *dragImage = [[[NSImage alloc] initWithSize: imageSize] autorelease];
@@ -1970,11 +1993,6 @@ static void _updateMouseoverTimerCallback(CFRunLoopTimerRef timer, void *info)
     // remove tooltips before clearing _private so removeTrackingRect: will work correctly
     [self removeAllToolTips];
 
-#if USE(ACCELERATED_COMPOSITING)
-    if (_private->layerHostingView)
-        [[self _webView] _stoppedAcceleratedCompositingForFrame:[self _frame]];
-#endif
-
     [_private clear];
 
     Page* page = core([self _webView]);
@@ -2167,6 +2185,15 @@ static void _updateMouseoverTimerCallback(CFRunLoopTimerRef timer, void *info)
 #endif
 }
 
+- (NSView *)_compositingLayersHostingView
+{
+#if USE(ACCELERATED_COMPOSITING)
+    return _private->layerHostingView;
+#else
+    return 0;
+#endif
+}
+
 @end
 
 @implementation NSView (WebHTMLViewFileInternal)
@@ -2299,24 +2326,36 @@ static bool matchesExtensionOrEquivalent(NSString *filename, NSString *extension
     return [[webView _editingDelegateForwarder] webView:webView doCommandBySelector:selector];
 }
 
+typedef HashMap<SEL, String> SelectorNameMap;
+
+// Map selectors into Editor command names.
+// This is not needed for any selectors that have the same name as the Editor command.
+static const SelectorNameMap* createSelectorExceptionMap()
+{
+    SelectorNameMap* map = new HashMap<SEL, String>;
+
+    map->add(@selector(insertNewlineIgnoringFieldEditor:), "InsertNewline");
+    map->add(@selector(insertParagraphSeparator:), "InsertNewline");
+    map->add(@selector(insertTabIgnoringFieldEditor:), "InsertTab");
+    map->add(@selector(pageDown:), "MovePageDown");
+    map->add(@selector(pageDownAndModifySelection:), "MovePageDownAndModifySelection");
+    map->add(@selector(pageUp:), "MovePageUp");
+    map->add(@selector(pageUpAndModifySelection:), "MovePageUpAndModifySelection");
+
+    return map;
+}
+
 static String commandNameForSelector(SEL selector)
 {
-    // Change a few command names into ones supported by WebCore::Editor.
-    // If this list gets too long we might decide we need to use a hash table.
-    if (selector == @selector(insertParagraphSeparator:) || selector == @selector(insertNewlineIgnoringFieldEditor:))
-        return "InsertNewline";
-    if (selector == @selector(insertTabIgnoringFieldEditor:))
-        return "InsertTab";
-    if (selector == @selector(pageDown:))
-        return "MovePageDown";
-    if (selector == @selector(pageDownAndModifySelection:))
-        return "MovePageDownAndModifySelection";
-    if (selector == @selector(pageUp:))
-        return "MovePageUp";
-    if (selector == @selector(pageUpAndModifySelection:))
-        return "MovePageUpAndModifySelection";
+    // Check the exception map first.
+    static const SelectorNameMap* exceptionMap = createSelectorExceptionMap();
+    SelectorNameMap::const_iterator it = exceptionMap->find(selector);
+    if (it != exceptionMap->end())
+        return it->second;
 
     // Remove the trailing colon.
+    // No need to capitalize the command name since Editor command names are
+    // not case sensitive.
     const char* selectorName = sel_getName(selector);
     size_t selectorNameLength = strlen(selectorName);
     if (selectorNameLength < 2 || selectorName[selectorNameLength - 1] != ':')
@@ -2639,7 +2678,10 @@ WEBCORE_COMMAND(yankAndSelect)
     
     if (action == @selector(_lookUpInDictionaryFromMenu:))
         return [self _hasSelection];
-    
+
+    if (action == @selector(stopSpeaking:))
+        return [NSApp isSpeaking];
+
 #ifndef BUILDING_ON_TIGER
     if (action == @selector(toggleGrammarChecking:)) {
         // FIXME 4799134: WebView is the bottleneck for this grammar-checking logic, but we must validate 
@@ -2858,6 +2900,14 @@ WEBCORE_COMMAND(yankAndSelect)
 {
     if ([self superview] != nil)
         [self addSuperviewObservers];
+
+#if USE(ACCELERATED_COMPOSITING)
+    if ([self superview] && [self _isUsingAcceleratedCompositing]) {
+        WebView *webView = [self _webView];
+        if ([webView _postsAcceleratedCompositingNotifications])
+            [[NSNotificationCenter defaultCenter] postNotificationName:_WebViewDidStartAcceleratedCompositingNotification object:webView userInfo:nil];
+    }
+#endif
 }
 
 - (void)viewWillMoveToWindow:(NSWindow *)window
@@ -3160,7 +3210,8 @@ WEBCORE_COMMAND(yankAndSelect)
     double start = CFAbsoluteTimeGetCurrent();
 #endif
 
-    if ([[self _webView] _mustDrawUnionedRect:rect singleRects:rects count:count])
+    WebView *webView = [self _webView];
+    if ([webView _mustDrawUnionedRect:rect singleRects:rects count:count])
         [self drawSingleRect:rect];
     else
         for (int i = 0; i < count; ++i)
@@ -3175,16 +3226,19 @@ WEBCORE_COMMAND(yankAndSelect)
         [self _setAsideSubviews];
         
 #if USE(ACCELERATED_COMPOSITING)
-    if ([[self _webView] _needsOneShotDrawingSynchronization]) {
+    if ([webView _needsOneShotDrawingSynchronization]) {
         // Disable screen updates so that any layer changes committed here
         // don't show up on the screen before the window flush at the end
-        // of the current window display.
-        [[self window] disableScreenUpdatesUntilFlush];
+        // of the current window display, but only if a window flush is actually
+        // going to happen.
+        NSWindow *window = [self window];
+        if ([window viewsNeedDisplay])
+            [window disableScreenUpdatesUntilFlush];
         
         // Make sure any layer changes that happened as a result of layout
         // via -viewWillDraw are committed.
         [CATransaction flush];
-        [[self _webView] _setNeedsOneShotDrawingSynchronization:NO];
+        [webView _setNeedsOneShotDrawingSynchronization:NO];
     }
 #endif
 }
@@ -3272,6 +3326,12 @@ WEBCORE_COMMAND(yankAndSelect)
     return [[[self elementAtPoint:point allowShadowContent:YES] objectForKey:WebElementIsSelectedKey] boolValue];
 }
 
+- (BOOL)_isScrollBarEvent:(NSEvent *)event
+{
+    NSPoint point = [self convertPoint:[event locationInWindow] fromView:nil];
+    return [[[self elementAtPoint:point allowShadowContent:YES] objectForKey:WebElementIsInScrollBarKey] boolValue];
+}
+
 - (BOOL)acceptsFirstMouse:(NSEvent *)event
 {
     // There's a chance that responding to this event will run a nested event loop, and
@@ -3294,6 +3354,8 @@ WEBCORE_COMMAND(yankAndSelect)
             [hitHTMLView _setMouseDownEvent:event];
             if ([hitHTMLView _isSelectionEvent:event])
                 result = coreFrame->eventHandler()->eventMayStartDrag(event);
+            else if ([hitHTMLView _isScrollBarEvent:event])
+                result = true;
             [hitHTMLView _setMouseDownEvent:nil];
         }
         return result;
@@ -3407,26 +3469,7 @@ done:
     if (!page)
         return NSDragOperationNone;
 
-    // FIXME: Why do we override the source provided operation here?  Why not in DragController::startDrag
-    if (page->dragController()->sourceDragOperation() == DragOperationNone)
-        return NSDragOperationGeneric | NSDragOperationCopy;
-
     return (NSDragOperation)page->dragController()->sourceDragOperation();
-}
-
-- (void)draggedImage:(NSImage *)image movedTo:(NSPoint)screenLoc
-{
-    ASSERT(![self _webView] || [self _isTopHTMLView]);
-    
-    NSPoint windowImageLoc = [[self window] convertScreenToBase:screenLoc];
-    NSPoint windowMouseLoc = windowImageLoc;
-    
-    if (Page* page = core([self _webView])) {
-        DragController* dragController = page->dragController();
-        NSPoint windowMouseLoc = NSMakePoint(windowImageLoc.x + dragController->dragOffset().x(), windowImageLoc.y + dragController->dragOffset().y());
-    }
-    
-    [[self _frame] _dragSourceMovedTo:windowMouseLoc];
 }
 
 - (void)draggedImage:(NSImage *)anImage endedAt:(NSPoint)aPoint operation:(NSDragOperation)operation
@@ -3715,7 +3758,7 @@ static BOOL isInPasswordField(Frame* coreFrame)
 #ifdef __LP64__
     // If the new bottom is equal to the old bottom (when both are treated as floats), we just copy
     // oldBottom over to newBottom. This prevents rounding errors that can occur when converting newBottomFloat to a double.
-    if (fabs((float)oldBottom - newBottomFloat) <= std::numeric_limits<float>::epsilon()) 
+    if (fabs((float)oldBottom - newBottomFloat) <= numeric_limits<float>::epsilon()) 
         *newBottom = oldBottom;
     else
 #endif
@@ -3750,7 +3793,7 @@ static BOOL isInPasswordField(Frame* coreFrame)
     float maxShrinkToFitScaleFactor = 1.0f / PrintingMaximumShrinkFactor;
     float shrinkToFitScaleFactor = [self _availablePaperWidthForPrintOperation:printOperation]/viewWidth;
     float shrinkToAvoidOrphan = _private->avoidingPrintOrphan ? (1.0f / PrintingOrphanShrinkAdjustment) : 1.0f;
-    return userScaleFactor * MAX(maxShrinkToFitScaleFactor, shrinkToFitScaleFactor) * shrinkToAvoidOrphan;
+    return userScaleFactor * max(maxShrinkToFitScaleFactor, shrinkToFitScaleFactor) * shrinkToAvoidOrphan;
 }
 
 // FIXME 3491344: This is a secret AppKit-internal method that we need to override in order
@@ -5398,7 +5441,6 @@ static CGPoint coreGraphicsScreenPointForAppKitScreenPoint(NSPoint point)
         [hostingView release];
         // hostingView is owned by being a subview of self
         _private->layerHostingView = hostingView;
-        [[self _webView] _startedAcceleratedCompositingForFrame:[self _frame]];
     }
 
     // Make a container layer, which will get sized/positioned by AppKit and CA.
@@ -5427,6 +5469,9 @@ static CGPoint coreGraphicsScreenPointForAppKitScreenPoint(NSPoint point)
     // Parent our root layer in the container layer
     [viewLayer addSublayer:layer];
     
+    if ([[self _webView] _postsAcceleratedCompositingNotifications])
+        [[NSNotificationCenter defaultCenter] postNotificationName:_WebViewDidStartAcceleratedCompositingNotification object:[self _webView] userInfo:nil];
+    
 #if defined(BUILDING_ON_LEOPARD)
     [self _updateLayerHostingViewPosition];
 #endif
@@ -5439,7 +5484,6 @@ static CGPoint coreGraphicsScreenPointForAppKitScreenPoint(NSPoint point)
         [_private->layerHostingView setWantsLayer:NO];
         [_private->layerHostingView removeFromSuperview];
         _private->layerHostingView = nil;
-        [[self _webView] _stoppedAcceleratedCompositingForFrame:[self _frame]];
     }
 }
 
@@ -5450,13 +5494,13 @@ static CGPoint coreGraphicsScreenPointForAppKitScreenPoint(NSPoint point)
     if (!_private->layerHostingView)
         return;
     
-    const CGFloat maxHeight = 4096;
+    const CGFloat maxHeight = 2048;
     NSRect layerViewFrame = [self bounds];
 
     if (layerViewFrame.size.height > maxHeight) {
         CGFloat documentHeight = layerViewFrame.size.height;
             
-        // Clamp the size of the view to <= 4096px to avoid the bug.
+        // Clamp the size of the view to <= maxHeight to avoid the bug.
         layerViewFrame.size.height = maxHeight;
         NSRect visibleRect = [[self enclosingScrollView] documentVisibleRect];
         
@@ -5468,7 +5512,8 @@ static CGPoint coreGraphicsScreenPointForAppKitScreenPoint(NSPoint point)
         CGFloat bottomOffset = documentHeight - layerViewFrame.size.height - topOffset;
         [[_private->layerHostingView layer] setSublayerTransform:CATransform3DMakeTranslation(0, -bottomOffset, 0)];
     }
-        
+
+    [_private->layerHostingView _updateLayerGeometryFromView];  // Workaround for <rdar://problem/7071636>
     [_private->layerHostingView setFrame:layerViewFrame];
 }
 #endif // defined(BUILDING_ON_LEOPARD)
@@ -5895,7 +5940,7 @@ static void extractUnderlines(NSAttributedString *string, Vector<CompositionUnde
     
     Vector<FloatRect> list;
     if (Frame* coreFrame = core([self _frame]))
-        coreFrame->selectionTextRects(list);
+        coreFrame->selectionTextRects(list, Frame::RespectTransforms);
 
     unsigned size = list.size();
     NSMutableArray *result = [[[NSMutableArray alloc] initWithCapacity:size] autorelease];

@@ -82,10 +82,12 @@ public:
     //Helper functions to allow Clipboard to share code
     static void writeSelection(NSPasteboard* pasteboard, Range* selectedRange, bool canSmartCopyOrDelete, Frame* frame);
     static void writeURL(NSPasteboard* pasteboard, NSArray* types, const KURL& url, const String& titleStr, Frame* frame);
+    static void writePlainText(NSPasteboard* pasteboard, const String& text);
 #endif
     
     static Pasteboard* generalPasteboard();
     void writeSelection(Range*, bool canSmartCopyOrDelete, Frame*);
+    void writePlainText(const String&);
     void writeURL(const KURL&, const String&, Frame* = 0);
     void writeImage(Node*, const KURL&, const String& title);
 #if PLATFORM(MAC)
@@ -95,13 +97,14 @@ public:
     bool canSmartReplace();
     PassRefPtr<DocumentFragment> documentFragment(Frame*, PassRefPtr<Range>, bool allowPlainText, bool& chosePlainText);
     String plainText(Frame* = 0);
-#if PLATFORM(QT)
+#if PLATFORM(QT) || PLATFORM(CHROMIUM)
     bool isSelectionMode() const;
     void setSelectionMode(bool selectionMode);
 #endif
 
 #if PLATFORM(GTK)
     void setHelper(PasteboardHelper*);
+    PasteboardHelper* m_helper;
 #endif
 
 private:
@@ -117,11 +120,7 @@ private:
     HWND m_owner;
 #endif
 
-#if PLATFORM(GTK)
-    PasteboardHelper* m_helper;
-#endif
-
-#if PLATFORM(QT)
+#if PLATFORM(QT) || PLATFORM(CHROMIUM)
     bool m_selectionMode;
 #endif
 

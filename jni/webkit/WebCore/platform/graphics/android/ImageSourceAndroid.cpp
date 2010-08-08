@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -39,10 +39,12 @@
 
 #ifdef ANDROID_ANIMATED_GIF
     #include "EmojiFont.h"
-    #include "gif/GIFImageDecoder.h"
+    #include "GIFImageDecoder.h"
 
     using namespace android;
 #endif
+
+// TODO: We should make use of some of the common code in platform/graphics/ImageSource.cpp.
 
 SkPixelRef* SkCreateRLEPixelRef(const SkBitmap& src);
 
@@ -50,9 +52,38 @@ SkPixelRef* SkCreateRLEPixelRef(const SkBitmap& src);
 //#define TRACE_RLE_BITMAPS
 
 
-// don't use RLE for images smaller than this, since they incur a drawing cost
-// (and don't work as patterns yet) we only want to use RLE when we must
-#define MIN_RLE_ALLOC_SIZE      (2*1024*1024)
+// flag to tell us when we're on a large-ram device (e.g. >= 256M)
+#ifdef ANDROID_LARGE_MEMORY_DEVICE
+    // don't use RLE for images smaller than this, since they incur a drawing cost
+    // (and don't work as patterns yet) we only want to use RLE when we must
+    #define MIN_RLE_ALLOC_SIZE          (8*1024*1024)
+
+    // see dox for computeMaxBitmapSizeForCache()
+    #define MAX_SIZE_BEFORE_SUBSAMPLE   (8*1024*1024)
+
+    // preserve quality for 24/32bit src
+    static const SkBitmap::Config gPrefConfigTable[6] = {
+        SkBitmap::kIndex8_Config,       // src: index, opaque
+        SkBitmap::kIndex8_Config,       // src: index, alpha
+        SkBitmap::kRGB_565_Config,      // src: 16bit, opaque
+        SkBitmap::kARGB_8888_Config,    // src: 16bit, alpha  (promote to 32bit)
+        SkBitmap::kARGB_8888_Config,    // src: 32bit, opaque
+        SkBitmap::kARGB_8888_Config,    // src: 32bit, alpha
+    };
+#else
+    #define MIN_RLE_ALLOC_SIZE          (2*1024*1024)
+    #define MAX_SIZE_BEFORE_SUBSAMPLE   (2*1024*1024)
+
+    // tries to minimize memory usage (i.e. demote opaque 32bit -> 16bit)
+    static const SkBitmap::Config gPrefConfigTable[6] = {
+        SkBitmap::kIndex8_Config,       // src: index, opaque
+        SkBitmap::kIndex8_Config,       // src: index, alpha
+        SkBitmap::kRGB_565_Config,      // src: 16bit, opaque
+        SkBitmap::kARGB_8888_Config,    // src: 16bit, alpha  (promote to 32bit)
+        SkBitmap::kRGB_565_Config,      // src: 32bit, opaque (demote to 16bit)
+        SkBitmap::kARGB_8888_Config,    // src: 32bit, alpha
+    };
+#endif
 
 /*  Images larger than this should be subsampled. Using ashmem, the decoded
     pixels will be purged as needed, so this value can be pretty large. Making
@@ -65,7 +96,7 @@ SkPixelRef* SkCreateRLEPixelRef(const SkBitmap& src);
     Perhaps this value should be some fraction of the available RAM...
 */
 static size_t computeMaxBitmapSizeForCache() {
-    return 2*1024*1024;
+    return MAX_SIZE_BEFORE_SUBSAMPLE;
 }
 
 /* 8bit images larger than this should be recompressed in RLE, to reduce
@@ -184,8 +215,12 @@ void ImageSource::setURL(const String& url)
 // we only animate small GIFs for now, to save memory
 // also, we only support this in Japan, hence the Emoji check
 static bool should_use_animated_gif(int width, int height) {
+#ifdef ANDROID_LARGE_MEMORY_DEVICE
+    return true;
+#else
     return EmojiFont::IsAvailable() &&
            width <= 32 && height <= 32;
+#endif
 }
 #endif
 
@@ -208,12 +243,13 @@ void ImageSource::setData(SharedBuffer* data, bool allDataReceived)
 
         SkMemoryStream stream(data->data(), data->size(), false);
         SkImageDecoder* codec = SkImageDecoder::Factory(&stream);
-        SkAutoTDelete<SkImageDecoder> ad(codec);
-        
-        if (!codec || !codec->decode(&stream, &tmp, SkBitmap::kNo_Config,
-                                       SkImageDecoder::kDecodeBounds_Mode)) {
+        if (!codec)
             return;
-        }
+
+        SkAutoTDelete<SkImageDecoder> ad(codec);
+        codec->setPrefConfigTable(gPrefConfigTable);
+        if (!codec->decode(&stream, &tmp, SkImageDecoder::kDecodeBounds_Mode))
+            return;
 
         int origW = tmp.width();
         int origH = tmp.height();
@@ -240,8 +276,8 @@ void ImageSource::setData(SharedBuffer* data, bool allDataReceived)
         if (sampleSize > 1) {
             codec->setSampleSize(sampleSize);
             stream.rewind();
-            if (!codec->decode(&stream, &tmp, SkBitmap::kNo_Config,
-                                 SkImageDecoder::kDecodeBounds_Mode)) {
+            if (!codec->decode(&stream, &tmp,
+                               SkImageDecoder::kDecodeBounds_Mode)) {
                 return;
             }
         }

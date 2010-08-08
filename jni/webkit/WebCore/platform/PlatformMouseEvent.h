@@ -36,6 +36,7 @@ typedef struct _GdkEventMotion GdkEventMotion;
 #if PLATFORM(QT)
 QT_BEGIN_NAMESPACE
 class QInputEvent;
+class QGraphicsSceneMouseEvent;
 QT_END_NAMESPACE
 #endif
 
@@ -48,6 +49,16 @@ typedef long LPARAM;
 
 #if PLATFORM(WX)
 class wxMouseEvent;
+#endif
+
+#if PLATFORM(HAIKU)
+class BMessage;
+#endif
+
+#if PLATFORM(BREWMP)
+typedef unsigned short    uint16;
+typedef unsigned long int uint32;
+#define AEEEvent uint16
 #endif
 
 namespace WebCore {
@@ -109,13 +120,19 @@ namespace WebCore {
         PlatformMouseEvent(GdkEventMotion*);
 #endif
 
-#if PLATFORM(MAC) && defined(__OBJC__)
+#if PLATFORM(MAC)
+#if defined(__OBJC__)
         PlatformMouseEvent(NSEvent *, NSView *windowView);
+#endif
+        PlatformMouseEvent(int x, int y, int globalX, int globalY, MouseButton button, MouseEventType eventType,
+                           int clickCount, bool shiftKey, bool ctrlKey, bool altKey, bool metaKey, double timestamp,
+                           unsigned modifierFlags, int eventNumber);
         int eventNumber() const { return m_eventNumber; }
 #endif
 
 #if PLATFORM(QT)
         PlatformMouseEvent(QInputEvent*, int clickCount);
+        PlatformMouseEvent(QGraphicsSceneMouseEvent*, int clickCount);
 #endif
 
 #if PLATFORM(WIN)
@@ -126,6 +143,14 @@ namespace WebCore {
 
 #if PLATFORM(WX)
         PlatformMouseEvent(const wxMouseEvent&, const wxPoint& globalPoint, int clickCount);
+#endif
+
+#if PLATFORM(HAIKU)
+        PlatformMouseEvent(const BMessage*);
+#endif
+
+#if PLATFORM(BREWMP)
+        PlatformMouseEvent(AEEEvent, uint16 wParam, uint32 dwParam);
 #endif
 
     protected:

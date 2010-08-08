@@ -39,10 +39,9 @@
 
 #include "config.h"
 #include "JPEGImageDecoder.h"
-#include <assert.h>
 #include <stdio.h>  // Needed by jpeglib.h for FILE.
 
-#if PLATFORM(WINCE)
+#if OS(WINCE) || PLATFORM(BREWMP_SIMULATOR)
 // Remove warning: 'FAR' macro redefinition
 #undef FAR
 
@@ -271,7 +270,7 @@ public:
                         return true; /* I/O suspension */
       
                     /* If we've completed image output ... */
-                    assert(m_info.output_scanline == m_info.output_height);
+                    ASSERT(m_info.output_scanline == m_info.output_height);
                     m_state = JPEG_DONE;
                 }
             }
@@ -401,12 +400,11 @@ void term_source (j_decompress_ptr jd)
 }
 
 JPEGImageDecoder::JPEGImageDecoder()
-: m_reader(0)
-{}
+{
+}
 
 JPEGImageDecoder::~JPEGImageDecoder()
 {
-    delete m_reader;
 }
 
 // Take the data and store it.
@@ -420,7 +418,7 @@ void JPEGImageDecoder::setData(SharedBuffer* data, bool allDataReceived)
 
     // Create the JPEG reader.
     if (!m_reader && !m_failed)
-        m_reader = new JPEGImageReader(this);
+        m_reader.set(new JPEGImageReader(this));
 }
 
 // Whether or not the size information has been decoded yet.
@@ -430,6 +428,14 @@ bool JPEGImageDecoder::isSizeAvailable()
          decode(true);
 
     return ImageDecoder::isSizeAvailable();
+}
+
+bool JPEGImageDecoder::setSize(unsigned width, unsigned height)
+{
+    if (!ImageDecoder::setSize(width, height))
+        return false;
+    prepareScaleDataIfNecessary();
+    return true;
 }
 
 RGBA32Buffer* JPEGImageDecoder::frameBufferAtIndex(size_t index)
@@ -455,58 +461,8 @@ void JPEGImageDecoder::decode(bool sizeOnly)
 
     m_failed = !m_reader->decode(m_data->buffer(), sizeOnly);
 
-    if (m_failed || (!m_frameBufferCache.isEmpty() && m_frameBufferCache[0].status() == RGBA32Buffer::FrameComplete)) {
-        delete m_reader;
-        m_reader = 0;
-    }
-}
-
-static void convertCMYKToRGBA(RGBA32Buffer& dest, JSAMPROW src, jpeg_decompress_struct* info)
-{
-    ASSERT(info->out_color_space == JCS_CMYK);
-
-    for (unsigned x = 0; x < info->output_width; ++x) {
-        unsigned c = *src++;
-        unsigned m = *src++;
-        unsigned y = *src++;
-        unsigned k = *src++;
-
-        // Source is 'Inverted CMYK', output is RGB.
-        // See: http://www.easyrgb.com/math.php?MATH=M12#text12
-        // Or:  http://www.ilkeratalay.com/colorspacesfaq.php#rgb
-
-        // From CMYK to CMY
-        // C = C * ( 1 - K ) + K
-        // M = M * ( 1 - K ) + K
-        // Y = Y * ( 1 - K ) + K
-
-        // From Inverted CMYK to CMY is thus:
-        // C = (1-iC) * (1 - (1-iK)) + (1-iK) => 1 - iC*iK
-        // Same for M and Y
-
-        // Convert from CMY (0..1) to RGB (0..1)
-        // R = 1 - C => 1 - (1 - iC*iK) => iC*iK
-        // G = 1 - M => 1 - (1 - iM*iK) => iM*iK
-        // B = 1 - Y => 1 - (1 - iY*iK) => iY*iK
-
-        // read_scanlines has increased the scanline counter, so we
-        // actually mean the previous one.
-        dest.setRGBA(x, info->output_scanline - 1, c * k / 255, m * k / 255, y * k / 255, 0xFF);
-    }
-}
-
-static void convertRGBToRGBA(RGBA32Buffer& dest, JSAMPROW src, jpeg_decompress_struct* info)
-{
-    ASSERT(info->out_color_space == JCS_RGB);
-
-    for (unsigned x = 0; x < info->output_width; ++x) {
-        unsigned r = *src++;
-        unsigned g = *src++;
-        unsigned b = *src++;
-        // read_scanlines has increased the scanline counter, so we
-        // actually mean the previous one.
-        dest.setRGBA(x, info->output_scanline - 1, r, g, b, 0xFF);
-    }
+    if (m_failed || (!m_frameBufferCache.isEmpty() && m_frameBufferCache[0].status() == RGBA32Buffer::FrameComplete))
+        m_reader.clear();
 }
 
 bool JPEGImageDecoder::outputScanlines()
@@ -517,7 +473,7 @@ bool JPEGImageDecoder::outputScanlines()
     // Initialize the framebuffer if needed.
     RGBA32Buffer& buffer = m_frameBufferCache[0];
     if (buffer.status() == RGBA32Buffer::FrameEmpty) {
-        if (!buffer.setSize(size().width(), size().height())) {
+        if (!buffer.setSize(scaledSize().width(), scaledSize().height())) {
             m_failed = true;
             return false;
         }
@@ -532,16 +488,39 @@ bool JPEGImageDecoder::outputScanlines()
     JSAMPARRAY samples = m_reader->samples();
 
     while (info->output_scanline < info->output_height) {
+        // jpeg_read_scanlines will increase the scanline counter, so we
+        // save the scanline before calling it.
+        int sourceY = info->output_scanline;
         /* Request one scanline.  Returns 0 or 1 scanlines. */
         if (jpeg_read_scanlines(info, samples, 1) != 1)
             return false;
 
-        if (info->out_color_space == JCS_RGB)
-            convertRGBToRGBA(buffer, *samples, info);
-        else if (info->out_color_space == JCS_CMYK)
-            convertCMYKToRGBA(buffer, *samples, info);
-        else
-            return false;
+        int destY = scaledY(sourceY);
+        if (destY < 0)
+            continue;
+        int width = m_scaled ? m_scaledColumns.size() : info->output_width;
+        for (int x = 0; x < width; ++x) {
+            JSAMPLE* jsample = *samples + (m_scaled ? m_scaledColumns[x] : x) * ((info->out_color_space == JCS_RGB) ? 3 : 4);
+            if (info->out_color_space == JCS_RGB)
+                buffer.setRGBA(x, destY, jsample[0], jsample[1], jsample[2], 0xFF);
+            else if (info->out_color_space == JCS_CMYK) {
+                // Source is 'Inverted CMYK', output is RGB.
+                // See: http://www.easyrgb.com/math.php?MATH=M12#text12
+                // Or:  http://www.ilkeratalay.com/colorspacesfaq.php#rgb
+                // From CMYK to CMY:
+                // X =   X    * (1 -   K   ) +   K  [for X = C, M, or Y]
+                // Thus, from Inverted CMYK to CMY is:
+                // X = (1-iX) * (1 - (1-iK)) + (1-iK) => 1 - iX*iK
+                // From CMY (0..1) to RGB (0..1):
+                // R = 1 - C => 1 - (1 - iC*iK) => iC*iK  [G and B similar]
+                unsigned k = jsample[3];
+                buffer.setRGBA(x, destY, jsample[0] * k / 255, jsample[1] * k / 255, jsample[2] * k / 255, 0xFF);
+            } else {
+                ASSERT_NOT_REACHED();
+                m_failed = true;
+                return false;
+            }
+        }
     }
 
     return true;

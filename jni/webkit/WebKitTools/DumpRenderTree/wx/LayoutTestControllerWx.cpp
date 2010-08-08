@@ -100,6 +100,11 @@ void LayoutTestController::setAcceptsEditing(bool acceptsEditing)
 {
 }
 
+void LayoutTestController::setAlwaysAcceptCookies(bool alwaysAcceptCookies)
+{
+    // FIXME: Implement this (and restore the default value before running each test in DumpRenderTree.cpp).
+}
+
 void LayoutTestController::setCustomPolicyDelegate(bool, bool)
 {
     // FIXME: implement
@@ -165,6 +170,16 @@ void LayoutTestController::setXSSAuditorEnabled(bool enabled)
     // FIXME: implement
 }
 
+void LayoutTestController::setFrameSetFlatteningEnabled(bool enabled)
+{
+    // FIXME: implement
+}
+
+void LayoutTestController::setAllowUniversalAccessFromFileURLs(bool enabled)
+{
+    // FIXME: implement
+}
+
 void LayoutTestController::setAuthorAndUserStylesEnabled(bool flag)
 {
     // FIXME: implement
@@ -206,12 +221,23 @@ void LayoutTestController::setDatabaseQuota(unsigned long long quota)
     // FIXME: implement
 }
 
+void LayoutTestController::setDomainRelaxationForbiddenForURLScheme(bool, JSStringRef)
+{
+    // FIXME: implement
+}
+
 void LayoutTestController::setAppCacheMaximumSize(unsigned long long size)
 {
     // FIXME: implement
 }
 
 unsigned LayoutTestController::numberOfActiveAnimations() const
+{
+    // FIXME: implement
+    return 0;
+}
+
+unsigned LayoutTestController::workerThreadCount() const
 {
     // FIXME: implement
     return 0;
@@ -228,12 +254,30 @@ bool LayoutTestController::pauseTransitionAtTimeOnElementWithId(JSStringRef prop
     return false;
 }
 
+void LayoutTestController::setMockGeolocationPosition(double latitude, double longitude, double accuracy)
+{
+    // FIXME: Implement for Geolocation layout tests.
+    // See https://bugs.webkit.org/show_bug.cgi?id=28264.
+}
+
+void LayoutTestController::setMockGeolocationError(int code, JSStringRef message)
+{
+    // FIXME: Implement for Geolocation layout tests.
+    // See https://bugs.webkit.org/show_bug.cgi?id=28264.
+}
+
 void LayoutTestController::setIconDatabaseEnabled(bool iconDatabaseEnabled)
 {
     // FIXME: implement
 }
 
 bool LayoutTestController::pauseAnimationAtTimeOnElementWithId(JSStringRef animationName, double time, JSStringRef elementId)
+{
+    // FIXME: implement
+    return false;
+}
+
+bool LayoutTestController::sampleSVGAnimationForElementAtTime(JSStringRef animationId, double time, JSStringRef elementId)
 {
     // FIXME: implement
     return false;
@@ -259,4 +303,76 @@ size_t LayoutTestController::webHistoryItemCount()
 void LayoutTestController::waitForPolicyDelegate()
 {
     // FIXME: Implement this.
+}
+
+void LayoutTestController::overridePreference(JSStringRef /* key */, JSStringRef /* value */)
+{
+    // FIXME: implement
+}
+
+void LayoutTestController::addUserScript(JSStringRef source, bool runAtStart)
+{
+    printf("LayoutTestController::addUserScript not implemented.\n");
+}
+
+void LayoutTestController::addUserStyleSheet(JSStringRef source)
+{
+    printf("LayoutTestController::addUserStyleSheet not implemented.\n");
+}
+
+void LayoutTestController::showWebInspector()
+{
+    // FIXME: Implement this.
+}
+
+void LayoutTestController::closeWebInspector()
+{
+    // FIXME: Implement this.
+}
+
+void LayoutTestController::evaluateInWebInspector(long callId, JSStringRef script)
+{
+    // FIXME: Implement this.
+}
+
+void LayoutTestController::removeAllVisitedLinks()
+{
+    // FIXME: Implement this.
+}
+
+void LayoutTestController::setTimelineProfilingEnabled(bool enabled)
+{
+
+}
+
+void LayoutTestController::evaluateScriptInIsolatedWorld(unsigned worldId, JSObjectRef globalObject, JSStringRef script)
+{
+
+}
+
+void LayoutTestController::disableImageLoading()
+{
+
+}
+
+void LayoutTestController::whiteListAccessFromOrigin(JSStringRef sourceOrigin, JSStringRef destinationProtocol, JSStringRef destinationHost, bool allowDestinationSubdomains)
+{
+
+}
+
+JSRetainPtr<JSStringRef> LayoutTestController::counterValueForElementById(JSStringRef id)
+{
+    return 0;
+}
+
+int LayoutTestController::pageNumberForElementById(JSStringRef, float, float)
+{
+    // FIXME: implement
+    return -1;
+}
+
+int LayoutTestController::numberOfPages(float, float)
+{
+    // FIXME: implement
+    return -1;
 }

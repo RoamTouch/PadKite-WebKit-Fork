@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008, 2009, 2010 Apple Inc. All Rights Reserved.
  * Copyright (C) 2009 Jan Michael Alonzo
  *
  * Redistribution and use in source and binary forms, with or without
@@ -58,6 +58,30 @@ AccessibilityUIElement AccessibilityController::focusedElement()
 AccessibilityUIElement AccessibilityController::rootElement()
 {
     WebKitWebView* view = webkit_web_frame_get_web_view(mainFrame);
-    AtkObject* axObject = gtk_widget_get_accessible(GTK_WIDGET(view));
+
+    // The presumed, desired rootElement is the parent of the web view.
+    GtkWidget* webViewParent = gtk_widget_get_parent(GTK_WIDGET(view));
+    AtkObject* axObject = gtk_widget_get_accessible(webViewParent);
+ 
     return AccessibilityUIElement(axObject);
+}
+
+void AccessibilityController::setLogFocusEvents(bool)
+{
+}
+
+void AccessibilityController::setLogScrollingStartEvents(bool)
+{
+}
+
+void AccessibilityController::setLogValueChangeEvents(bool)
+{
+}
+
+void AccessibilityController::addNotificationListener(PlatformUIElement, JSObjectRef)
+{
+}
+
+void AccessibilityController::notificationReceived(PlatformUIElement, const std::string&)
+{
 }

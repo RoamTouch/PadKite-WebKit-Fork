@@ -31,12 +31,12 @@
 #include "config.h"
 #include "Image.h"
 
+#include "AffineTransform.h"
 #include "ImageObserver.h"
 #include "BitmapImage.h"
 #include "FloatRect.h"
 #include "PlatformString.h"
 #include "GraphicsContext.h"
-#include "TransformationMatrix.h"
 #include "StillImageQt.h"
 #include "qwebsettings.h"
 
@@ -44,9 +44,7 @@
 #include <QPainter>
 #include <QImage>
 #include <QImageReader>
-#if QT_VERSION >= 0x040300
 #include <QTransform>
-#endif
 
 #include <QDebug>
 
@@ -64,6 +62,8 @@ static QPixmap loadResourcePixmap(const char *name)
         pixmap = QWebSettings::webGraphic(QWebSettings::DefaultFrameIconGraphic);
     else if (qstrcmp(name, "textAreaResizeCorner") == 0)
         pixmap = QWebSettings::webGraphic(QWebSettings::TextAreaSizeGripCornerGraphic);
+    else if (qstrcmp(name, "deleteButton") == 0)
+        pixmap = QWebSettings::webGraphic(QWebSettings::DeleteButtonGraphic);
 
     return pixmap;
 }
@@ -76,6 +76,7 @@ bool FrameData::clear(bool clearMetadata)
         m_haveMetadata = false;
 
     if (m_frame) {
+        delete m_frame;
         m_frame = 0;
         return true;
     }
@@ -92,8 +93,8 @@ PassRefPtr<Image> Image::loadPlatformResource(const char* name)
     return StillImage::create(loadResourcePixmap(name));
 }
 
-void Image::drawPattern(GraphicsContext* ctxt, const FloatRect& tileRect, const TransformationMatrix& patternTransform,
-                        const FloatPoint& phase, CompositeOperator op, const FloatRect& destRect)
+void Image::drawPattern(GraphicsContext* ctxt, const FloatRect& tileRect, const AffineTransform& patternTransform,
+                        const FloatPoint& phase, ColorSpace, CompositeOperator op, const FloatRect& destRect)
 {
     QPixmap* framePixmap = nativeImageForCurrentFrame();
     if (!framePixmap) // If it's too early we won't have an image yet.
@@ -119,6 +120,38 @@ void Image::drawPattern(GraphicsContext* ctxt, const FloatRect& tileRect, const 
         imageObserver()->didDraw(this);
 }
 
+BitmapImage::BitmapImage(QPixmap* pixmap, ImageObserver* observer)
+    : Image(observer)
+    , m_currentFrame(0)
+    , m_frames(0)
+    , m_frameTimer(0)
+    , m_repetitionCount(cAnimationNone)
+    , m_repetitionCountStatus(Unknown)
+    , m_repetitionsComplete(0)
+    , m_isSolidColor(false)
+    , m_checkedForSolidColor(false)
+    , m_animationFinished(true)
+    , m_allDataReceived(true)
+    , m_haveSize(true)
+    , m_sizeAvailable(true)
+    , m_decodedSize(0)
+    , m_haveFrameCount(true)
+    , m_frameCount(1)
+{
+    initPlatformData();
+
+    int width = pixmap->width();
+    int height = pixmap->height();
+    m_decodedSize = width * height * 4;
+    m_size = IntSize(width, height);
+
+    m_frames.grow(1);
+    m_frames[0].m_frame = pixmap;
+    m_frames[0].m_hasAlpha = pixmap->hasAlpha();
+    m_frames[0].m_haveMetadata = true;
+    checkForSolidColor();
+}
+
 void BitmapImage::initPlatformData()
 {
 }
@@ -129,7 +162,7 @@ void BitmapImage::invalidatePlatformData()
 
 // Drawing Routines
 void BitmapImage::draw(GraphicsContext* ctxt, const FloatRect& dst,
-                       const FloatRect& src, CompositeOperator op)
+                       const FloatRect& src, ColorSpace styleColorSpace, CompositeOperator op)
 {
     startAnimation();
 
@@ -138,7 +171,7 @@ void BitmapImage::draw(GraphicsContext* ctxt, const FloatRect& dst,
         return;
 
     if (mayFillWithSolidColor()) {
-        fillWithSolidColor(ctxt, dst, solidColor(), op);
+        fillWithSolidColor(ctxt, dst, solidColor(), styleColorSpace, op);
         return;
     }
 
@@ -179,6 +212,13 @@ void BitmapImage::checkForSolidColor()
     m_isSolidColor = true;
     m_solidColor = QColor::fromRgba(framePixmap->toImage().pixel(0, 0));
 }
+
+#if OS(WINDOWS)
+PassRefPtr<BitmapImage> BitmapImage::create(HBITMAP hBitmap)
+{
+    return BitmapImage::create(new QPixmap(QPixmap::fromWinHBITMAP(hBitmap)));
+}
+#endif
 
 }
 

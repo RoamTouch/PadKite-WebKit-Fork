@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -24,10 +24,15 @@
  */
 
 #include "config.h"
-#include "android_graphics.h"
+#include "PluginWidgetAndroid.h"
+
+#if ENABLE(TOUCH_EVENTS)
+#include "ChromeClient.h"
+#endif
 #include "Document.h"
 #include "Element.h"
 #include "Frame.h"
+#include "Page.h"
 #include "PluginPackage.h"
 #include "PluginView.h"
 #include "PluginWidgetAndroid.h"
@@ -35,7 +40,17 @@
 #include "SkANP.h"
 #include "SkFlipPixelRef.h"
 #include "SkString.h"
+#include "SkTime.h"
 #include "WebViewCore.h"
+#include "android_graphics.h"
+#include <JNIUtility.h>
+
+// #define PLUGIN_DEBUG_LOCAL // controls the printing of log messages
+#define DEBUG_EVENTS 0 // logs event contents, return value, and processing time
+#define DEBUG_VISIBLE_RECTS 0 // temporary debug printfs and fixes
+
+// this include statement must follow the declaration of PLUGIN_DEBUG_LOCAL
+#include "PluginDebugAndroid.h"
 
 PluginWidgetAndroid::PluginWidgetAndroid(WebCore::PluginView* view)
         : m_pluginView(view) {
@@ -45,30 +60,46 @@ PluginWidgetAndroid::PluginWidgetAndroid(WebCore::PluginView* view)
     m_eventFlags = 0;
     m_pluginWindow = NULL;
     m_requestedVisibleRectCount = 0;
-    m_requestedFrameRect.setEmpty();
+    m_requestedVisibleRect.setEmpty();
     m_visibleDocRect.setEmpty();
+    m_pluginBounds.setEmpty();
     m_hasFocus = false;
+    m_isFullScreen = false;
+    m_visible = true;
     m_zoomLevel = 0;
-    m_javaClassName = NULL;
-    m_childView = NULL;
+    m_embeddedView = NULL;
+    m_embeddedViewAttached = false;
+    m_acceptEvents = false;
+    m_isSurfaceClippedOut = false;
 }
 
 PluginWidgetAndroid::~PluginWidgetAndroid() {
+    PLUGIN_LOG("%p Deleting Plugin", m_pluginView->instance());
+    m_acceptEvents = false;
     if (m_core) {
         m_core->removePlugin(this);
-        if (m_childView) {
-            m_core->destroySurface(m_childView);
+        if (m_isFullScreen) {
+            exitFullScreen(true);
+        }
+        if (m_embeddedView) {
+            m_core->destroySurface(m_embeddedView);
         }
     }
-    if (m_javaClassName) {
-        free(m_javaClassName);
+
+    // cleanup any remaining JNI References
+    JNIEnv* env = JSC::Bindings::getJNIEnv();
+    if (m_embeddedView) {
+        env->DeleteGlobalRef(m_embeddedView);
     }
+
     m_flipPixelRef->safeUnref();
 }
 
 void PluginWidgetAndroid::init(android::WebViewCore* core) {
     m_core = core;
     m_core->addPlugin(this);
+    m_acceptEvents = true;
+    PLUGIN_LOG("%p Initialized Plugin", m_pluginView->instance());
 }
 
 static SkBitmap::Config computeConfig(bool isTransparent) {
@@ -77,78 +108,38 @@ static SkBitmap::Config computeConfig(bool isTransparent) {
 }
 
 void PluginWidgetAndroid::setWindow(NPWindow* window, bool isTransparent) {
+
+    // store the reference locally for easy lookup
     m_pluginWindow = window;
 
-    if (m_drawingModel == kSurface_ANPDrawingModel) {
-        if (!m_childView) {
-            IntPoint docPoint = frameToDocumentCoords(window->x, window->y);
+    // make a copy of the previous bounds
+    SkIRect oldPluginBounds = m_pluginBounds;
 
-            const String& libName = m_pluginView->plugin()->path();
-            SkString skLibName;
-            skLibName.setUTF16(libName.characters(), libName.length());
+    // keep a local copy of the plugin bounds because the m_pluginWindow pointer
+    // gets updated values prior to this method being called
+    m_pluginBounds.set(m_pluginWindow->x, m_pluginWindow->y,
+                       m_pluginWindow->x + m_pluginWindow->width,
+                       m_pluginWindow->y + m_pluginWindow->height);
 
-            m_childView = m_core->createSurface(skLibName.c_str(), m_javaClassName,
-                                                m_pluginView->instance(),
-                                                docPoint.x(), docPoint.y(),
-                                                window->width, window->height);
-        }
-    } else {
+    PLUGIN_LOG("%p PluginBounds (%d,%d,%d,%d)", m_pluginView->instance(),
+               m_pluginBounds.fLeft, m_pluginBounds.fTop,
+               m_pluginBounds.fRight, m_pluginBounds.fBottom);
+
+    layoutSurface(m_pluginBounds != oldPluginBounds);
+
+    if (m_drawingModel != kSurface_ANPDrawingModel) {
         m_flipPixelRef->safeUnref();
         m_flipPixelRef = new SkFlipPixelRef(computeConfig(isTransparent),
                                             window->width, window->height);
     }
 }
 
-bool PluginWidgetAndroid::setPluginStubJavaClassName(const char* className) {
-
-    if (m_javaClassName) {
-        free(m_javaClassName);
-    }
-
-    // don't call strdup() if the className is to be set to NULL
-    if (!className) {
-        m_javaClassName = NULL;
-        return true;
-    }
-
-    // make a local copy of the className
-    m_javaClassName = strdup(className);
-    return (m_javaClassName != NULL);
-}
-
-void PluginWidgetAndroid::requestFullScreenMode() {
-
-    if (!m_javaClassName) {
-        return;
-    }
-
-    const String& libName = m_pluginView->plugin()->path();
-    SkString skLibName;
-    skLibName.setUTF16(libName.characters(), libName.length());
-
-    m_core->startFullScreenPluginActivity(skLibName.c_str(), m_javaClassName,
-                                          m_pluginView->instance());
-}
-
 bool PluginWidgetAndroid::setDrawingModel(ANPDrawingModel model) {
-
-    // disallow the surface drawing model if no java class name has been given
-    if (model == kSurface_ANPDrawingModel && m_javaClassName == NULL) {
-        return false;
-    }
-
     m_drawingModel = model;
     return true;
 }
 
-void PluginWidgetAndroid::localToDocumentCoords(SkIRect* rect) const {
-    if (m_pluginWindow) {
-        IntPoint pluginDocCoords = frameToDocumentCoords(m_pluginWindow->x,
-                                                         m_pluginWindow->y);
-        rect->offset(pluginDocCoords.x(), pluginDocCoords.y());
-    }
-}
-
+// returned rect is in the page coordinate
 bool PluginWidgetAndroid::isDirty(SkIRect* rect) const {
     // nothing to report if we haven't had setWindow() called yet
     if (NULL == m_flipPixelRef) {
@@ -161,6 +152,7 @@ bool PluginWidgetAndroid::isDirty(SkIRect* rect) const {
     } else {
         if (rect) {
             *rect = dirty.getBounds();
+            rect->offset(m_pluginWindow->x, m_pluginWindow->y);
         }
         return true;
     }
@@ -208,8 +200,7 @@ void PluginWidgetAndroid::draw(SkCanvas* canvas) {
                 if (canvas && m_pluginWindow) {
                     SkBitmap bm(bitmap);
                     bm.setPixelRef(m_flipPixelRef);
-                    canvas->drawBitmap(bm, SkIntToScalar(m_pluginWindow->x),
-                                           SkIntToScalar(m_pluginWindow->y), NULL);
+                    canvas->drawBitmap(bm, 0, 0);
                 }
             }
             break;
@@ -219,26 +210,111 @@ void PluginWidgetAndroid::draw(SkCanvas* canvas) {
     }
 }
 
-bool PluginWidgetAndroid::sendEvent(const ANPEvent& evt) {
+void PluginWidgetAndroid::setSurfaceClip(const SkIRect& clip) {
+
+    if (m_drawingModel != kSurface_ANPDrawingModel)
+        return;
+
+    /* don't display surfaces that are either entirely clipped or only 1x1 in
+       size. It appears that when an element is absolutely positioned and has
+       been completely clipped in CSS that webkit still sends a clip of 1x1.
+     */
+    bool clippedOut = (clip.width() <= 1 && clip.height() <= 1);
+    if(clippedOut != m_isSurfaceClippedOut) {
+        m_isSurfaceClippedOut = clippedOut;
+        layoutSurface();
+    }
+}
+
+void PluginWidgetAndroid::layoutSurface(bool pluginBoundsChanged) {
+
+    if (m_drawingModel != kSurface_ANPDrawingModel)
+        return;
+    if (!m_pluginWindow)
+        return;
+
+
+    bool displayPlugin = m_pluginView->isVisible() && !m_isSurfaceClippedOut;
+    PLUGIN_LOG("%p DisplayPlugin[%d] visible=[%d] clipped=[%d]",
+            m_pluginView->instance(), displayPlugin,
+            m_pluginView->isVisible(), m_isSurfaceClippedOut);
+
+    // if the surface does not exist then create a new surface
+    if (!m_embeddedView && displayPlugin) {
+
+        WebCore::PluginPackage* pkg = m_pluginView->plugin();
+        NPP instance = m_pluginView->instance();
+
+        jobject pluginSurface;
+        pkg->pluginFuncs()->getvalue(instance, kJavaSurface_ANPGetValue,
+                                     static_cast<void*>(&pluginSurface));
+
+        jobject tempObj = m_core->addSurface(pluginSurface,
+                m_pluginWindow->x, m_pluginWindow->y,
+                m_pluginWindow->width, m_pluginWindow->height);
+
+        if (tempObj) {
+            JNIEnv* env = JSC::Bindings::getJNIEnv();
+            m_embeddedView = env->NewGlobalRef(tempObj);
+            m_embeddedViewAttached = true;
+        }
+    // if the view is unattached but visible then attach it
+    } else if (m_embeddedView && !m_embeddedViewAttached && displayPlugin && !m_isFullScreen) {
+        m_core->updateSurface(m_embeddedView, m_pluginWindow->x, m_pluginWindow->y,
+                              m_pluginWindow->width, m_pluginWindow->height);
+        m_embeddedViewAttached = true;
+    // if the view is attached but invisible then remove it
+    } else if (m_embeddedView && m_embeddedViewAttached && !displayPlugin) {
+        m_core->destroySurface(m_embeddedView);
+        m_embeddedViewAttached = false;
+    // if the plugin's bounds have changed and it's visible then update it
+    } else if (pluginBoundsChanged && displayPlugin && !m_isFullScreen) {
+        m_core->updateSurface(m_embeddedView, m_pluginWindow->x, m_pluginWindow->y,
+                              m_pluginWindow->width, m_pluginWindow->height);
+
+    }
+}
+
+int16 PluginWidgetAndroid::sendEvent(const ANPEvent& evt) {
+    if (!m_acceptEvents)
+        return 0;
     WebCore::PluginPackage* pkg = m_pluginView->plugin();
     NPP instance = m_pluginView->instance();
     // "missing" plugins won't have these
     if (pkg && instance) {
 
-        // keep track of whether or not the plugin currently has focus
-        if (evt.eventType == kLifecycle_ANPEventType) {
-           if (evt.data.lifecycle.action == kLoseFocus_ANPLifecycleAction)
-               m_hasFocus = false;
-           else if (evt.data.lifecycle.action == kGainFocus_ANPLifecycleAction)
-               m_hasFocus = true;
+        // if the plugin is gaining focus then update our state now to allow
+        // the plugin's event handler to perform actions that require focus
+        if (evt.eventType == kLifecycle_ANPEventType &&
+                evt.data.lifecycle.action == kGainFocus_ANPLifecycleAction) {
+            m_hasFocus = true;
         }
+
+#if DEBUG_EVENTS
+        SkMSec startTime = SkTime::GetMSecs();
+#endif
 
         // make a localCopy since the actual plugin may not respect its constness,
         // and so we don't want our caller to have its param modified
         ANPEvent localCopy = evt;
-        return pkg->pluginFuncs()->event(instance, &localCopy);
+        int16 result = pkg->pluginFuncs()->event(instance, &localCopy);
+
+#if DEBUG_EVENTS
+        SkMSec endTime = SkTime::GetMSecs();
+        PLUGIN_LOG_EVENT(instance, &evt, result, endTime - startTime);
+#endif
+
+        // if the plugin is losing focus then delay the update of our state
+        // until after we notify the plugin and allow them to perform actions
+        // that may require focus
+        if (evt.eventType == kLifecycle_ANPEventType &&
+                evt.data.lifecycle.action == kLoseFocus_ANPLifecycleAction) {
+            m_hasFocus = false;
+        }
+
+        return result;
     }
-    return false;
+    return 0;
 }
 
 void PluginWidgetAndroid::updateEventFlags(ANPEventFlags flags) {
@@ -248,13 +324,13 @@ void PluginWidgetAndroid::updateEventFlags(ANPEventFlags flags) {
         return;
     }
 
-    Document* doc = m_pluginView->getParentFrame()->document();
+    Document* doc = m_pluginView->parentFrame()->document();
+#if ENABLE(TOUCH_EVENTS)
     if((m_eventFlags ^ flags) & kTouch_ANPEventFlag) {
-        if(flags & kTouch_ANPEventFlag)
-            doc->addTouchEventListener(m_pluginView->getElement());
-        else
-            doc->removeTouchEventListener(m_pluginView->getElement());
+        if (flags & kTouch_ANPEventFlag)
+           doc->addListenerTypeIfNeeded(eventNames().touchstartEvent);
     }
+#endif
 
     m_eventFlags = flags;
 }
@@ -264,46 +340,93 @@ bool PluginWidgetAndroid::isAcceptingEvent(ANPEventFlag flag) {
 }
 
 void PluginWidgetAndroid::setVisibleScreen(const ANPRectI& visibleDocRect, float zoom) {
-
+#if DEBUG_VISIBLE_RECTS
+    PLUGIN_LOG("%s (%d,%d,%d,%d)[%f]", __FUNCTION__, visibleDocRect.left,
+            visibleDocRect.top, visibleDocRect.right,
+            visibleDocRect.bottom, zoom);
+#endif
     // TODO update the bitmap size based on the zoom? (for kBitmap_ANPDrawingModel)
 
     int oldScreenW = m_visibleDocRect.width();
     int oldScreenH = m_visibleDocRect.height();
 
-    m_visibleDocRect.set(visibleDocRect.left, visibleDocRect.top,
-                         visibleDocRect.right, visibleDocRect.bottom);
+    // make local copies of the parameters
+    m_zoomLevel = zoom;
+    m_visibleDocRect.set(visibleDocRect.left,
+                         visibleDocRect.top,
+                         visibleDocRect.right,
+                         visibleDocRect.bottom);
 
     int newScreenW = m_visibleDocRect.width();
     int newScreenH = m_visibleDocRect.height();
 
-    if (oldScreenW != newScreenW || oldScreenH != newScreenH)
-        computeVisibleFrameRect();
+    // if the screen dimensions have changed by more than 5 pixels in either
+    // direction then recompute the plugin's visible rectangle
+    if (abs(oldScreenW - newScreenW) > 5 || abs(oldScreenH - newScreenH) > 5) {
+        PLUGIN_LOG("%s VisibleDoc old=[%d,%d] new=[%d,%d] ", __FUNCTION__,
+                   oldScreenW, oldScreenH, newScreenW, newScreenH);
+        computeVisiblePluginRect();
+    }
+
+    bool visible = SkIRect::Intersects(m_visibleDocRect, m_pluginBounds);
+    if(m_visible != visible) {
+
+#if DEBUG_VISIBLE_RECTS
+        PLUGIN_LOG("%p changeVisiblity[%d] pluginBounds(%d,%d,%d,%d)",
+                   m_pluginView->instance(), visible,
+                   m_pluginBounds.fLeft, m_pluginBounds.fTop,
+                   m_pluginBounds.fRight, m_pluginBounds.fBottom);
+#endif
+
+        // change the visibility
+        m_visible = visible;
+        // send the event
+        ANPEvent event;
+        SkANP::InitEvent(&event, kLifecycle_ANPEventType);
+        event.data.lifecycle.action = visible ? kOnScreen_ANPLifecycleAction
+                                              : kOffScreen_ANPLifecycleAction;
+        sendEvent(event);
+    }
 }
 
 void PluginWidgetAndroid::setVisibleRects(const ANPRectI rects[], int32_t count) {
-
+#if DEBUG_VISIBLE_RECTS
+    PLUGIN_LOG("%s count=%d", __FUNCTION__, count);
+#endif
     // ensure the count does not exceed our allocated space
     if (count > MAX_REQUESTED_RECTS)
         count = MAX_REQUESTED_RECTS;
 
     // store the values in member variables
     m_requestedVisibleRectCount = count;
-    memcpy(m_requestedVisibleRect, rects, count * sizeof(rects[0]));
+    memcpy(m_requestedVisibleRects, rects, count * sizeof(rects[0]));
 
-    computeVisibleFrameRect();
+#if DEBUG_VISIBLE_RECTS // FIXME: this fixes bad data from the plugin
+    // take it out once plugin supplies better data
+    for (int index = 0; index < count; index++) {
+        PLUGIN_LOG("%s [%d](%d,%d,%d,%d)", __FUNCTION__, index,
+            m_requestedVisibleRects[index].left,
+            m_requestedVisibleRects[index].top,
+            m_requestedVisibleRects[index].right,
+            m_requestedVisibleRects[index].bottom);
+        if (m_requestedVisibleRects[index].left ==
+                m_requestedVisibleRects[index].right) {
+            m_requestedVisibleRects[index].right += 1;
+        }
+        if (m_requestedVisibleRects[index].top ==
+                m_requestedVisibleRects[index].bottom) {
+            m_requestedVisibleRects[index].bottom += 1;
+        }
+    }
+#endif
+    computeVisiblePluginRect();
 }
 
-void PluginWidgetAndroid::computeVisibleFrameRect() {
+void PluginWidgetAndroid::computeVisiblePluginRect() {
 
     // ensure the visibleDocRect has been set (i.e. not equal to zero)
-    if (m_visibleDocRect.isEmpty() || !m_pluginWindow)
+    if (m_visibleDocRect.isEmpty() || !m_pluginWindow || m_requestedVisibleRectCount < 1)
         return;
-
-    // create a rect that represents the plugin's bounds
-    SkIRect pluginBounds;
-    pluginBounds.set(m_pluginWindow->x, m_pluginWindow->y,
-                     m_pluginWindow->x + m_pluginWindow->width,
-                     m_pluginWindow->y + m_pluginWindow->height);
 
     // create a rect that will contain as many of the rects that will fit on screen
     SkIRect visibleRect;
@@ -311,83 +434,125 @@ void PluginWidgetAndroid::computeVisibleFrameRect() {
 
     for (int counter = 0; counter < m_requestedVisibleRectCount; counter++) {
 
-        ANPRectI* rect = &m_requestedVisibleRect[counter];
+        ANPRectI* rect = &m_requestedVisibleRects[counter];
 
-        // create skia rect for easier manipulation and convert it to frame coordinates
+        // create skia rect for easier manipulation and convert it to page coordinates
         SkIRect pluginRect;
         pluginRect.set(rect->left, rect->top, rect->right, rect->bottom);
         pluginRect.offset(m_pluginWindow->x, m_pluginWindow->y);
 
         // ensure the rect falls within the plugin's bounds
-        if (!pluginBounds.contains(pluginRect))
-          continue;
+        if (!m_pluginBounds.contains(pluginRect)) {
+#if DEBUG_VISIBLE_RECTS
+            PLUGIN_LOG("%s (%d,%d,%d,%d) !contain (%d,%d,%d,%d)", __FUNCTION__,
+                       m_pluginBounds.fLeft, m_pluginBounds.fTop,
+                       m_pluginBounds.fRight, m_pluginBounds.fBottom,
+                       pluginRect.fLeft, pluginRect.fTop,
+                       pluginRect.fRight, pluginRect.fBottom);
+            // assume that the desired outcome is to clamp to the container
+            if (pluginRect.intersect(m_pluginBounds)) {
+                visibleRect = pluginRect;
+            }
+#endif
+            continue;
+        }
 
         // combine this new rect with the higher priority rects
         pluginRect.join(visibleRect);
 
-        // check to see if the new rect fits within the screen bounds. If this
-        // is the highest priority rect then attempt to center even if it doesn't
-        // fit on the screen.
+        // check to see if the new rect could be made to fit within the screen
+        // bounds. If this is the highest priority rect then attempt to center
+        // even if it doesn't fit on the screen.
         if (counter > 0 && (m_visibleDocRect.width() < pluginRect.width() ||
-                               m_visibleDocRect.height() < pluginRect.height()))
+                            m_visibleDocRect.height() < pluginRect.height()))
           break;
 
         // set the new visible rect
         visibleRect = pluginRect;
     }
 
-    m_requestedFrameRect = visibleRect;
-    scrollToVisibleFrameRect();
+    m_requestedVisibleRect = visibleRect;
+    scrollToVisiblePluginRect();
 }
 
-void PluginWidgetAndroid::scrollToVisibleFrameRect() {
+void PluginWidgetAndroid::scrollToVisiblePluginRect() {
 
-    if (!m_hasFocus || m_requestedFrameRect.isEmpty() || m_visibleDocRect.isEmpty())
+    if (!m_hasFocus || m_requestedVisibleRect.isEmpty() || m_visibleDocRect.isEmpty()) {
+#if DEBUG_VISIBLE_RECTS
+        PLUGIN_LOG("%s call m_hasFocus=%d m_requestedVisibleRect.isEmpty()=%d"
+                " m_visibleDocRect.isEmpty()=%d", __FUNCTION__, m_hasFocus,
+                m_requestedVisibleRect.isEmpty(), m_visibleDocRect.isEmpty());
+#endif
         return;
-
-    // if the entire rect is already visible then we don't need to scroll, which
-    // requires converting the m_requestedFrameRect from frame to doc coordinates
-    IntPoint pluginDocPoint = frameToDocumentCoords(m_requestedFrameRect.fLeft,
-                                                    m_requestedFrameRect.fTop);
-    SkIRect requestedDocRect;
-    requestedDocRect.set(pluginDocPoint.x(), pluginDocPoint.y(),
-                         pluginDocPoint.x() + m_requestedFrameRect.width(),
-                         pluginDocPoint.y() + m_requestedFrameRect.height());
-
-    if (m_visibleDocRect.contains(requestedDocRect))
+    }
+    // if the entire rect is already visible then we don't need to scroll
+    if (m_visibleDocRect.contains(m_requestedVisibleRect))
         return;
 
     // find the center of the visibleRect in document coordinates
-    int rectCenterX = requestedDocRect.fLeft + requestedDocRect.width()/2;
-    int rectCenterY = requestedDocRect.fTop + requestedDocRect.height()/2;
+    int rectCenterX = m_requestedVisibleRect.fLeft + m_requestedVisibleRect.width()/2;
+    int rectCenterY = m_requestedVisibleRect.fTop + m_requestedVisibleRect.height()/2;
 
     // find document coordinates for center of the visible screen
-    int screenCenterX = m_visibleDocRect.fLeft + m_visibleDocRect.width()/2;
-    int screenCenterY = m_visibleDocRect.fTop + m_visibleDocRect.height()/2;
+    int visibleDocCenterX = m_visibleDocRect.fLeft + m_visibleDocRect.width()/2;
+    int visibleDocCenterY = m_visibleDocRect.fTop + m_visibleDocRect.height()/2;
 
-    //compute the delta of the two points
-    int deltaX = rectCenterX - screenCenterX;
-    int deltaY = rectCenterY - screenCenterY;
+    //compute the delta of the two points and scale to screen coordinates
+    int deltaX = rectCenterX - visibleDocCenterX;
+    int deltaY = rectCenterY - visibleDocCenterY;
 
     ScrollView* scrollView = m_pluginView->parent();
     android::WebViewCore* core = android::WebViewCore::getWebViewCore(scrollView);
+#if DEBUG_VISIBLE_RECTS
+    PLUGIN_LOG("%s call scrollBy (%d,%d)", __FUNCTION__, deltaX, deltaY);
+#endif
     core->scrollBy(deltaX, deltaY, true);
 }
 
-IntPoint PluginWidgetAndroid::frameToDocumentCoords(int frameX, int frameY) const {
-    IntPoint docPoint = IntPoint(frameX, frameY);
-
-    const ScrollView* currentScrollView = m_pluginView->parent();
-    if (currentScrollView) {
-        const ScrollView* parentScrollView = currentScrollView->parent();
-        while (parentScrollView) {
-
-            docPoint.move(currentScrollView->x(), currentScrollView->y());
-
-            currentScrollView = parentScrollView;
-            parentScrollView = parentScrollView->parent();
-        }
+void PluginWidgetAndroid::requestFullScreen() {
+    if (m_isFullScreen || !m_embeddedView) {
+        return;
     }
 
-    return docPoint;
+    // send event to notify plugin of full screen change
+    ANPEvent event;
+    SkANP::InitEvent(&event, kLifecycle_ANPEventType);
+    event.data.lifecycle.action = kEnterFullScreen_ANPLifecycleAction;
+    sendEvent(event);
+
+    // remove the embedded surface from the view hierarchy
+    m_core->destroySurface(m_embeddedView);
+
+    // add the full screen view
+    m_core->showFullScreenPlugin(m_embeddedView, m_pluginView->instance());
+    m_isFullScreen = true;
 }
+
+void PluginWidgetAndroid::exitFullScreen(bool pluginInitiated) {
+    if (!m_isFullScreen || !m_embeddedView) {
+        return;
+    }
+
+    // remove the full screen surface from the view hierarchy
+    if (pluginInitiated) {
+        m_core->hideFullScreenPlugin();
+    }
+
+    // add the embedded view back
+    m_core->updateSurface(m_embeddedView, m_pluginWindow->x, m_pluginWindow->y,
+                          m_pluginWindow->width, m_pluginWindow->height);
+
+    // send event to notify plugin of full screen change
+    ANPEvent event;
+    SkANP::InitEvent(&event, kLifecycle_ANPEventType);
+    event.data.lifecycle.action = kExitFullScreen_ANPLifecycleAction;
+    sendEvent(event);
+
+    m_isFullScreen = false;
+}
+
+void PluginWidgetAndroid::requestCenterFitZoom() {
+    m_core->centerFitRect(m_pluginWindow->x, m_pluginWindow->y,
+            m_pluginWindow->width, m_pluginWindow->height);
+}
+

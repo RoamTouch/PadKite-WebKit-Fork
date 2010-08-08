@@ -39,8 +39,6 @@ namespace WebCore {
     class ChildThreadDOMData : public DOMData {
     public:
         ChildThreadDOMData();
-        virtual ~ChildThreadDOMData() { }
-
         DOMDataStore& getStore();
 
     private:

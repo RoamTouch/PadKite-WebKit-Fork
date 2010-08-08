@@ -22,6 +22,7 @@
 #define WTF_FastMalloc_h
 
 #include "Platform.h"
+#include "PossiblyNull.h"
 #include <stdlib.h>
 #include <new>
 
@@ -32,12 +33,44 @@ namespace WTF {
     void* fastZeroedMalloc(size_t);
     void* fastCalloc(size_t numElements, size_t elementSize);
     void* fastRealloc(void*, size_t);
+    char* fastStrDup(const char*);
 
-    // These functions return 0 if an allocation fails.
-    void* tryFastMalloc(size_t);
-    void* tryFastZeroedMalloc(size_t);
-    void* tryFastCalloc(size_t numElements, size_t elementSize);
-    void* tryFastRealloc(void*, size_t);
+    struct TryMallocReturnValue {
+        TryMallocReturnValue(void* data)
+            : m_data(data)
+        {
+        }
+        TryMallocReturnValue(const TryMallocReturnValue& source)
+            : m_data(source.m_data)
+        {
+            source.m_data = 0;
+        }
+        ~TryMallocReturnValue() { ASSERT(!m_data); }
+        template <typename T> bool getValue(T& data) WARN_UNUSED_RETURN;
+        template <typename T> operator PossiblyNull<T>()
+        { 
+            T value; 
+            getValue(value); 
+            return PossiblyNull<T>(value);
+        } 
+    private:
+        mutable void* m_data;
+    };
+    
+    template <typename T> bool TryMallocReturnValue::getValue(T& data)
+    {
+        union u { void* data; T target; } res;
+        res.data = m_data;
+        data = res.target;
+        bool returnValue = !!m_data;
+        m_data = 0;
+        return returnValue;
+    }
+
+    TryMallocReturnValue tryFastMalloc(size_t n);
+    TryMallocReturnValue tryFastZeroedMalloc(size_t n);
+    TryMallocReturnValue tryFastCalloc(size_t n_elements, size_t element_size);
+    TryMallocReturnValue tryFastRealloc(void* p, size_t n);
 
     void fastFree(void*);
 
@@ -156,17 +189,18 @@ using WTF::tryFastZeroedMalloc;
 using WTF::tryFastCalloc;
 using WTF::tryFastRealloc;
 using WTF::fastFree;
+using WTF::fastStrDup;
 
 #ifndef NDEBUG    
 using WTF::fastMallocForbid;
 using WTF::fastMallocAllow;
 #endif
 
-#if COMPILER(GCC) && PLATFORM(DARWIN)
+#if COMPILER(GCC) && OS(DARWIN)
 #define WTF_PRIVATE_INLINE __private_extern__ inline __attribute__((always_inline))
 #elif COMPILER(GCC)
 #define WTF_PRIVATE_INLINE inline __attribute__((always_inline))
-#elif COMPILER(MSVC)
+#elif COMPILER(MSVC) || COMPILER(RVCT)
 #define WTF_PRIVATE_INLINE __forceinline
 #else
 #define WTF_PRIVATE_INLINE inline
@@ -181,14 +215,26 @@ using WTF::fastMallocAllow;
 // debug-only code to make sure we don't use the system malloc via the default operator
 // new by accident.
 
-WTF_PRIVATE_INLINE void* operator new(size_t size) { return fastMalloc(size); }
+// We musn't customize the global operator new and delete for the Qt port.
+#if !PLATFORM(QT)
+
+#if COMPILER(MSVC)
+#pragma warning(push)
+#pragma warning(disable: 4290) // Disable the C++ exception specification ignored warning.
+#endif
+WTF_PRIVATE_INLINE void* operator new(size_t size) throw (std::bad_alloc) { return fastMalloc(size); }
 WTF_PRIVATE_INLINE void* operator new(size_t size, const std::nothrow_t&) throw() { return fastMalloc(size); }
-WTF_PRIVATE_INLINE void operator delete(void* p) { fastFree(p); }
+WTF_PRIVATE_INLINE void operator delete(void* p) throw() { fastFree(p); }
 WTF_PRIVATE_INLINE void operator delete(void* p, const std::nothrow_t&) throw() { fastFree(p); }
-WTF_PRIVATE_INLINE void* operator new[](size_t size) { return fastMalloc(size); }
+WTF_PRIVATE_INLINE void* operator new[](size_t size) throw (std::bad_alloc) { return fastMalloc(size); }
 WTF_PRIVATE_INLINE void* operator new[](size_t size, const std::nothrow_t&) throw() { return fastMalloc(size); }
-WTF_PRIVATE_INLINE void operator delete[](void* p) { fastFree(p); }
+WTF_PRIVATE_INLINE void operator delete[](void* p) throw() { fastFree(p); }
 WTF_PRIVATE_INLINE void operator delete[](void* p, const std::nothrow_t&) throw() { fastFree(p); }
+#if COMPILER(MSVC)
+#pragma warning(pop)
+#endif
+
+#endif
 
 #endif
 

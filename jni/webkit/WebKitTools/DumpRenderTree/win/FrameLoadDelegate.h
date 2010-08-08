@@ -35,12 +35,16 @@
 class AccessibilityController;
 class GCController;
 
-class FrameLoadDelegate : public IWebFrameLoadDelegate, public IWebFrameLoadDelegatePrivate {
+class FrameLoadDelegate : public IWebFrameLoadDelegate, public IWebFrameLoadDelegatePrivate2 {
 public:
     FrameLoadDelegate();
     virtual ~FrameLoadDelegate();
 
     void processWork();
+
+    void resetToConsistentState();
+
+    AccessibilityController* accessibilityController() const { return m_accessibilityController.get(); }
 
     // IUnknown
     virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppvObject);
@@ -131,7 +135,32 @@ public:
         /* [in] */ IWebView *sender,
         /* [in] */ IWebFrame *frame);
 
-protected:
+    // IWebFrameLoadDelegatePrivate2
+    virtual HRESULT STDMETHODCALLTYPE didDisplayInsecureContent( 
+        /* [in] */ IWebView *sender);
+
+    virtual HRESULT STDMETHODCALLTYPE didRunInsecureContent( 
+        /* [in] */ IWebView *sender,
+        /* [in] */ IWebSecurityOrigin *origin);
+
+    virtual HRESULT STDMETHODCALLTYPE didClearWindowObjectForFrameInScriptWorld(IWebView*, IWebFrame*, IWebScriptWorld*);
+
+    virtual HRESULT STDMETHODCALLTYPE didPushStateWithinPageForFrame( 
+        /* [in] */ IWebView *sender,
+        /* [in] */ IWebFrame *frame) { return E_NOTIMPL; } 
+    
+    virtual HRESULT STDMETHODCALLTYPE didReplaceStateWithinPageForFrame( 
+        /* [in] */ IWebView *sender,
+        /* [in] */ IWebFrame *frame) { return E_NOTIMPL; } 
+
+    virtual HRESULT STDMETHODCALLTYPE didPopStateWithinPageForFrame( 
+        /* [in] */ IWebView *sender,
+        /* [in] */ IWebFrame *frame) { return E_NOTIMPL; } 
+
+private:
+    void didClearWindowObjectForFrameInIsolatedWorld(IWebFrame*, IWebScriptWorld*);
+    void didClearWindowObjectForFrameInStandardWorld(IWebFrame*);
+
     void locationChangeDone(IWebError*, IWebFrame*);
 
     ULONG m_refCount;

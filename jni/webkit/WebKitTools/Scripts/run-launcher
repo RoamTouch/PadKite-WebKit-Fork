@@ -49,6 +49,8 @@ if (isQt()) {
     my $libDir = catdir(productDir(), 'lib');
     $launcherPath = catdir($launcherPath, "bin", "QtLauncher");
 
+    $ENV{QTWEBKIT_PLUGIN_PATH} = catdir($libDir, 'plugins');
+
     print "Starting webkit launcher, running against the built WebKit in $libDir...\n";
     if (isDarwin()) {
         $ENV{DYLD_LIBRARY_PATH} = $ENV{DYLD_LIBRARY_PATH} ? "$libDir:$ENV{DYLD_LIBRARY_PATH}" : $libDir;
@@ -60,6 +62,15 @@ if (isQt()) {
 
     if (isGtk()) {
         $launcherPath = catdir($launcherPath, "Programs", "GtkLauncher");
+    }
+    
+    if (isWx()) {
+        if (isDarwin()) {
+            $launcherPath = catdir($launcherPath, 'wxBrowser.app', 'Contents', 'MacOS', 'wxBrowser');
+        } else {
+            $ENV{LD_LIBRARY_PATH} = $ENV{LD_LIBRARY_PATH} ? "$productDir:$ENV{LD_LIBRARY_PATH}" : $productDir;
+            $launcherPath = catdir($launcherPath, 'wxBrowser');
+        }
     }
 
     print "Starting webkit launcher.\n";

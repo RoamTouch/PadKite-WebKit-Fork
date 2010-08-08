@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -28,6 +28,7 @@
 
 #include "android_npapi.h"
 #include "IntPoint.h"
+#include "IntRect.h"
 #include "SkRect.h"
 #include <jni.h>
 
@@ -67,26 +68,19 @@ struct PluginWidgetAndroid {
      */
     void setWindow(NPWindow* window, bool isTransparent);
 
-    /* Called to notify us of the plugin's java class that implements the
-     * PluginStub interface. A local copy is made of the className so the caller
-     * can safely free the memory as soon as the function returns.
-     */
-    bool setPluginStubJavaClassName(const char* className);
-
     /*  Called whenever the plugin itself requests a new drawing model. If the
         hardware does not support the requested model then false is returned,
         otherwise true is returned.
      */
     bool setDrawingModel(ANPDrawingModel);
 
-    /*  Utility method to convert from local (plugin) coordinates to document
-        coordinates. Needed (for instance) to convert the dirty rectangle into
-        document coordinates to inturn inval the screen.
+    /*  Called to check if the plugin is running in "windowed" mode (i.e. surface
+        view).
      */
-    void localToDocumentCoords(SkIRect*) const;
+    bool isSurfaceDrawingModel() const { return kSurface_ANPDrawingModel == m_drawingModel; }
 
-    /*  Returns true (and optionally updates rect with the dirty bounds) if
-        the plugin has invalidate us.
+    /*  Returns true (and optionally updates rect with the dirty bounds in the
+        page coordinate) if the plugin has invalidate us.
      */
     bool isDirty(SkIRect* dirtyBounds = NULL) const;
     /*  Called by PluginView to invalidate a portion of the plugin area (in
@@ -100,10 +94,10 @@ struct PluginWidgetAndroid {
      */
     void draw(SkCanvas* canvas = NULL);
 
-    /*  Send this event to the plugin instance, and return true if the plugin
-        handled it.
+    /*  Send this event to the plugin instance. A non-zero value will be
+        returned if the plugin handled the event.
      */
-    bool sendEvent(const ANPEvent&);
+    int16 sendEvent(const ANPEvent&);
 
     /*  Update the plugins event flags. If a flag is set to true then the plugin
         wants to be notified of events of this type.
@@ -131,16 +125,47 @@ struct PluginWidgetAndroid {
      */
     void setVisibleRects(const ANPRectI rects[], int32_t count);
 
-    /** Called when a plugin wishes to enter into full screen mode. The plugin's
-        Java class (set using setPluginStubJavaClassName(...)) will be called
-        asynchronously to provide a View to be displayed in full screen.
+    /** Called when a plugin wishes to enter into full screen mode. It invokes
+        the plugin's Java class (defined in the plugin's apk manifest), which is
+        called asynchronously and provides a View to be displayed full screen.
      */
-    void requestFullScreenMode();
+    void requestFullScreen();
+
+    /** Called when a plugin wishes to exit from full screen mode. As a result,
+        the plugin's full-screen view is discarded by the view system. It is also
+        called in order to notify the native code that the browser has discarded
+        the view.
+     */
+    void exitFullScreen(bool pluginInitiated);
+
+    bool inFullScreen() { return m_isFullScreen; }
+
+    /** Called to check if a plugin currently has document focus, which is
+        required for certain operations (e.g. show/hide keyboard). It returns
+        true if the plugin currently has focus and false otherwise.
+     */
+    bool hasFocus() const { return m_hasFocus; }
+
+    /** Called to ensure the surface is being correctly displayed within the
+        view hierarchy. For instance, if the visibility of the plugin has
+        changed then we need to ensure the surface is added or removed from the
+        view system.
+     */
+    void layoutSurface(bool pluginBoundsChanged = false);
+
+    /** send the surface the currently visible portion of the plugin. This is not
+        the portion of the plugin visible on the screen but rather the portion of
+        the plugin that is not obscured by other HTML content.
+     */
+    void setSurfaceClip(const SkIRect& clip);
+
+    /** Called when a plugin wishes to be zoomed and centered in the current view.
+     */
+    void requestCenterFitZoom();
 
 private:
-    WebCore::IntPoint frameToDocumentCoords(int frameX, int frameY) const;
-    void computeVisibleFrameRect();
-    void scrollToVisibleFrameRect();
+    void computeVisiblePluginRect();
+    void scrollToVisiblePluginRect();
 
     WebCore::PluginView*    m_pluginView;
     android::WebViewCore*   m_core;
@@ -148,12 +173,17 @@ private:
     ANPDrawingModel         m_drawingModel;
     ANPEventFlags           m_eventFlags;
     NPWindow*               m_pluginWindow;
-    SkIRect                 m_visibleDocRect;
-    SkIRect                 m_requestedFrameRect;
+    SkIRect                 m_pluginBounds; // relative to the page
+    SkIRect                 m_visibleDocRect; // relative to the page
+    SkIRect                 m_requestedVisibleRect; // relative to the page
     bool                    m_hasFocus;
+    bool                    m_isFullScreen;
+    bool                    m_visible;
     float                   m_zoomLevel;
-    char*                   m_javaClassName;
-    jobject                 m_childView;
+    jobject                 m_embeddedView;
+    bool                    m_embeddedViewAttached;
+    bool                    m_acceptEvents;
+    bool                    m_isSurfaceClippedOut;
 
     /* We limit the number of rectangles to minimize storage and ensure adequate
        speed.
@@ -162,7 +192,7 @@ private:
         MAX_REQUESTED_RECTS = 5,
     };
 
-    ANPRectI                m_requestedVisibleRect[MAX_REQUESTED_RECTS];
+    ANPRectI                m_requestedVisibleRects[MAX_REQUESTED_RECTS];
     int32_t                 m_requestedVisibleRectCount;
 };
 

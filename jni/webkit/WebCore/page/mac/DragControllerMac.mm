@@ -26,6 +26,7 @@
 #import "config.h"
 #import "DragController.h"
 
+#if ENABLE(DRAG_SUPPORT)
 #import "DragData.h"
 #import "Frame.h"
 #import "FrameView.h"
@@ -40,6 +41,20 @@ const int DragController::DragIconRightInset = 7;
 const int DragController::DragIconBottomInset = 3;
 
 const float DragController::DragImageAlpha = 0.75f;
+
+#if ENABLE(EXPERIMENTAL_SINGLE_VIEW_MODE)
+
+DragOperation DragController::dragOperation(DragData*)
+{
+    return DragOperationNone;
+} 
+
+bool DragController::isCopyKeyDown()
+{
+    return false;
+}
+
+#else
 
 bool DragController::isCopyKeyDown()
 {
@@ -57,7 +72,9 @@ DragOperation DragController::dragOperation(DragData* dragData)
         return DragOperationCopy;
 
     return DragOperationNone;
-} 
+}
+
+#endif
 
 const IntSize& DragController::maxDragImageSize()
 {
@@ -75,4 +92,6 @@ void DragController::cleanupAfterSystemDrag()
     dragEnded();
 }
 
-}
+} // namespace WebCore
+
+#endif // ENABLE(DRAG_SUPPORT)

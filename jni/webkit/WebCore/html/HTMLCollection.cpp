@@ -27,6 +27,7 @@
 #include "HTMLElement.h"
 #include "HTMLNames.h"
 #include "HTMLObjectElement.h"
+#include "HTMLOptionElement.h"
 #include "NodeList.h"
 
 #include <utility>
@@ -104,6 +105,7 @@ Element* HTMLCollection::itemAfter(Element* previous) const
         case MapAreas:
         case OtherCollection:
         case SelectOptions:
+        case DataListOptions:
         case WindowNamedItems:
             break;
         case NodeChildren:
@@ -152,6 +154,13 @@ Element* HTMLCollection::itemAfter(Element* previous) const
             case SelectOptions:
                 if (e->hasLocalName(optionTag))
                     return e;
+                break;
+            case DataListOptions:
+                if (e->hasLocalName(optionTag)) {
+                    HTMLOptionElement* option = static_cast<HTMLOptionElement*>(e);
+                    if (!option->disabled() && !option->value().isEmpty())
+                        return e;
+                }
                 break;
             case MapAreas:
                 if (e->hasLocalName(areaTag))
@@ -242,15 +251,15 @@ Node* HTMLCollection::firstItem() const
 Node* HTMLCollection::nextItem() const
 {
      resetCollectionInfo();
-     
+ 
 #ifdef ANDROID_FIX
-     // resetCollectionInfo() can set info->current to be 0. If this is the 
-     // case, we need to go back to the firstItem. Otherwise traverseNextItem 
+     // resetCollectionInfo() can set info->current to be 0. If this is the
+     // case, we need to go back to the firstItem. Otherwise traverseNextItem
      // will crash.
      if (!m_info->current)
          return firstItem();
 #endif
-     
+
      // Look for the 'second' item. The first one is currentItem, already given back.
      Element* retval = itemAfter(m_info->current);
      m_info->current = retval;
@@ -265,7 +274,7 @@ bool HTMLCollection::checkForNameMatch(Element* element, bool checkName, const A
     
     HTMLElement* e = static_cast<HTMLElement*>(element);
     if (!checkName)
-        return e->getAttribute(idAttr) == name;
+        return e->getAttribute(e->idAttributeName()) == name;
 
     // document.all returns only images, forms, applets, objects and embeds
     // by name (though everything by id)
@@ -276,7 +285,7 @@ bool HTMLCollection::checkForNameMatch(Element* element, bool checkName, const A
           e->hasLocalName(selectTag)))
         return false;
 
-    return e->getAttribute(nameAttr) == name && e->getAttribute(idAttr) != name;
+    return e->getAttribute(nameAttr) == name && e->getAttribute(e->idAttributeName()) != name;
 }
 
 Node* HTMLCollection::namedItem(const AtomicString& name) const
@@ -318,7 +327,7 @@ void HTMLCollection::updateNameCache() const
         if (!element->isHTMLElement())
             continue;
         HTMLElement* e = static_cast<HTMLElement*>(element);
-        const AtomicString& idAttrVal = e->getAttribute(idAttr);
+        const AtomicString& idAttrVal = e->getAttribute(e->idAttributeName());
         const AtomicString& nameAttrVal = e->getAttribute(nameAttr);
         if (!idAttrVal.isEmpty()) {
             // add to id cache
@@ -357,7 +366,8 @@ void HTMLCollection::namedItems(const AtomicString& name, Vector<RefPtr<Node> >&
 
     resetCollectionInfo();
     updateNameCache();
-    
+    m_info->checkConsistency();
+
     Vector<Element*>* idResults = m_info->idCache.get(name.impl());
     Vector<Element*>* nameResults = m_info->nameCache.get(name.impl());
     
@@ -372,6 +382,7 @@ void HTMLCollection::namedItems(const AtomicString& name, Vector<RefPtr<Node> >&
 Node* HTMLCollection::nextNamedItem(const AtomicString& name) const
 {
     resetCollectionInfo();
+    m_info->checkConsistency();
 
     for (Element* e = itemAfter(m_info->current); e; e = itemAfter(e)) {
         if (checkForNameMatch(e, m_idsDone, name)) {

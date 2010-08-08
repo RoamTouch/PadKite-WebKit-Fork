@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -52,8 +52,8 @@ public:
     void setDidFirstLayout(bool did) { mDidFirstLayout = did; }
     void setMouseBounds(const WebCore::IntRect& loc) { mMouseBounds = loc; }
     void setNavBounds(const WebCore::IntRect& loc) { mNavBounds = loc; }
-    void setWorking(CachedFrame::Direction , const CachedNode* focus,
-        const WebCore::IntRect& viewBounds);
+    void setWorking(CachedFrame::Direction , const CachedFrame* ,
+        const CachedNode* , const WebCore::IntRect& viewBounds);
     void reset();
 private:
     void pinMaxMin(const WebCore::IntRect& viewBounds);

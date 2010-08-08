@@ -5,43 +5,45 @@
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
- * 1. Redistributions of source code must retain the above copyright
+ *  * Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
+ *  * Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE COMPUTER, INC. ``AS IS'' AND ANY
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include "config.h"
+#include "PluginPackage.h"
 
 #ifdef ANDROID_PLUGINS
 
-#define LOG_TAG "WebKit"
-
-#include "config.h"
-#include "PluginDatabase.h"
-#include "PluginPackage.h"
-
-#include "Timer.h"
-#include "PlatformString.h"
-#include "PluginMainThreadScheduler.h"
 #include "CString.h"
-#include "jni_utility.h"
-#include "npruntime_impl.h"
+#include "JNIUtility.h"
+#include "PlatformString.h"
+#include "PluginDatabase.h"
+#include "PluginMainThreadScheduler.h"
+#include "Timer.h"
 #include "npfunctions.h"
+#include "npruntime_impl.h"
 #include <dlfcn.h>
 #include <errno.h>
 
+// un-comment this to enable logging
+//#define PLUGIN_DEBUG_LOCAL
+#define LOG_TAG "WebKit"
+#include "NotImplemented.h"
 #include "PluginDebug.h"
 #include "PluginDebugAndroid.h"
 
@@ -105,17 +107,6 @@ static bool getEntryPoint(PlatformModule module,
                    name, error);
         return false;
     }
-}
-
-int PluginPackage::compareFileVersion(
-        const PlatformModuleVersion& compareVersion) const
-{
-    // return -1, 0, or 1 if plug-in version is less than, equal to,
-    // or greater than the passed version
-    if (m_moduleVersion != compareVersion)
-        return m_moduleVersion > compareVersion ? 1 : -1;
-    else
-        return 0;
 }
 
 bool PluginPackage::isPluginBlacklisted()
@@ -199,45 +190,6 @@ static void initializeExtraBrowserFuncs(NPNetscapeFuncs *funcs)
     funcs->enumerate = _NPN_Enumerate;
 }
 
-static jobject createPluginObject(const char *name,
-                                  const char *path,
-                                  const char *fileName,
-                                  const char *description)
-{
-    JNIEnv *env = JSC::Bindings::getJNIEnv();
-    // Create a Java "class Plugin" object instance
-    jclass pluginClass = env->FindClass("android/webkit/Plugin");
-    if(!pluginClass) {
-        PLUGIN_LOG("Couldn't find class android.webkit.Plugin\n");
-        return 0;
-    }
-    // Get Plugin(String, String, String, String, Context)
-    jmethodID pluginConstructor = env->GetMethodID(
-            pluginClass,
-            "<init>",
-            "(Ljava/lang/String;"
-            "Ljava/lang/String;"
-            "Ljava/lang/String;"
-            "Ljava/lang/String;)V");
-    if(!pluginConstructor) {
-        PLUGIN_LOG("Couldn't get android.webkit.Plugin constructor\n");
-        return 0;
-    }
-    // Make Java strings of name, path, fileName, description
-    jstring javaName = env->NewStringUTF(name);
-    jstring javaPath = env->NewStringUTF(path);
-    jstring javaFileName = env->NewStringUTF(fileName);
-    jstring javaDescription = env->NewStringUTF(description);
-    // Make a plugin instance
-    jobject pluginObject = env->NewObject(pluginClass,
-                                          pluginConstructor,
-                                          javaName,
-                                          javaPath,
-                                          javaFileName,
-                                          javaDescription);
-    return pluginObject;
-}
-
 bool PluginPackage::load()
 {
     PLUGIN_LOG("tid:%d isActive:%d isLoaded:%d loadCount:%d\n",
@@ -295,8 +247,7 @@ bool PluginPackage::load()
     m_pluginFuncs.size = sizeof(m_pluginFuncs);
     if(NP_Initialize(&m_browserFuncs,
                      &m_pluginFuncs,
-                     JSC::Bindings::getJNIEnv(),
-                     m_pluginObject) != NPERR_NO_ERROR) {
+                     JSC::Bindings::getJNIEnv()) != NPERR_NO_ERROR) {
         PLUGIN_LOG("Couldn't initialize plugin\n");
         return false;
     }
@@ -403,22 +354,6 @@ bool PluginPackage::fetchInfo()
         if(!description.isEmpty())
             m_mimeToDescriptions.set(mimeType, description);
     }
-
-    // Create a new Java Plugin object, this object is an instance of
-    // android.os.WebView.Plugin
-    CString path = m_path.utf8();
-    CString filename = m_fileName.utf8();
-    jobject pluginObject = createPluginObject(name,
-                                              path.data(),
-                                              filename.data(),
-                                              description);
-    if(!pluginObject) {
-        PLUGIN_LOG("Couldn't create Java Plugin\n");
-        return false;
-    }
-
-    // Retain the Java Plugin object
-    m_pluginObject = JSC::Bindings::getJNIEnv()->NewGlobalRef(pluginObject);
 
     PLUGIN_LOG("Fetch Info Loaded plugin details ok \"%s\"\n",
             m_path.utf8().data());

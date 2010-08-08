@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -22,37 +22,23 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
 #define LOG_TAG "webcoreglue"
 
 #include "config.h"
+#include "WebCoreJni.h"
 
 #include "NotImplemented.h"
-#include "WebCoreJni.h"
-#include "jni_utility.h"
+#include <JNIUtility.h>
 #include <jni.h>
 #include <utils/Log.h>
 
 namespace android {
 
-// Class, constructor, and get method on WeakReference
-jclass    gWeakRefClass;
-jmethodID gWeakRefInit;
-jmethodID gWeakRefGet;
-
-jobject adoptGlobalRef(JNIEnv* env, jobject obj)
-{
-    // Create a WeakReference object
-    jobject ref = env->NewObject(gWeakRefClass, gWeakRefInit, obj);
-    // Increment the ref count of the WeakReference
-    ref = env->NewGlobalRef(ref);
-    return ref;
-}
-
 AutoJObject getRealObject(JNIEnv* env, jobject obj)
 {
-    jobject real = env->CallObjectMethod(obj, gWeakRefGet);
-    if (!real)
-        LOGE("The real object has been deleted");
+    jobject real = env->NewLocalRef(obj);
+    LOG_ASSERT(real, "The real object has been deleted!");
     return AutoJObject(env, real);
 }
 
@@ -83,22 +69,6 @@ WebCore::String to_string(JNIEnv* env, jstring str)
     env->ReleaseStringChars(str, s);
     checkException(env);
     return ret;
-}
-
-int register_webcorejni(JNIEnv* env) {
-    // Instantiate the WeakReference fields.
-    jclass weakRef = env->FindClass("java/lang/ref/WeakReference");
-    LOG_ASSERT(weakRef, "Could not find WeakReference");
-    android::gWeakRefClass = (jclass)env->NewGlobalRef(weakRef);
-    android::gWeakRefInit = env->GetMethodID(android::gWeakRefClass,
-            "<init>", "(Ljava/lang/Object;)V");
-    LOG_ASSERT(android::gWeakRefInit,
-            "Could not find constructor for WeakReference");
-    android::gWeakRefGet = env->GetMethodID(android::gWeakRefClass, "get",
-            "()Ljava/lang/Object;");
-    LOG_ASSERT(android::gWeakRefInit,
-            "Could not find get method for WeakReference");
-    return JNI_OK;
 }
 
 }

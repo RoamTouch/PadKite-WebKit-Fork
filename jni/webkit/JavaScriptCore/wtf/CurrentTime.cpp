@@ -33,7 +33,7 @@
 #include "config.h"
 #include "CurrentTime.h"
 
-#if PLATFORM(WIN_OS)
+#if OS(WINDOWS)
 
 // Windows is first since we want to use hires timers, despite PLATFORM(CF)
 // being defined.
@@ -45,7 +45,7 @@
 #include <time.h>
 
 #if USE(QUERY_PERFORMANCE_COUNTER)
-#if PLATFORM(WINCE)
+#if OS(WINCE)
 extern "C" time_t mktime(struct tm *t);
 #else
 #include <sys/timeb.h>
@@ -59,15 +59,21 @@ extern "C" time_t mktime(struct tm *t);
 #include <glib.h>
 #elif PLATFORM(WX)
 #include <wx/datetime.h>
+#elif PLATFORM(BREWMP)
+#include <AEEStdLib.h>
 #else // Posix systems relying on the gettimeofday()
 #include <sys/time.h>
+#endif
+
+#if PLATFORM(CHROMIUM)
+#error Chromium uses a different timer implementation
 #endif
 
 namespace WTF {
 
 const double msPerSecond = 1000.0;
 
-#if PLATFORM(WIN_OS)
+#if OS(WINDOWS)
 
 #if USE(QUERY_PERFORMANCE_COUNTER)
 
@@ -119,7 +125,7 @@ static double highResUpTime()
 
 static double lowResUTCTime()
 {
-#if PLATFORM(WINCE)
+#if OS(WINCE)
     SYSTEMTIME systemTime;
     GetSystemTime(&systemTime);
     struct tm tmtime;
@@ -273,6 +279,20 @@ double currentTime()
     return (double)now.GetTicks() + (double)(now.GetMillisecond() / 1000.0);
 }
 
+#elif PLATFORM(BREWMP)
+
+// GETUTCSECONDS returns the number of seconds since 1980/01/06 00:00:00 UTC,
+// and GETTIMEMS returns the number of milliseconds that have elapsed since the last
+// occurrence of 00:00:00 local time.
+// We can combine GETUTCSECONDS and GETTIMEMS to calculate the number of milliseconds
+// since 1970/01/01 00:00:00 UTC.
+double currentTime()
+{
+    // diffSeconds is the number of seconds from 1970/01/01 to 1980/01/06
+    const unsigned diffSeconds = 315964800;
+    return static_cast<double>(diffSeconds + GETUTCSECONDS() + ((GETTIMEMS() % 1000) / msPerSecond));
+}
+
 #else // Other Posix systems rely on the gettimeofday().
 
 double currentTime()
@@ -282,26 +302,6 @@ double currentTime()
 
     gettimeofday(&now, &zone);
     return static_cast<double>(now.tv_sec) + (double)(now.tv_usec / 1000000.0);
-}
-
-#endif
-
-#if PLATFORM(ANDROID)
-
-uint32_t get_thread_msec()
-{
-#if defined(HAVE_POSIX_CLOCKS)
-    struct timespec tm;
-
-    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &tm);
-    return tm.tv_sec * 1000LL + tm.tv_nsec / 1000000;
-#else
-    struct timeval now;
-    struct timezone zone;
-
-    gettimeofday(&now, &zone);
-    return now.tv_sec * 1000LL + now.tv_usec / 1000;
-#endif
 }
 
 #endif

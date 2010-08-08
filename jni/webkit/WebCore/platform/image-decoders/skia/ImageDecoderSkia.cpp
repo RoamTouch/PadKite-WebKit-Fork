@@ -26,8 +26,7 @@
 
 #include "config.h"
 #include "ImageDecoder.h"
-
-#if PLATFORM(SGL)
+#if PLATFORM(ANDROID)
 #include "SkBitmapRef.h"
 #endif
 
@@ -71,11 +70,8 @@ bool RGBA32Buffer::setSize(int newWidth, int newHeight)
     // otherwise.
     ASSERT(width() == 0 && height() == 0);
     m_bitmap.setConfig(SkBitmap::kARGB_8888_Config, newWidth, newHeight);
-    if (!m_bitmap.allocPixels()) {
-        // Allocation failure, maybe the bitmap was too big.
-        setStatus(FrameComplete);
+    if (!m_bitmap.allocPixels())
         return false;
-    }
 
     // Zero the image.
     zeroFill();
@@ -85,7 +81,7 @@ bool RGBA32Buffer::setSize(int newWidth, int newHeight)
 
 NativeImagePtr RGBA32Buffer::asNewNativeImage() const
 {
-#if PLATFORM(SGL)
+#if PLATFORM(ANDROID)
     return new SkBitmapRef(m_bitmap);
 #else
     return new NativeImageSkia(m_bitmap);

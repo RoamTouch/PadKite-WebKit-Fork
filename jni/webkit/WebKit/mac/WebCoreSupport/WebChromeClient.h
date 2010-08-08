@@ -53,6 +53,8 @@ public:
     virtual bool canTakeFocus(WebCore::FocusDirection);
     virtual void takeFocus(WebCore::FocusDirection);
 
+    virtual void focusedNodeChanged(WebCore::Node*);
+
     virtual WebCore::Page* createWindow(WebCore::Frame*, const WebCore::FrameLoadRequest&, const WebCore::WindowFeatures&);
     virtual void show();
 
@@ -93,12 +95,13 @@ public:
     virtual void scroll(const WebCore::IntSize& scrollDelta, const WebCore::IntRect& rectToScroll, const WebCore::IntRect& clipRect);
     virtual WebCore::IntPoint screenToWindow(const WebCore::IntPoint&) const;
     virtual WebCore::IntRect windowToScreen(const WebCore::IntRect&) const;
-    virtual PlatformWidget platformWindow() const;
+    virtual PlatformPageClient platformPageClient() const;
     virtual void contentsSizeChanged(WebCore::Frame*, const WebCore::IntSize&) const;
     virtual void scrollRectIntoView(const WebCore::IntRect&, const WebCore::ScrollView*) const;
     
     virtual void setStatusbarText(const WebCore::String&);
 
+    virtual void scrollbarsModeDidChange() const { }
     virtual void mouseDidMoveOverElement(const WebCore::HitTestResult&, unsigned modifierFlags);
 
     virtual void setToolTip(const WebCore::String&, WebCore::TextDirection);
@@ -149,7 +152,14 @@ public:
     virtual void scheduleCompositingLayerSync();
 #endif
 
+#if ENABLE(VIDEO)
+    virtual bool supportsFullscreenForNode(const WebCore::Node*);
+    virtual void enterFullscreenForNode(WebCore::Node*);
+    virtual void exitFullscreenForNode(WebCore::Node*);
+#endif
+
     virtual void requestGeolocationPermissionForFrame(WebCore::Frame*, WebCore::Geolocation*);
+    virtual void cancelGeolocationPermissionRequestForFrame(WebCore::Frame*) { }
 
 private:
     WebView *m_webView;

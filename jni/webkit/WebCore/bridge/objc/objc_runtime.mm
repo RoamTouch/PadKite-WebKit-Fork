@@ -174,7 +174,7 @@ JSValue ObjcArray::valueAt(ExecState* exec, unsigned int index) const
     @try {
         id obj = [_array.get() objectAtIndex:index];
         if (obj)
-            return convertObjcValueToValue (exec, &obj, ObjcObjectType, _rootObject.get());
+            return convertObjcValueToValue (exec, &obj, ObjcObjectType, m_rootObject.get());
     } @catch(NSException* localException) {
         return throwError(exec, GeneralError, "Objective-C exception.");
     }
@@ -203,13 +203,20 @@ bool ObjcFallbackObjectImp::getOwnPropertySlot(ExecState*, const Identifier&, Pr
     return true;
 }
 
+bool ObjcFallbackObjectImp::getOwnPropertyDescriptor(ExecState*, const Identifier&, PropertyDescriptor& descriptor)
+{
+    // keep the prototype from getting called instead of just returning false
+    descriptor.setUndefined();
+    return true;
+}
+
 void ObjcFallbackObjectImp::put(ExecState*, const Identifier&, JSValue, PutPropertySlot&)
 {
 }
 
 static JSValue JSC_HOST_CALL callObjCFallbackObject(ExecState* exec, JSObject* function, JSValue thisValue, const ArgList& args)
 {
-    if (!thisValue.isObject(&RuntimeObjectImp::s_info))
+    if (!thisValue.inherits(&RuntimeObjectImp::s_info))
         return throwError(exec, TypeError);
 
     JSValue result = jsUndefined();

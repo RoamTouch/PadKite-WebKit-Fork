@@ -42,6 +42,7 @@ namespace JSC {
 
     class CodeBlock;
     class ExecutablePool;
+    class FunctionExecutable;
     class Identifier;
     class JSGlobalData;
     class JSGlobalData;
@@ -53,8 +54,6 @@ namespace JSC {
     class PropertySlot;
     class PutPropertySlot;
     class RegisterFile;
-    class FuncDeclNode;
-    class FuncExprNode;
     class JSGlobalObject;
     class RegExp;
 
@@ -64,19 +63,27 @@ namespace JSC {
         int32_t asInt32;
 
         JSValue jsValue() { return JSValue::decode(asEncodedJSValue); }
+        JSObject* jsObject() { return static_cast<JSObject*>(asPointer); }
         Identifier& identifier() { return *static_cast<Identifier*>(asPointer); }
         int32_t int32() { return asInt32; }
         CodeBlock* codeBlock() { return static_cast<CodeBlock*>(asPointer); }
-        FuncDeclNode* funcDeclNode() { return static_cast<FuncDeclNode*>(asPointer); }
-        FuncExprNode* funcExprNode() { return static_cast<FuncExprNode*>(asPointer); }
+        FunctionExecutable* function() { return static_cast<FunctionExecutable*>(asPointer); }
         RegExp* regExp() { return static_cast<RegExp*>(asPointer); }
         JSPropertyNameIterator* propertyNameIterator() { return static_cast<JSPropertyNameIterator*>(asPointer); }
         JSGlobalObject* globalObject() { return static_cast<JSGlobalObject*>(asPointer); }
         JSString* jsString() { return static_cast<JSString*>(asPointer); }
         ReturnAddressPtr returnAddress() { return ReturnAddressPtr(asPointer); }
     };
+    
+    struct TrampolineStructure {
+        MacroAssemblerCodePtr ctiStringLengthTrampoline;
+        MacroAssemblerCodePtr ctiVirtualCallLink;
+        MacroAssemblerCodePtr ctiVirtualCall;
+        MacroAssemblerCodePtr ctiNativeCallThunk;
+        MacroAssemblerCodePtr ctiSoftModulo;
+    };
 
-#if PLATFORM(X86_64)
+#if CPU(X86_64)
     struct JITStackFrame {
         void* reserved; // Unused
         JITStubArg args[6];
@@ -100,7 +107,7 @@ namespace JSC {
         // When JIT code makes a call, it pushes its return address just below the rest of the stack.
         ReturnAddressPtr* returnAddressSlot() { return reinterpret_cast<ReturnAddressPtr*>(this) - 1; }
     };
-#elif PLATFORM(X86)
+#elif CPU(X86)
 #if COMPILER(MSVC)
 #pragma pack(push)
 #pragma pack(4)
@@ -131,7 +138,7 @@ namespace JSC {
 #if COMPILER(MSVC)
 #pragma pack(pop)
 #endif // COMPILER(MSVC)
-#elif PLATFORM_ARM_ARCH(7)
+#elif CPU(ARM_THUMB2)
     struct JITStackFrame {
         void* reserved; // Unused
         JITStubArg args[6];
@@ -151,16 +158,20 @@ namespace JSC {
         CallFrame* callFrame;
         JSValue* exception;
 
+        void* padding2;
+
         // These arguments passed on the stack.
         Profiler** enabledProfilerReference;
         JSGlobalData* globalData;
         
         ReturnAddressPtr* returnAddressSlot() { return &thunkReturnAddress; }
     };
-#elif PLATFORM(ARM)
+#elif CPU(ARM_TRADITIONAL)
     struct JITStackFrame {
         JITStubArg padding; // Unused
         JITStubArg args[7];
+
+        ReturnAddressPtr thunkReturnAddress;
 
         void* preservedR4;
         void* preservedR5;
@@ -172,15 +183,19 @@ namespace JSC {
         RegisterFile* registerFile;
         CallFrame* callFrame;
         JSValue* exception;
+
+        // These arguments passed on the stack.
         Profiler** enabledProfilerReference;
         JSGlobalData* globalData;
 
         // When JIT code makes a call, it pushes its return address just below the rest of the stack.
-        ReturnAddressPtr* returnAddressSlot() { return reinterpret_cast<ReturnAddressPtr*>(this) - 1; }
+        ReturnAddressPtr* returnAddressSlot() { return &thunkReturnAddress; }
     };
 #else
 #error "JITStackFrame not defined for this platform."
 #endif
+
+#define JITSTACKFRAME_ARGS_INDEX (OBJECT_OFFSETOF(JITStackFrame, args) / sizeof(void*))
 
 #if USE(JIT_STUB_ARGUMENT_VA_LIST)
     #define STUB_ARGS_DECLARATION void* args, ...
@@ -195,16 +210,16 @@ namespace JSC {
     #define STUB_ARGS_DECLARATION void** args
     #define STUB_ARGS (args)
 
-    #if PLATFORM(X86) && COMPILER(MSVC)
+    #if CPU(X86) && COMPILER(MSVC)
     #define JIT_STUB __fastcall
-    #elif PLATFORM(X86) && COMPILER(GCC)
+    #elif CPU(X86) && COMPILER(GCC)
     #define JIT_STUB  __attribute__ ((fastcall))
     #else
     #define JIT_STUB
     #endif
 #endif
 
-#if PLATFORM(X86_64)
+#if CPU(X86_64)
     struct VoidPtrPair {
         void* first;
         void* second;
@@ -232,18 +247,16 @@ namespace JSC {
         static void tryCacheGetByID(CallFrame*, CodeBlock*, ReturnAddressPtr returnAddress, JSValue baseValue, const Identifier& propertyName, const PropertySlot&, StructureStubInfo* stubInfo);
         static void tryCachePutByID(CallFrame*, CodeBlock*, ReturnAddressPtr returnAddress, JSValue baseValue, const PutPropertySlot&, StructureStubInfo* stubInfo);
 
-        MacroAssemblerCodePtr ctiStringLengthTrampoline() { return m_ctiStringLengthTrampoline; }
-        MacroAssemblerCodePtr ctiVirtualCallLink() { return m_ctiVirtualCallLink; }
-        MacroAssemblerCodePtr ctiVirtualCall() { return m_ctiVirtualCall; }
-        MacroAssemblerCodePtr ctiNativeCallThunk() { return m_ctiNativeCallThunk; }
+        MacroAssemblerCodePtr ctiStringLengthTrampoline() { return m_trampolineStructure.ctiStringLengthTrampoline; }
+        MacroAssemblerCodePtr ctiVirtualCallLink() { return m_trampolineStructure.ctiVirtualCallLink; }
+        MacroAssemblerCodePtr ctiVirtualCall() { return m_trampolineStructure.ctiVirtualCall; }
+        MacroAssemblerCodePtr ctiNativeCallThunk() { return m_trampolineStructure.ctiNativeCallThunk; }
+        MacroAssemblerCodePtr ctiSoftModulo() { return m_trampolineStructure.ctiSoftModulo; }
 
     private:
         RefPtr<ExecutablePool> m_executablePool;
 
-        MacroAssemblerCodePtr m_ctiStringLengthTrampoline;
-        MacroAssemblerCodePtr m_ctiVirtualCallLink;
-        MacroAssemblerCodePtr m_ctiVirtualCall;
-        MacroAssemblerCodePtr m_ctiNativeCallThunk;
+        TrampolineStructure m_trampolineStructure;
     };
 
 extern "C" {
@@ -285,7 +298,6 @@ extern "C" {
     EncodedJSValue JIT_STUB cti_op_mod(STUB_ARGS_DECLARATION);
     EncodedJSValue JIT_STUB cti_op_mul(STUB_ARGS_DECLARATION);
     EncodedJSValue JIT_STUB cti_op_negate(STUB_ARGS_DECLARATION);
-    EncodedJSValue JIT_STUB cti_op_next_pname(STUB_ARGS_DECLARATION);
     EncodedJSValue JIT_STUB cti_op_not(STUB_ARGS_DECLARATION);
     EncodedJSValue JIT_STUB cti_op_nstricteq(STUB_ARGS_DECLARATION);
     EncodedJSValue JIT_STUB cti_op_post_dec(STUB_ARGS_DECLARATION);
@@ -307,6 +319,7 @@ extern "C" {
     EncodedJSValue JIT_STUB cti_op_typeof(STUB_ARGS_DECLARATION);
     EncodedJSValue JIT_STUB cti_op_urshift(STUB_ARGS_DECLARATION);
     EncodedJSValue JIT_STUB cti_vm_throw(STUB_ARGS_DECLARATION);
+    EncodedJSValue JIT_STUB cti_to_object(STUB_ARGS_DECLARATION);
     JSObject* JIT_STUB cti_op_construct_JSConstruct(STUB_ARGS_DECLARATION);
     JSObject* JIT_STUB cti_op_new_array(STUB_ARGS_DECLARATION);
     JSObject* JIT_STUB cti_op_new_error(STUB_ARGS_DECLARATION);
@@ -328,10 +341,9 @@ extern "C" {
     int JIT_STUB cti_op_jlesseq(STUB_ARGS_DECLARATION);
     int JIT_STUB cti_op_jtrue(STUB_ARGS_DECLARATION);
     int JIT_STUB cti_op_load_varargs(STUB_ARGS_DECLARATION);
-    int JIT_STUB cti_op_loop_if_less(STUB_ARGS_DECLARATION);
     int JIT_STUB cti_op_loop_if_lesseq(STUB_ARGS_DECLARATION);
-    int JIT_STUB cti_op_loop_if_true(STUB_ARGS_DECLARATION);
     int JIT_STUB cti_timeout_check(STUB_ARGS_DECLARATION);
+    int JIT_STUB cti_has_property(STUB_ARGS_DECLARATION);
     void JIT_STUB cti_op_create_arguments(STUB_ARGS_DECLARATION);
     void JIT_STUB cti_op_create_arguments_no_params(STUB_ARGS_DECLARATION);
     void JIT_STUB cti_op_debug(STUB_ARGS_DECLARATION);
@@ -345,7 +357,6 @@ extern "C" {
     void JIT_STUB cti_op_put_by_id_generic(STUB_ARGS_DECLARATION);
     void JIT_STUB cti_op_put_by_index(STUB_ARGS_DECLARATION);
     void JIT_STUB cti_op_put_by_val(STUB_ARGS_DECLARATION);
-    void JIT_STUB cti_op_put_by_val_array(STUB_ARGS_DECLARATION);
     void JIT_STUB cti_op_put_by_val_byte_array(STUB_ARGS_DECLARATION);
     void JIT_STUB cti_op_put_getter(STUB_ARGS_DECLARATION);
     void JIT_STUB cti_op_put_setter(STUB_ARGS_DECLARATION);

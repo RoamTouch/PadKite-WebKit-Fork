@@ -69,6 +69,8 @@ class CallbackProxy extends Handler {
     private volatile int mLatestProgress = 100;
     // Back/Forward list
     private final WebBackForwardList mBackForwardList;
+    // Back/Forward list client
+    private volatile WebBackForwardListClient mWebBackForwardListClient;
     // Used to call startActivity during url override.
     private final Context mContext;
 
@@ -90,7 +92,6 @@ class CallbackProxy extends Handler {
     private static final int JS_PROMPT                           = 114;
     private static final int JS_UNLOAD                           = 115;
     private static final int ASYNC_KEYEVENTS                     = 116;
-    private static final int TOO_MANY_REDIRECTS                  = 117;
     private static final int DOWNLOAD_FILE                       = 118;
     private static final int REPORT_ERROR                        = 119;
     private static final int RESEND_POST_DATA                    = 120;
@@ -107,6 +108,10 @@ class CallbackProxy extends Handler {
     private static final int GEOLOCATION_PERMISSIONS_HIDE_PROMPT = 131;
     private static final int RECEIVED_TOUCH_ICON_URL             = 132;
     private static final int GET_VISITED_HISTORY                 = 133;
+    private static final int OPEN_FILE_CHOOSER                   = 134;
+    private static final int ADD_HISTORY_ITEM                    = 135;
+    private static final int HISTORY_INDEX_CHANGED               = 136;
+    private static final int AUTH_CREDENTIALS                    = 137;
 
     // Message triggered by the client to resume execution
     private static final int NOTIFY                              = 200;
@@ -137,7 +142,7 @@ class CallbackProxy extends Handler {
         // Used to start a default activity.
         mContext = context;
         mWebView = w;
-        mBackForwardList = new WebBackForwardList();
+        mBackForwardList = new WebBackForwardList(this);
     }
 
     /**
@@ -146,6 +151,16 @@ class CallbackProxy extends Handler {
      */
     public void setWebViewClient(WebViewClient client) {
         mWebViewClient = client;
+    }
+
+    /**
+     * Get the WebViewClient.
+     * @return the current WebViewClient instance.
+     *
+     *@hide pending API council approval.
+     */
+    public WebViewClient getWebViewClient() {
+       return mWebViewClient;
     }
 
     /**
@@ -178,6 +193,14 @@ class CallbackProxy extends Handler {
      */
     public WebBackForwardList getBackForwardList() {
         return mBackForwardList;
+    }
+
+    void setWebBackForwardListClient(WebBackForwardListClient client) {
+        mWebBackForwardListClient = client;
+    }
+
+    WebBackForwardListClient getWebBackForwardListClient() {
+        return mWebBackForwardListClient;
     }
 
     /**
@@ -230,6 +253,13 @@ class CallbackProxy extends Handler {
         // 32-bit reads and writes.
         switch (msg.what) {
             case PAGE_STARTED:
+                // every time we start a new page, we want to reset the
+                // WebView certificate:
+                // if the new site is secure, we will reload it and get a
+                // new certificate set;
+                // if the new site is not secure, the certificate must be
+                // null, and that will be the case
+                mWebView.setCertificate(null);
                 if (mWebViewClient != null) {
                     mWebViewClient.onPageStarted(mWebView,
                             msg.getData().getString("url"),
@@ -238,8 +268,10 @@ class CallbackProxy extends Handler {
                 break;
 
             case PAGE_FINISHED:
+                String finishedUrl = (String) msg.obj;
+                mWebView.onPageFinished(finishedUrl);
                 if (mWebViewClient != null) {
-                    mWebViewClient.onPageFinished(mWebView, (String) msg.obj);
+                    mWebViewClient.onPageFinished(mWebView, finishedUrl);
                 }
                 break;
                 
@@ -260,19 +292,6 @@ class CallbackProxy extends Handler {
                 if (mWebChromeClient != null) {
                     mWebChromeClient.onReceivedTitle(mWebView,
                             (String) msg.obj);
-                }
-                break;
-
-            case TOO_MANY_REDIRECTS:
-                Message cancelMsg =
-                        (Message) msg.getData().getParcelable("cancelMsg");
-                Message continueMsg =
-                        (Message) msg.getData().getParcelable("continueMsg");
-                if (mWebViewClient != null) {
-                    mWebViewClient.onTooManyRedirects(mWebView, cancelMsg,
-                            continueMsg);
-                } else {
-                    cancelMsg.sendToTarget();
                 }
                 break;
 
@@ -379,6 +398,7 @@ class CallbackProxy extends Handler {
                             notify();
                         }
                     }
+                    mWebView.dismissZoomControl();
                 }
                 break;
 
@@ -522,6 +542,13 @@ class CallbackProxy extends Handler {
                                                     int which) {
                                                 res.cancel();
                                             }})
+                                .setOnCancelListener(
+                                        new DialogInterface.OnCancelListener() {
+                                            public void onCancel(
+                                                    DialogInterface dialog) {
+                                                res.cancel();
+                                            }
+                                        })
                                 .show();
                     }
                     // Tell the JsResult that it is ready for client
@@ -652,13 +679,76 @@ class CallbackProxy extends Handler {
                 String message = msg.getData().getString("message");
                 String sourceID = msg.getData().getString("sourceID");
                 int lineNumber = msg.getData().getInt("lineNumber");
-                mWebChromeClient.onConsoleMessage(message, lineNumber, sourceID);
+                int msgLevel = msg.getData().getInt("msgLevel");
+                int numberOfMessageLevels = ConsoleMessage.MessageLevel.values().length;
+                // Sanity bounds check as we'll index an array with msgLevel
+                if (msgLevel < 0 || msgLevel >= numberOfMessageLevels) {
+                    msgLevel = 0;
+                }
+
+                ConsoleMessage.MessageLevel messageLevel =
+                        ConsoleMessage.MessageLevel.values()[msgLevel];
+
+                if (!mWebChromeClient.onConsoleMessage(new ConsoleMessage(message, sourceID,
+                        lineNumber, messageLevel))) {
+                    // If false was returned the user did not provide their own console function so
+                    //  we should output some default messages to the system log.
+                    String logTag = "Web Console";
+                    String logMessage = message + " at " + sourceID + ":" + lineNumber;
+
+                    switch (messageLevel) {
+                        case TIP:
+                            Log.v(logTag, logMessage);
+                            break;
+                        case LOG:
+                            Log.i(logTag, logMessage);
+                            break;
+                        case WARNING:
+                            Log.w(logTag, logMessage);
+                            break;
+                        case ERROR:
+                            Log.e(logTag, logMessage);
+                            break;
+                        case DEBUG:
+                            Log.d(logTag, logMessage);
+                            break;
+                    }
+                }
+
                 break;
 
             case GET_VISITED_HISTORY:
                 if (mWebChromeClient != null) {
                     mWebChromeClient.getVisitedHistory((ValueCallback<String[]>)msg.obj);
                 }
+                break;
+
+            case OPEN_FILE_CHOOSER:
+                if (mWebChromeClient != null) {
+                    mWebChromeClient.openFileChooser((UploadFile) msg.obj);
+                }
+                break;
+
+            case ADD_HISTORY_ITEM:
+                if (mWebBackForwardListClient != null) {
+                    mWebBackForwardListClient.onNewHistoryItem(
+                            (WebHistoryItem) msg.obj);
+                }
+                break;
+
+            case HISTORY_INDEX_CHANGED:
+                if (mWebBackForwardListClient != null) {
+                    mWebBackForwardListClient.onIndexChanged(
+                            (WebHistoryItem) msg.obj, msg.arg1);
+                }
+                break;
+            case AUTH_CREDENTIALS:
+                String host = msg.getData().getString("host");
+                String realm = msg.getData().getString("realm");
+                username = msg.getData().getString("username");
+                password = msg.getData().getString("password");
+                mWebView.setHttpAuthUsernamePassword(
+                        host, realm, username, password);
                 break;
         }
     }
@@ -758,11 +848,6 @@ class CallbackProxy extends Handler {
     }
 
     public void onPageFinished(String url) {
-        // Do an unsynchronized quick check to avoid posting if no callback has
-        // been set.
-        if (mWebViewClient == null) {
-            return;
-        }
         // Performance probe
         if (PERF_PROBE) {
             // un-comment this if PERF_PROBE is true
@@ -776,19 +861,10 @@ class CallbackProxy extends Handler {
         sendMessage(msg);
     }
 
+    // Because this method is public and because CallbackProxy is mistakenly
+    // party of the public classes, we cannot remove this method.
     public void onTooManyRedirects(Message cancelMsg, Message continueMsg) {
-        // Do an unsynchronized quick check to avoid posting if no callback has
-        // been set.
-        if (mWebViewClient == null) {
-            cancelMsg.sendToTarget();
-            return;
-        }
-
-        Message msg = obtainMessage(TOO_MANY_REDIRECTS);
-        Bundle bundle = msg.getData();
-        bundle.putParcelable("cancelMsg", cancelMsg);
-        bundle.putParcelable("continueMsg", continueMsg);
-        sendMessage(msg);
+        // deprecated.
     }
 
     public void onReceivedError(int errorCode, String description,
@@ -857,6 +933,7 @@ class CallbackProxy extends Handler {
         msg.getData().putString("realm", realmName);
         sendMessage(msg);
     }
+
     /**
      * @hide - hide this because it contains a parameter of type SslError.
      * SslError is located in a hidden package.
@@ -993,6 +1070,16 @@ class CallbackProxy extends Handler {
         return false;
     }
 
+    public void onReceivedHttpAuthCredentials(String host, String realm,
+            String username, String password) {
+        Message msg = obtainMessage(AUTH_CREDENTIALS);
+        msg.getData().putString("host", host);
+        msg.getData().putString("realm", realm);
+        msg.getData().putString("username", username);
+        msg.getData().putString("password", password);
+        sendMessage(msg);
+    }
+
     //--------------------------------------------------------------------------
     // WebChromeClient methods
     //--------------------------------------------------------------------------
@@ -1000,10 +1087,10 @@ class CallbackProxy extends Handler {
     public void onProgressChanged(int newProgress) {
         // Synchronize so that mLatestProgress is up-to-date.
         synchronized (this) {
-            mLatestProgress = newProgress;
-            if (mWebChromeClient == null) {
+            if (mWebChromeClient == null || mLatestProgress == newProgress) {
                 return;
             }
+            mLatestProgress = newProgress;
             if (!mProgressUpdatePending) {
                 sendEmptyMessage(PROGRESS);
                 mProgressUpdatePending = true;
@@ -1079,7 +1166,7 @@ class CallbackProxy extends Handler {
         // for null.
         WebHistoryItem i = mBackForwardList.getCurrentItem();
         if (i != null) {
-            if (precomposed || i.getTouchIconUrl() != null) {
+            if (precomposed || i.getTouchIconUrl() == null) {
                 i.setTouchIconUrl(url);
             }
         }
@@ -1295,8 +1382,10 @@ class CallbackProxy extends Handler {
      *     occurred.
      * @param sourceID The filename of the source file in which the error
      *     occurred.
+     * @param msgLevel The message level, corresponding to the MessageLevel enum in
+     *     WebCore/page/Console.h
      */
-    public void addMessageToConsole(String message, int lineNumber, String sourceID) {
+    public void addMessageToConsole(String message, int lineNumber, String sourceID, int msgLevel) {
         if (mWebChromeClient == null) {
             return;
         }
@@ -1305,6 +1394,7 @@ class CallbackProxy extends Handler {
         msg.getData().putString("message", message);
         msg.getData().putString("sourceID", sourceID);
         msg.getData().putInt("lineNumber", lineNumber);
+        msg.getData().putInt("msgLevel", msgLevel);
         sendMessage(msg);
     }
 
@@ -1333,6 +1423,58 @@ class CallbackProxy extends Handler {
         }
         Message msg = obtainMessage(GET_VISITED_HISTORY);
         msg.obj = callback;
+        sendMessage(msg);
+    }
+
+    private class UploadFile implements ValueCallback<Uri> {
+        private Uri mValue;
+        public void onReceiveValue(Uri value) {
+            mValue = value;
+            synchronized (CallbackProxy.this) {
+                CallbackProxy.this.notify();
+            }
+        }
+        public Uri getResult() {
+            return mValue;
+        }
+    }
+
+    /**
+     * Called by WebViewCore to open a file chooser.
+     */
+    /* package */ Uri openFileChooser() {
+        if (mWebChromeClient == null) {
+            return null;
+        }
+        Message myMessage = obtainMessage(OPEN_FILE_CHOOSER);
+        UploadFile uploadFile = new UploadFile();
+        myMessage.obj = uploadFile;
+        synchronized (this) {
+            sendMessage(myMessage);
+            try {
+                wait();
+            } catch (InterruptedException e) {
+                Log.e(LOGTAG,
+                        "Caught exception while waiting for openFileChooser");
+                Log.e(LOGTAG, Log.getStackTraceString(e));
+            }
+        }
+        return uploadFile.getResult();
+    }
+
+    void onNewHistoryItem(WebHistoryItem item) {
+        if (mWebBackForwardListClient == null) {
+            return;
+        }
+        Message msg = obtainMessage(ADD_HISTORY_ITEM, item);
+        sendMessage(msg);
+    }
+
+    void onIndexChanged(WebHistoryItem item, int index) {
+        if (mWebBackForwardListClient == null) {
+            return;
+        }
+        Message msg = obtainMessage(HISTORY_INDEX_CHANGED, index, 0, item);
         sendMessage(msg);
     }
 }

@@ -56,6 +56,7 @@
 #import "WebKitErrorsPrivate.h"
 #import "WebKitLogging.h"
 #import "WebKitNSStringExtras.h"
+#import "WebNavigationData.h"
 #import "WebNSURLExtras.h"
 #import "WebNetscapePluginView.h"
 #import "WebNetscapePluginPackage.h"
@@ -68,6 +69,8 @@
 #import "WebPolicyDelegatePrivate.h"
 #import "WebPreferences.h"
 #import "WebResourceLoadDelegate.h"
+#import "WebScriptWorldInternal.h"
+#import "WebSecurityOriginInternal.h"
 #import "WebUIDelegate.h"
 #import "WebUIDelegatePrivate.h"
 #import "WebViewInternal.h"
@@ -101,6 +104,7 @@
 #import <WebCore/MouseEvent.h>
 #import <WebCore/Page.h>
 #import <WebCore/PlatformString.h>
+#import <WebCore/PluginWidget.h>
 #import <WebCore/ResourceError.h>
 #import <WebCore/ResourceHandle.h>
 #import <WebCore/ResourceLoader.h>
@@ -126,6 +130,7 @@
 
 using namespace WebCore;
 using namespace HTMLNames;
+using namespace std;
 
 #if ENABLE(MAC_JAVA_BRIDGE)
 @interface NSView (WebJavaPluginDetails)
@@ -534,6 +539,30 @@ void WebFrameLoaderClient::dispatchDidChangeLocationWithinPage()
         CallFrameLoadDelegate(implementations->didChangeLocationWithinPageForFrameFunc, webView, @selector(webView:didChangeLocationWithinPageForFrame:), m_webFrame.get());
 }
 
+void WebFrameLoaderClient::dispatchDidPushStateWithinPage()
+{
+    WebView *webView = getWebView(m_webFrame.get());
+    WebFrameLoadDelegateImplementationCache* implementations = WebViewGetFrameLoadDelegateImplementations(webView);
+    if (implementations->didPushStateWithinPageForFrameFunc)
+        CallFrameLoadDelegate(implementations->didPushStateWithinPageForFrameFunc, webView, @selector(webView:didPushStateWithinPageForFrame:), m_webFrame.get());
+}
+
+void WebFrameLoaderClient::dispatchDidReplaceStateWithinPage()
+{
+    WebView *webView = getWebView(m_webFrame.get());
+    WebFrameLoadDelegateImplementationCache* implementations = WebViewGetFrameLoadDelegateImplementations(webView);
+    if (implementations->didReplaceStateWithinPageForFrameFunc)
+        CallFrameLoadDelegate(implementations->didReplaceStateWithinPageForFrameFunc, webView, @selector(webView:didReplaceStateWithinPageForFrame:), m_webFrame.get());
+}
+
+void WebFrameLoaderClient::dispatchDidPopStateWithinPage()
+{
+    WebView *webView = getWebView(m_webFrame.get());
+    WebFrameLoadDelegateImplementationCache* implementations = WebViewGetFrameLoadDelegateImplementations(webView);
+    if (implementations->didPopStateWithinPageForFrameFunc)
+        CallFrameLoadDelegate(implementations->didPopStateWithinPageForFrameFunc, webView, @selector(webView:didPopStateWithinPageForFrame:), m_webFrame.get());
+}
+
 void WebFrameLoaderClient::dispatchWillClose()
 {
     WebView *webView = getWebView(m_webFrame.get());   
@@ -716,7 +745,7 @@ void WebFrameLoaderClient::dispatchWillSubmitForm(FramePolicyFunction function, 
 {
     id <WebFormDelegate> formDelegate = [getWebView(m_webFrame.get()) _formDelegate];
     if (!formDelegate) {
-        (core(m_webFrame.get())->loader()->*function)(PolicyUse);
+        (core(m_webFrame.get())->loader()->policyChecker()->*function)(PolicyUse);
         return;
     }
 
@@ -809,7 +838,26 @@ void WebFrameLoaderClient::finishedLoading(DocumentLoader* loader)
 
 void WebFrameLoaderClient::updateGlobalHistory()
 {
+    WebView* view = getWebView(m_webFrame.get());
     DocumentLoader* loader = core(m_webFrame.get())->loader()->documentLoader();
+
+    if ([view historyDelegate]) {
+        WebHistoryDelegateImplementationCache* implementations = WebViewGetHistoryDelegateImplementations(view);
+        if (implementations->navigatedFunc) {
+            WebNavigationData *data = [[WebNavigationData alloc] initWithURLString:loader->urlForHistory()
+                                                                             title:loader->title()
+                                                                   originalRequest:loader->originalRequestCopy().nsURLRequest()
+                                                                          response:loader->response().nsURLResponse()
+                                                                 hasSubstituteData:loader->substituteData().isValid()
+                                                              clientRedirectSource:loader->clientRedirectSourceForHistory()];
+
+            CallHistoryDelegate(implementations->navigatedFunc, view, @selector(webView:didNavigateWithNavigationData:inFrame:), data, m_webFrame.get());
+            [data release];
+        }
+    
+        return;
+    }
+
     [[WebHistory optionalSharedHistory] _visitedURL:loader->urlForHistory() 
                                           withTitle:loader->title()
                                              method:loader->originalRequestCopy().httpMethod()
@@ -819,16 +867,29 @@ void WebFrameLoaderClient::updateGlobalHistory()
 
 void WebFrameLoaderClient::updateGlobalHistoryRedirectLinks()
 {
+    WebView* view = getWebView(m_webFrame.get());
+    WebHistoryDelegateImplementationCache* implementations = [view historyDelegate] ? WebViewGetHistoryDelegateImplementations(view) : 0;
+    
     DocumentLoader* loader = core(m_webFrame.get())->loader()->documentLoader();
     ASSERT(loader->unreachableURL().isEmpty());
 
     if (!loader->clientRedirectSourceForHistory().isNull()) {
-        if (WebHistoryItem *item = [[WebHistory optionalSharedHistory] _itemForURLString:loader->clientRedirectSourceForHistory()])
+        if (implementations) {
+            if (implementations->clientRedirectFunc) {
+                CallHistoryDelegate(implementations->clientRedirectFunc, view, @selector(webView:didPerformClientRedirectFromURL:toURL:inFrame:), 
+                    loader->clientRedirectSourceForHistory(), loader->clientRedirectDestinationForHistory(), m_webFrame.get());
+            }
+        } else if (WebHistoryItem *item = [[WebHistory optionalSharedHistory] _itemForURLString:loader->clientRedirectSourceForHistory()])
             core(item)->addRedirectURL(loader->clientRedirectDestinationForHistory());
     }
 
     if (!loader->serverRedirectSourceForHistory().isNull()) {
-        if (WebHistoryItem *item = [[WebHistory optionalSharedHistory] _itemForURLString:loader->serverRedirectSourceForHistory()])
+        if (implementations) {
+            if (implementations->serverRedirectFunc) {
+                CallHistoryDelegate(implementations->serverRedirectFunc, view, @selector(webView:didPerformServerRedirectFromURL:toURL:inFrame:), 
+                    loader->serverRedirectSourceForHistory(), loader->serverRedirectDestinationForHistory(), m_webFrame.get());
+            }
+        } else if (WebHistoryItem *item = [[WebHistory optionalSharedHistory] _itemForURLString:loader->serverRedirectSourceForHistory()])
             core(item)->addRedirectURL(loader->serverRedirectDestinationForHistory());
     }
 }
@@ -839,6 +900,36 @@ bool WebFrameLoaderClient::shouldGoToHistoryItem(HistoryItem* item) const
     WebHistoryItem *webItem = kit(item);
     
     return [[view _policyDelegateForwarder] webView:view shouldGoToHistoryItem:webItem];
+}
+
+void WebFrameLoaderClient::dispatchDidAddBackForwardItem(HistoryItem*) const
+{
+}
+
+void WebFrameLoaderClient::dispatchDidRemoveBackForwardItem(HistoryItem*) const
+{
+}
+
+void WebFrameLoaderClient::dispatchDidChangeBackForwardIndex() const
+{
+}
+
+void WebFrameLoaderClient::didDisplayInsecureContent()
+{
+    WebView *webView = getWebView(m_webFrame.get());   
+    WebFrameLoadDelegateImplementationCache* implementations = WebViewGetFrameLoadDelegateImplementations(webView);
+    if (implementations->didDisplayInsecureContentFunc)
+        CallFrameLoadDelegate(implementations->didDisplayInsecureContentFunc, webView, @selector(webViewDidDisplayInsecureContent:));
+}
+
+void WebFrameLoaderClient::didRunInsecureContent(SecurityOrigin* origin)
+{
+    RetainPtr<WebSecurityOrigin> webSecurityOrigin(AdoptNS, [[WebSecurityOrigin alloc] _initWithWebCoreSecurityOrigin:origin]);
+
+    WebView *webView = getWebView(m_webFrame.get());   
+    WebFrameLoadDelegateImplementationCache* implementations = WebViewGetFrameLoadDelegateImplementations(webView);
+    if (implementations->didRunInsecureContentFunc)
+        CallFrameLoadDelegate(implementations->didRunInsecureContentFunc, webView, @selector(webView:didRunInsecureContent:), webSecurityOrigin.get());
 }
 
 ResourceError WebFrameLoaderClient::cancelledError(const ResourceRequest& request)
@@ -899,7 +990,7 @@ bool WebFrameLoaderClient::canHandleRequest(const ResourceRequest& request) cons
 
 bool WebFrameLoaderClient::canShowMIMEType(const String& MIMEType) const
 {
-    return [WebView canShowMIMEType:MIMEType];
+    return [getWebView(m_webFrame.get()) _canShowMIMEType:MIMEType];
 }
 
 bool WebFrameLoaderClient::representationExistsForURLScheme(const String& URLScheme) const
@@ -936,7 +1027,7 @@ void WebFrameLoaderClient::saveViewStateToItem(HistoryItem* item)
 
 void WebFrameLoaderClient::restoreViewState()
 {
-    HistoryItem* currentItem = core(m_webFrame.get())->loader()->currentHistoryItem();
+    HistoryItem* currentItem = core(m_webFrame.get())->loader()->history()->currentItem();
     ASSERT(currentItem);
 
     // FIXME: As the ASSERT attests, it seems we should always have a currentItem here.
@@ -1012,15 +1103,25 @@ PassRefPtr<DocumentLoader> WebFrameLoaderClient::createDocumentLoader(const Reso
     return loader.release();
 }
 
-// FIXME: <rdar://problem/4880065> - Push Global History into WebCore
-// Once that task is complete, this will go away
-void WebFrameLoaderClient::setTitle(const String& title, const KURL& URL)
+void WebFrameLoaderClient::setTitle(const String& title, const KURL& url)
 {
-    NSURL* nsURL = URL;
+    WebView* view = getWebView(m_webFrame.get());
+    
+    if ([view historyDelegate]) {
+        WebHistoryDelegateImplementationCache* implementations = WebViewGetHistoryDelegateImplementations(view);
+        if (!implementations->setTitleFunc)
+            return;
+            
+        CallHistoryDelegate(implementations->setTitleFunc, view, @selector(webView:updateHistoryTitle:forURL:), (NSString *)title, (NSString *)url);
+        return;
+    }
+    
+    NSURL* nsURL = url;
     nsURL = [nsURL _webkit_canonicalize];
     if(!nsURL)
         return;
     NSString *titleNSString = title;
+       
     [[[WebHistory optionalSharedHistory] itemForURL:nsURL] setTitle:titleNSString];
 }
 
@@ -1053,7 +1154,7 @@ void WebFrameLoaderClient::transitionToCommittedForNewPage()
 
     if (usesDocumentViews) {
         // FIXME (Viewless): I assume we want the equivalent of this optimization for viewless mode too.
-        bool willProduceHTMLView = [[WebFrameView class] _viewClassForMIMEType:[dataSource _responseMIMEType]] == [WebHTMLView class];
+        bool willProduceHTMLView = [m_webFrame->_private->webFrameView _viewClassForMIMEType:[dataSource _responseMIMEType]] == [WebHTMLView class];
         bool canSkipCreation = core(m_webFrame.get())->loader()->committingFirstRealLoad() && willProduceHTMLView;
         if (canSkipCreation) {
             [[m_webFrame->_private->webFrameView documentView] setDataSource:dataSource];
@@ -1145,7 +1246,7 @@ void WebFrameLoaderClient::receivedPolicyDecison(PolicyAction action)
     m_policyListener = nil;
     m_policyFunction = 0;
 
-    (core(m_webFrame.get())->loader()->*function)(action);
+    (core(m_webFrame.get())->loader()->policyChecker()->*function)(action);
 }
 
 String WebFrameLoaderClient::userAgent(const KURL& url)
@@ -1160,7 +1261,7 @@ String WebFrameLoaderClient::userAgent(const KURL& url)
     if (!webView)
         return String("");
 
-    return [webView _userAgentForURL:url];
+    return [webView userAgentForURL:url];
 }
 
 static const MouseEvent* findMouseEvent(const Event* event)
@@ -1301,7 +1402,7 @@ ObjectContentType WebFrameLoaderClient::objectContentType(const KURL& url, const
         return ObjectContentOtherPlugin;
     }
 
-    if ([WebFrameView _viewClassForMIMEType:type])
+    if ([m_webFrame->_private->webFrameView _viewClassForMIMEType:type])
         return ObjectContentFrame;
     
     return ObjectContentNone;
@@ -1374,19 +1475,6 @@ static NSView *pluginView(WebFrame *frame, WebPluginPackage *pluginPackage,
     return view;
 }
 
-class PluginWidget : public Widget {
-public:
-    PluginWidget(NSView *view = 0)
-        : Widget(view)
-    {
-    }
-    
-    virtual void invalidateRect(const IntRect& rect)
-    {
-        [platformWidget() setNeedsDisplayInRect:rect];
-    }
-};
-
 #if ENABLE(NETSCAPE_PLUGIN_API)
 
 class NetscapePluginWidget : public PluginWidget {
@@ -1396,15 +1484,15 @@ public:
     {
     }
     
-    virtual void handleEvent(Event*)
+    virtual void handleEvent(Event* event)
     {
         Frame* frame = Frame::frameForWidget(this);
         if (!frame)
             return;
         
-        NSEvent* event = frame->eventHandler()->currentNSEvent();
-        if ([event type] == NSMouseMoved)
-            [(WebBaseNetscapePluginView *)platformWidget() handleMouseMoved:event];
+        NSEvent* currentNSEvent = frame->eventHandler()->currentNSEvent();
+        if (event->type() == eventNames().mousemoveEvent)
+            [(WebBaseNetscapePluginView *)platformWidget() handleMouseMoved:currentNSEvent];
     }
     
 };
@@ -1627,12 +1715,23 @@ String WebFrameLoaderClient::overrideMediaType() const
 void WebFrameLoaderClient::documentElementAvailable() {
 }
 
-void WebFrameLoaderClient::windowObjectCleared()
+void WebFrameLoaderClient::dispatchDidClearWindowObjectInWorld(DOMWrapperWorld* world)
 {
-    Frame *frame = core(m_webFrame.get());
-    ScriptController *script = frame->script();
     WebView *webView = getWebView(m_webFrame.get());
     WebFrameLoadDelegateImplementationCache* implementations = WebViewGetFrameLoadDelegateImplementations(webView);
+
+    if (implementations->didClearWindowObjectForFrameInScriptWorldFunc) {
+        CallFrameLoadDelegate(implementations->didClearWindowObjectForFrameInScriptWorldFunc,
+            webView, @selector(webView:didClearWindowObjectForFrame:inScriptWorld:), m_webFrame.get(), [WebScriptWorld findOrCreateWorld:world]);
+        return;
+    }
+
+    if (world != mainThreadNormalWorld())
+        return;
+
+    Frame *frame = core(m_webFrame.get());
+    ScriptController *script = frame->script();
+
     if (implementations->didClearWindowObjectForFrameFunc) {
         CallFrameLoadDelegate(implementations->didClearWindowObjectForFrameFunc, webView, @selector(webView:didClearWindowObject:forFrame:),
             script->windowScriptObject(), m_webFrame.get());
@@ -1677,7 +1776,6 @@ jobject WebFrameLoaderClient::javaApplet(NSView* view)
 #endif
 
 @implementation WebFramePolicyListener
-
 + (void)initialize
 {
     JSC::initializeThreading();

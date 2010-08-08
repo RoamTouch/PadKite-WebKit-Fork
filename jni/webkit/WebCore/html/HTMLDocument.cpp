@@ -80,7 +80,7 @@ namespace WebCore {
 using namespace HTMLNames;
 
 HTMLDocument::HTMLDocument(Frame* frame)
-    : Document(frame, false)
+    : Document(frame, false, true)
 {
     clearXMLVersion();
     setParseMode(Compat);
@@ -109,14 +109,14 @@ String HTMLDocument::dir()
     HTMLElement* b = body();
     if (!b)
         return String();
-    return b->dir();
+    return b->getAttribute(dirAttr);
 }
 
 void HTMLDocument::setDir(const String& value)
 {
     HTMLElement* b = body();
     if (b)
-        b->setDir(value);
+        b->setAttribute(dirAttr, value);
 }
 
 String HTMLDocument::designMode() const
@@ -284,8 +284,10 @@ void HTMLDocument::releaseEvents()
 Tokenizer *HTMLDocument::createTokenizer()
 {
     bool reportErrors = false;
+#if ENABLE(INSPECTOR)
     if (Page* page = this->page())
         reportErrors = page->inspectorController()->windowVisible();
+#endif
 
     return new HTMLTokenizer(this, reportErrors);
 }
@@ -305,8 +307,7 @@ PassRefPtr<Element> HTMLDocument::createElement(const AtomicString& name, Except
         ec = INVALID_CHARACTER_ERR;
         return 0;
     }
-    AtomicString lowerName = name.string().impl()->isLower() ? name : AtomicString(name.string().lower());
-    return HTMLElementFactory::createHTMLElement(QualifiedName(nullAtom, lowerName, xhtmlNamespaceURI), this, 0, false);
+    return HTMLElementFactory::createHTMLElement(QualifiedName(nullAtom, name.lower(), xhtmlNamespaceURI), this, 0, false);
 }
 
 static void addItemToMap(HashCountedSet<AtomicStringImpl*>& map, const AtomicString& name)
@@ -397,8 +398,11 @@ void HTMLDocument::determineParseMode()
         }
     }
     
-    if (inCompatMode() != wasInCompatMode)
+    if (inCompatMode() != wasInCompatMode) {
+        clearPageUserSheet();
+        clearPageGroupUserSheets();
         updateStyleSelector();
+    }
 }
 
 void HTMLDocument::clear()
@@ -413,5 +417,27 @@ bool HTMLDocument::isFrameSet() const
     HTMLElement* bodyElement = body();
     return bodyElement && bodyElement->renderer() && bodyElement->hasTagName(framesetTag);
 }
+
+#ifdef ANDROID_INSTRUMENT
+void* HTMLDocument::operator new(size_t size)
+{
+    return Node::operator new(size);
+}
+
+void* HTMLDocument::operator new[](size_t size)
+{
+    return Node::operator new[](size);
+}
+
+void HTMLDocument::operator delete(void* p, size_t size)
+{
+    Node::operator delete(p, size);
+}
+
+void HTMLDocument::operator delete[](void* p, size_t size)
+{
+    Node::operator delete[](p, size);
+}
+#endif
 
 }

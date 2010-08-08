@@ -39,6 +39,7 @@
 #include "FormState.h"
 #include "FrameLoaderClient.h"
 #include "InspectorClient.h"
+#include "PluginHalterClient.h"
 #include "ResourceError.h"
 #include "SharedBuffer.h"
 
@@ -69,11 +70,17 @@ public:
 
     virtual float scaleFactor() { return 1.f; }
 
+#ifdef ANDROID_USER_GESTURE
+    virtual void focus(bool userGesture) { }
+#else
     virtual void focus() { }
+#endif
     virtual void unfocus() { }
 
     virtual bool canTakeFocus(FocusDirection) { return false; }
     virtual void takeFocus(FocusDirection) { }
+
+    virtual void focusedNodeChanged(Node*) { }
 
     virtual Page* createWindow(Frame*, const FrameLoadRequest&, const WindowFeatures&) { return 0; }
     virtual void show() { }
@@ -120,9 +127,10 @@ public:
     virtual void scroll(const IntSize&, const IntRect&, const IntRect&) { }
     virtual IntPoint screenToWindow(const IntPoint& p) const { return p; }
     virtual IntRect windowToScreen(const IntRect& r) const { return r; }
-    virtual PlatformWidget platformWindow() const { return 0; }
+    virtual PlatformPageClient platformPageClient() const { return 0; }
     virtual void contentsSizeChanged(Frame*, const IntSize&) const { }
 
+    virtual void scrollbarsModeDidChange() const { }
     virtual void mouseDidMoveOverElement(const HitTestResult&, unsigned) { }
 
     virtual void setToolTip(const String&, TextDirection) { }
@@ -135,6 +143,10 @@ public:
 
 #if ENABLE(OFFLINE_WEB_APPLICATIONS)
     virtual void reachedMaxAppCacheSize(int64_t) { }
+#endif
+
+#if ENABLE(NOTIFICATIONS)
+    virtual NotificationPresenter* notificationPresenter() const { return 0; }
 #endif
 
     virtual void runOpenPanel(Frame*, PassRefPtr<FileChooser>) { }
@@ -151,15 +163,20 @@ public:
     virtual void scrollRectIntoView(const IntRect&, const ScrollView*) const {}
 
     virtual void requestGeolocationPermissionForFrame(Frame*, Geolocation*) {}
+    virtual void cancelGeolocationPermissionRequestForFrame(Frame*) {}
 
 #if USE(ACCELERATED_COMPOSITING)
     virtual void attachRootGraphicsLayer(Frame*, GraphicsLayer*) {};
     virtual void setNeedsOneShotDrawingSynchronization() {};
     virtual void scheduleCompositingLayerSync() {};
 #endif
+
+#if ENABLE(TOUCH_EVENTS)
+    virtual void needTouchEvents(bool) { }
+#endif
 };
 
-class EmptyFrameLoaderClient : public FrameLoaderClient {
+class EmptyFrameLoaderClient : public FrameLoaderClient, public Noncopyable {
 public:
     virtual ~EmptyFrameLoaderClient() {  }
     virtual void frameLoaderDestroyed() { }
@@ -194,6 +211,9 @@ public:
     virtual void dispatchDidCancelClientRedirect() { }
     virtual void dispatchWillPerformClientRedirect(const KURL&, double, double) { }
     virtual void dispatchDidChangeLocationWithinPage() { }
+    virtual void dispatchDidPushStateWithinPage() { }
+    virtual void dispatchDidReplaceStateWithinPage() { }
+    virtual void dispatchDidPopStateWithinPage() { }
     virtual void dispatchWillClose() { }
     virtual void dispatchDidReceiveIcon() { }
     virtual void dispatchDidStartProvisionalLoad() { }
@@ -273,14 +293,13 @@ public:
     virtual void updateGlobalHistory() { }
     virtual void updateGlobalHistoryRedirectLinks() { }
     virtual bool shouldGoToHistoryItem(HistoryItem*) const { return false; }
-#ifdef ANDROID_HISTORY_CLIENT
-    virtual void dispatchDidAddHistoryItem(HistoryItem*) const {}
-    virtual void dispatchDidRemoveHistoryItem(HistoryItem*, int) const {}
-    virtual void dispatchDidChangeHistoryIndex(BackForwardList*) const {}
-#endif
+    virtual void dispatchDidAddBackForwardItem(HistoryItem*) const { }
+    virtual void dispatchDidRemoveBackForwardItem(HistoryItem*) const { };
+    virtual void dispatchDidChangeBackForwardIndex() const { }
     virtual void saveViewStateToItem(HistoryItem*) { }
     virtual bool canCachePage() const { return false; }
-
+    virtual void didDisplayInsecureContent() { }
+    virtual void didRunInsecureContent(SecurityOrigin*) { }
     virtual PassRefPtr<Frame> createFrame(const KURL&, const String&, HTMLFrameOwnerElement*, const String&, bool, int, int) { return 0; }
     virtual PassRefPtr<Widget> createPlugin(const IntSize&, HTMLPlugInElement*, const KURL&, const Vector<String>&, const Vector<String>&, const String&, bool) { return 0; }
     virtual PassRefPtr<Widget> createJavaAppletWidget(const IntSize&, HTMLAppletElement*, const KURL&, const Vector<String>&, const Vector<String>&) { return 0; }
@@ -289,7 +308,7 @@ public:
     virtual String overrideMediaType() const { return String(); }
 
     virtual void redirectDataToPlugin(Widget*) { }
-    virtual void windowObjectCleared() { }
+    virtual void dispatchDidClearWindowObjectInWorld(DOMWrapperWorld*) { }
     virtual void documentElementAvailable() { }
     virtual void didPerformFirstNavigation() const { }
 
@@ -310,7 +329,7 @@ public:
 
 };
 
-class EmptyEditorClient : public EditorClient {
+class EmptyEditorClient : public EditorClient, public Noncopyable {
 public:
     virtual ~EmptyEditorClient() { }
     virtual void pageDestroyed() { }
@@ -414,7 +433,8 @@ public:
 
 };
 
-class EmptyContextMenuClient : public ContextMenuClient {
+#if ENABLE(CONTEXT_MENUS)
+class EmptyContextMenuClient : public ContextMenuClient, public Noncopyable {
 public:
     virtual ~EmptyContextMenuClient() {  }
     virtual void contextMenuDestroyed() { }
@@ -434,8 +454,10 @@ public:
     virtual void searchWithSpotlight() { }
 #endif
 };
+#endif // ENABLE(CONTEXT_MENUS)
 
-class EmptyDragClient : public DragClient {
+#if ENABLE(DRAG_SUPPORT)
+class EmptyDragClient : public DragClient, public Noncopyable {
 public:
     virtual ~EmptyDragClient() {}
     virtual void willPerformDragDestinationAction(DragDestinationAction, DragData*) { }
@@ -446,8 +468,9 @@ public:
     virtual DragImageRef createDragImageForLink(KURL&, const String&, Frame*) { return 0; }
     virtual void dragControllerDestroyed() { }
 };
+#endif // ENABLE(DRAG_SUPPORT)
 
-class EmptyInspectorClient : public InspectorClient {
+class EmptyInspectorClient : public InspectorClient, public Noncopyable {
 public:
     virtual ~EmptyInspectorClient() { }
 
@@ -471,9 +494,8 @@ public:
     virtual void hideHighlight() { }
     virtual void inspectedURLChanged(const String&) { }
 
-    virtual void populateSetting(const String&, InspectorController::Setting&) { }
-    virtual void storeSetting(const String&, const InspectorController::Setting&) { }
-    virtual void removeSetting(const String&) { }
+    virtual void populateSetting(const String&, String*) { }
+    virtual void storeSetting(const String&, const String&) { }
 
     virtual void inspectorWindowObjectCleared() { }
 };

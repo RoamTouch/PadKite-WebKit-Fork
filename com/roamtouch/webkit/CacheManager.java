@@ -17,6 +17,7 @@
 package android.webkit;
 
 import android.content.Context;
+import android.net.http.AndroidHttpClient;
 import android.net.http.Headers;
 import android.os.FileUtils;
 import android.util.Log;
@@ -24,11 +25,13 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+
 
 import org.bouncycastle.crypto.Digest;
 import org.bouncycastle.crypto.digests.SHA1Digest;
@@ -52,9 +55,13 @@ public final class CacheManager {
     private static final String NO_STORE = "no-store";
     private static final String NO_CACHE = "no-cache";
     private static final String MAX_AGE = "max-age";
+    private static final String MANIFEST_MIME = "text/cache-manifest";
 
     private static long CACHE_THRESHOLD = 6 * 1024 * 1024;
     private static long CACHE_TRIM_AMOUNT = 2 * 1024 * 1024;
+
+    // Limit the maximum cache file size to half of the normal capacity
+    static long CACHE_MAX_SIZE = (CACHE_THRESHOLD - CACHE_TRIM_AMOUNT) / 2;
 
     private static boolean mDisabled;
 
@@ -92,6 +99,7 @@ public final class CacheManager {
         String location;
         String encoding;
         String contentdisposition;
+        String crossDomain;
 
         // these fields are NOT saved to the database
         InputStream inStream;
@@ -167,7 +175,7 @@ public final class CacheManager {
      * @param context The application context.
      */
     static void init(Context context) {
-        mDataBase = WebViewDatabase.getInstance(context);
+        mDataBase = WebViewDatabase.getInstance(context.getApplicationContext());
         mBaseDir = new File(context.getCacheDir(), "webviewCache");
         if (createCacheDirectory() && mClearCacheOnInit) {
             removeAllCacheFiles();
@@ -194,9 +202,9 @@ public final class CacheManager {
             // the cache database. The directory could be recreated
             // because the system flushed all the data/cache directories
             // to free up disk space.
-            WebViewCore.endCacheTransaction();
-            mDataBase.clearCache();
-            WebViewCore.startCacheTransaction();
+            // delete rows in the cache database
+            WebViewWorker.getHandler().sendEmptyMessage(
+                    WebViewWorker.MSG_CLEAR_CACHE);
             return true;
         }
         return false;
@@ -217,7 +225,6 @@ public final class CacheManager {
      * 
      * @param disabled true to disable the cache
      */
-    // only called from WebCore thread
     static void setCacheDisabled(boolean disabled) {
         if (disabled == mDisabled) {
             return;
@@ -237,7 +244,7 @@ public final class CacheManager {
         return mDisabled;
     }
 
-    // only called from WebCore thread
+    // only called from WebViewWorkerThread
     // make sure to call enableTransaction/disableTransaction in pair
     static boolean enableTransaction() {
         if (++mRefCount == 1) {
@@ -247,12 +254,9 @@ public final class CacheManager {
         return false;
     }
 
-    // only called from WebCore thread
+    // only called from WebViewWorkerThread
     // make sure to call enableTransaction/disableTransaction in pair
     static boolean disableTransaction() {
-        if (mRefCount == 0) {
-            Log.e(LOGTAG, "disableTransaction is out of sync");
-        }
         if (--mRefCount == 0) {
             mDataBase.endCacheTransaction();
             return true;
@@ -260,21 +264,41 @@ public final class CacheManager {
         return false;
     }
 
-    // only called from WebCore thread
-    // make sure to call startCacheTransaction/endCacheTransaction in pair
-    public static boolean startCacheTransaction() {
+    // only called from WebViewWorkerThread
+    // make sure to call startTransaction/endTransaction in pair
+    static boolean startTransaction() {
         return mDataBase.startCacheTransaction();
     }
 
-    // only called from WebCore thread
-    // make sure to call startCacheTransaction/endCacheTransaction in pair
-    public static boolean endCacheTransaction() {
+    // only called from WebViewWorkerThread
+    // make sure to call startTransaction/endTransaction in pair
+    static boolean endTransaction() {
         boolean ret = mDataBase.endCacheTransaction();
         if (++mTrimCacheCount >= TRIM_CACHE_INTERVAL) {
             mTrimCacheCount = 0;
             trimCacheIfNeeded();
         }
         return ret;
+    }
+
+    // only called from WebCore Thread
+    // make sure to call startCacheTransaction/endCacheTransaction in pair
+    /**
+     * @deprecated
+     */
+    @Deprecated
+    public static boolean startCacheTransaction() {
+        return false;
+    }
+
+    // only called from WebCore Thread
+    // make sure to call startCacheTransaction/endCacheTransaction in pair
+    /**
+     * @deprecated
+     */
+    @Deprecated
+    public static boolean endCacheTransaction() {
+        return false;
     }
 
     /**
@@ -285,19 +309,25 @@ public final class CacheManager {
      * 
      * @return the CacheResult for a given url
      */
-    // only called from WebCore thread
     public static CacheResult getCacheFile(String url,
+            Map<String, String> headers) {
+        return getCacheFile(url, 0, headers);
+    }
+
+    static CacheResult getCacheFile(String url, long postIdentifier,
             Map<String, String> headers) {
         if (mDisabled) {
             return null;
         }
 
-        CacheResult result = mDataBase.getCache(url);
+        String databaseKey = getDatabaseKey(url, postIdentifier);
+
+        CacheResult result = mDataBase.getCache(databaseKey);
         if (result != null) {
             if (result.contentLength == 0) {
                 if (!checkCacheRedirect(result.httpStatusCode)) {
                     // this should not happen. If it does, remove it.
-                    mDataBase.removeCache(url);
+                    mDataBase.removeCache(databaseKey);
                     return null;
                 }
             } else {
@@ -309,7 +339,7 @@ public final class CacheManager {
                 } catch (FileNotFoundException e) {
                     // the files in the cache directory can be removed by the
                     // system. If it is gone, clean up the database
-                    mDataBase.removeCache(url);
+                    mDataBase.removeCache(databaseKey);
                     return null;
                 }
             }
@@ -354,17 +384,25 @@ public final class CacheManager {
      * @hide - hide createCacheFile since it has a parameter of type headers, which is
      * in a hidden package.
      */
-    // only called from WebCore thread
     public static CacheResult createCacheFile(String url, int statusCode,
             Headers headers, String mimeType, boolean forceCache) {
+        return createCacheFile(url, statusCode, headers, mimeType, 0,
+                forceCache);
+    }
+
+    static CacheResult createCacheFile(String url, int statusCode,
+            Headers headers, String mimeType, long postIdentifier,
+            boolean forceCache) {
         if (!forceCache && mDisabled) {
             return null;
         }
 
+        String databaseKey = getDatabaseKey(url, postIdentifier);
+
         // according to the rfc 2616, the 303 response MUST NOT be cached.
         if (statusCode == 303) {
             // remove the saved cache if there is any
-            mDataBase.removeCache(url);
+            mDataBase.removeCache(databaseKey);
             return null;
         }
 
@@ -372,7 +410,7 @@ public final class CacheManager {
         // header.
         if (checkCacheRedirect(statusCode) && !headers.getSetCookie().isEmpty()) {
             // remove the saved cache if there is any
-            mDataBase.removeCache(url);
+            mDataBase.removeCache(databaseKey);
             return null;
         }
 
@@ -380,9 +418,9 @@ public final class CacheManager {
         if (ret == null) {
             // this should only happen if the headers has "no-store" in the
             // cache-control. remove the saved cache if there is any
-            mDataBase.removeCache(url);
+            mDataBase.removeCache(databaseKey);
         } else {
-            setupFiles(url, ret);
+            setupFiles(databaseKey, ret);
             try {
                 ret.outStream = new FileOutputStream(ret.outFile);
             } catch (FileNotFoundException e) {
@@ -411,8 +449,12 @@ public final class CacheManager {
      * Save the info of a cache file for a given url to the CacheMap so that it
      * can be reused later
      */
-    // only called from WebCore thread
     public static void saveCacheFile(String url, CacheResult cacheRet) {
+        saveCacheFile(url, 0, cacheRet);
+    }
+
+    static void saveCacheFile(String url, long postIdentifier,
+            CacheResult cacheRet) {
         try {
             cacheRet.outStream.close();
         } catch (IOException e) {
@@ -424,7 +466,6 @@ public final class CacheManager {
             return;
         }
 
-        cacheRet.contentLength = cacheRet.outFile.length();
         boolean redirect = checkCacheRedirect(cacheRet.httpStatusCode);
         if (redirect) {
             // location is in database, no need to keep the file
@@ -439,11 +480,20 @@ public final class CacheManager {
             return;
         }
 
-        mDataBase.addCache(url, cacheRet);
+        mDataBase.addCache(getDatabaseKey(url, postIdentifier), cacheRet);
 
         if (DebugFlags.CACHE_MANAGER) {
             Log.v(LOGTAG, "saveCacheFile for url " + url);
         }
+    }
+
+    static boolean cleanupCacheFile(CacheResult cacheRet) {
+        try {
+            cacheRet.outStream.close();
+        } catch (IOException e) {
+            return false;
+        }
+        return cacheRet.outFile.delete();
     }
 
     /**
@@ -451,7 +501,6 @@ public final class CacheManager {
      * 
      * @return true if it succeeds
      */
-    // only called from WebCore thread
     static boolean removeAllCacheFiles() {
         // Note, this is called before init() when the database is
         // created or upgraded.
@@ -461,7 +510,10 @@ public final class CacheManager {
             mClearCacheOnInit = true;
             return true;
         }
-        // delete cache in a separate thread to not block UI.
+        // delete rows in the cache database
+        WebViewWorker.getHandler().sendEmptyMessage(
+                WebViewWorker.MSG_CLEAR_CACHE);
+        // delete cache files in a separate thread to not block UI.
         final Runnable clearCache = new Runnable() {
             public void run() {
                 // delete all cache files
@@ -479,8 +531,6 @@ public final class CacheManager {
                 } catch (SecurityException e) {
                     // Ignore SecurityExceptions.
                 }
-                // delete database
-                mDataBase.clearCache();
             }
         };
         new Thread(clearCache).start();
@@ -490,15 +540,13 @@ public final class CacheManager {
     /**
      * Return true if the cache is empty.
      */
-    // only called from WebCore thread
     static boolean cacheEmpty() {
         return mDataBase.hasCache();
     }
 
-    // only called from WebCore thread
     static void trimCacheIfNeeded() {
         if (mDataBase.getCacheTotalSize() > CACHE_THRESHOLD) {
-            ArrayList<String> pathList = mDataBase.trimCache(CACHE_TRIM_AMOUNT);
+            List<String> pathList = mDataBase.trimCache(CACHE_TRIM_AMOUNT);
             int size = pathList.size();
             for (int i = 0; i < size; i++) {
                 File f = new File(mBaseDir, pathList.get(i));
@@ -506,7 +554,32 @@ public final class CacheManager {
                     Log.e(LOGTAG, f.getPath() + " delete failed.");
                 }
             }
+            // remove the unreferenced files in the cache directory
+            final List<String> fileList = mDataBase.getAllCacheFileNames();
+            if (fileList == null) return;
+            String[] toDelete = mBaseDir.list(new FilenameFilter() {
+                public boolean accept(File dir, String filename) {
+                    if (fileList.contains(filename)) {
+                        return false;
+                    } else {
+                        return true;
+                    }
+                }
+            });
+            if (toDelete == null) return;
+            size = toDelete.length;
+            for (int i = 0; i < size; i++) {
+                File f = new File(mBaseDir, toDelete[i]);
+                if (!f.delete()) {
+                    Log.e(LOGTAG, f.getPath() + " delete failed.");
+                }
+            }
         }
+    }
+
+    static void clearCache() {
+        // delete database
+        mDataBase.clearCache();
     }
 
     private static boolean checkCacheRedirect(int statusCode) {
@@ -516,6 +589,11 @@ public final class CacheManager {
         } else {
             return false;
         }
+    }
+
+    private static String getDatabaseKey(String url, long postIdentifier) {
+        if (postIdentifier == 0) return url;
+        return postIdentifier + url;
     }
 
     @SuppressWarnings("deprecation")
@@ -615,6 +693,18 @@ public final class CacheManager {
 
     private static CacheResult parseHeaders(int statusCode, Headers headers,
             String mimeType) {
+        // if the contentLength is already larger than CACHE_MAX_SIZE, skip it
+        if (headers.getContentLength() > CACHE_MAX_SIZE) return null;
+
+        // The HTML 5 spec, section 6.9.4, step 7.3 of the application cache
+        // process states that HTTP caching rules are ignored for the
+        // purposes of the application cache download process.
+        // At this point we can't tell that if a file is part of this process,
+        // except for the manifest, which has its own mimeType.
+        // TODO: work out a way to distinguish all responses that are part of
+        // the application download process and skip them.
+        if (MANIFEST_MIME.equals(mimeType)) return null;
+
         // TODO: if authenticated or secure, return null
         CacheResult ret = new CacheResult();
         ret.httpStatusCode = statusCode;
@@ -626,7 +716,7 @@ public final class CacheManager {
         ret.expiresString = headers.getExpires();
         if (ret.expiresString != null) {
             try {
-                ret.expires = HttpDateTime.parse(ret.expiresString);
+                ret.expires = AndroidHttpClient.parseDate(ret.expiresString);
             } catch (IllegalArgumentException ex) {
                 // Take care of the special "-1" and "0" cases
                 if ("-1".equals(ret.expiresString)
@@ -644,11 +734,20 @@ public final class CacheManager {
             ret.contentdisposition = contentDisposition;
         }
 
+        String crossDomain = headers.getXPermittedCrossDomainPolicies();
+        if (crossDomain != null) {
+            ret.crossDomain = crossDomain;
+        }
+
+        // lastModified and etag may be set back to http header. So they can't
+        // be empty string.
         String lastModified = headers.getLastModified();
-        if (lastModified != null) ret.lastModified = lastModified;
+        if (lastModified != null && lastModified.length() > 0) {
+            ret.lastModified = lastModified;
+        }
 
         String etag = headers.getEtag();
-        if (etag != null) ret.etag = etag;
+        if (etag != null && etag.length() > 0) ret.etag = etag;
 
         String cacheControl = headers.getCacheControl();
         if (cacheControl != null) {
@@ -732,7 +831,7 @@ public final class CacheManager {
                 // 24 * 60 * 60 * 1000
                 long lastmod = System.currentTimeMillis() + 86400000;
                 try {
-                    lastmod = HttpDateTime.parse(ret.lastModified);
+                    lastmod = AndroidHttpClient.parseDate(ret.lastModified);
                 } catch (IllegalArgumentException ex) {
                     Log.e(LOGTAG, "illegal lastModified: " + ret.lastModified);
                 }

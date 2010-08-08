@@ -38,10 +38,10 @@ RenderForeignObject::RenderForeignObject(SVGForeignObjectElement* node)
 {
 }
 
-TransformationMatrix RenderForeignObject::translationForAttributes() const
+FloatPoint RenderForeignObject::translationForAttributes() const
 {
     SVGForeignObjectElement* foreign = static_cast<SVGForeignObjectElement*>(node());
-    return TransformationMatrix().translate(foreign->x().value(foreign), foreign->y().value(foreign));
+    return FloatPoint(foreign->x().value(foreign), foreign->y().value(foreign));
 }
 
 void RenderForeignObject::paint(PaintInfo& paintInfo, int, int)
@@ -84,12 +84,15 @@ FloatRect RenderForeignObject::repaintRectInLocalCoordinates() const
 void RenderForeignObject::computeRectForRepaint(RenderBoxModelObject* repaintContainer, IntRect& rect, bool fixed)
 {
     rect = localToParentTransform().mapRect(rect);
+    style()->svgStyle()->inflateForShadow(rect);
     RenderBlock::computeRectForRepaint(repaintContainer, rect, fixed);
 }
 
-TransformationMatrix RenderForeignObject::localToParentTransform() const
+const AffineTransform& RenderForeignObject::localToParentTransform() const
 {
-    return localTransform() * translationForAttributes();
+    FloatPoint attributeTranslation(translationForAttributes());
+    m_localToParentTransform = localTransform().translateRight(attributeTranslation.x(), attributeTranslation.y());
+    return m_localToParentTransform;
 }
 
 void RenderForeignObject::layout()
@@ -116,6 +119,11 @@ bool RenderForeignObject::nodeAtPoint(const HitTestRequest&, HitTestResult&, int
 {
     ASSERT_NOT_REACHED();
     return false;
+}
+
+void RenderForeignObject::mapLocalToContainer(RenderBoxModelObject* repaintContainer, bool fixed , bool useTransforms, TransformState& transformState) const
+{
+    SVGRenderBase::mapLocalToContainer(this, repaintContainer, fixed, useTransforms, transformState);
 }
 
 } // namespace WebCore

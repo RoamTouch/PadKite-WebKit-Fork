@@ -44,7 +44,10 @@ public:
     virtual void absoluteRects(Vector<IntRect>&, int tx, int ty);
     virtual void absoluteQuads(Vector<FloatQuad>&);
 
+    virtual IntSize offsetFromContainer(RenderObject*) const;
+
     IntRect linesBoundingBox() const;
+    IntRect linesVisibleOverflowBoundingBox() const;
 
     InlineFlowBox* createAndAppendInlineFlowBox();
 
@@ -62,7 +65,7 @@ public:
     
     IntSize relativePositionedInlineOffset(const RenderBox* child) const;
 
-    virtual void addFocusRingRects(GraphicsContext*, int tx, int ty);
+    virtual void addFocusRingRects(Vector<IntRect>&, int tx, int ty);
     void paintOutline(GraphicsContext*, int tx, int ty);
 
     int verticalPositionFromCache(bool firstLine) const;
@@ -105,6 +108,9 @@ private:
     virtual IntRect clippedOverflowRectForRepaint(RenderBoxModelObject* repaintContainer);
     virtual IntRect rectWithOutlineForRepaint(RenderBoxModelObject* repaintContainer, int outlineWidth);
     virtual void computeRectForRepaint(RenderBoxModelObject* repaintContainer, IntRect& rect, bool fixed);
+
+    virtual void mapLocalToContainer(RenderBoxModelObject* repaintContainer, bool fixed, bool useTransforms, TransformState&) const;
+    virtual void mapAbsoluteToLocalPoint(bool fixed, bool useTransforms, TransformState&) const;
 
     virtual VisiblePosition positionForPoint(const IntPoint&);
 

@@ -34,6 +34,7 @@
 #include "KURL.h"
 #include "PlatformString.h"
 
+class QEventLoop;
 class QWebPage;
 
 namespace WebCore {
@@ -42,6 +43,7 @@ namespace WebCore {
     class FloatRect;
     class Page;
     struct FrameLoadRequest;
+    class QtAbstractWebPopup;
 
     class ChromeClientQt : public ChromeClient
     {
@@ -62,6 +64,8 @@ namespace WebCore {
 
         virtual bool canTakeFocus(FocusDirection);
         virtual void takeFocus(FocusDirection);
+
+        virtual void focusedNodeChanged(Node*);
 
         virtual Page* createWindow(Frame*, const FrameLoadRequest&, const WindowFeatures&);
         virtual void show();
@@ -105,9 +109,10 @@ namespace WebCore {
         virtual void scroll(const IntSize& scrollDelta, const IntRect& rectToScroll, const IntRect& clipRect);
         virtual IntPoint screenToWindow(const IntPoint&) const;
         virtual IntRect windowToScreen(const IntRect&) const;
-        virtual PlatformWidget platformWindow() const;
+        virtual PlatformPageClient platformPageClient() const;
         virtual void contentsSizeChanged(Frame*, const IntSize&) const;
 
+        virtual void scrollbarsModeDidChange() const { }
         virtual void mouseDidMoveOverElement(const HitTestResult&, unsigned modifierFlags);
 
         virtual void setToolTip(const String&, TextDirection);
@@ -119,6 +124,19 @@ namespace WebCore {
 #if ENABLE(OFFLINE_WEB_APPLICATIONS)
         virtual void reachedMaxAppCacheSize(int64_t spaceNeeded);
 #endif
+
+#if USE(ACCELERATED_COMPOSITING)
+        // see ChromeClient.h
+        // this is a hook for WebCore to tell us what we need to do with the GraphicsLayers
+        virtual void attachRootGraphicsLayer(Frame*, GraphicsLayer*);
+        virtual void setNeedsOneShotDrawingSynchronization();
+        virtual void scheduleCompositingLayerSync();
+#endif
+
+#if ENABLE(TOUCH_EVENTS)
+        virtual void needTouchEvents(bool) { }
+#endif
+
         virtual void runOpenPanel(Frame*, PassRefPtr<FileChooser>);
 
         virtual void formStateDidChange(const Node*) { }
@@ -131,6 +149,8 @@ namespace WebCore {
 
         virtual void requestGeolocationPermissionForFrame(Frame*, Geolocation*);
 
+        QtAbstractWebPopup* createSelectPopup();
+
         QWebPage* m_webPage;
         WebCore::KURL lastHoverURL;
         WebCore::String lastHoverTitle;
@@ -139,6 +159,7 @@ namespace WebCore {
         bool toolBarsVisible;
         bool statusBarVisible;
         bool menuBarVisible;
+        QEventLoop* m_eventLoop;
     };
 }
 

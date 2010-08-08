@@ -38,6 +38,9 @@
 #include "FrameLoaderClient.h"
 #include "HTMLFormElement.h"
 #include "Page.h"
+#if PLATFORM(QT)
+#include "PluginDatabase.h"
+#endif
 #include "ResourceError.h"
 #include "ResourceHandle.h"
 #include "Settings.h"
@@ -77,7 +80,7 @@ void MainResourceLoader::receivedError(const ResourceError& error)
 
     if (!cancelled()) {
         ASSERT(!reachedTerminalState());
-        frameLoader()->didFailToLoad(this, error);
+        frameLoader()->notifier()->didFailToLoad(this, error);
         
         releaseResources();
     }
@@ -93,7 +96,7 @@ void MainResourceLoader::didCancel(const ResourceError& error)
     RefPtr<MainResourceLoader> protect(this);
 
     if (m_waitingForContentPolicy) {
-        frameLoader()->cancelContentPolicyCheck();
+        frameLoader()->policyChecker()->cancelCheck();
         ASSERT(m_waitingForContentPolicy);
         m_waitingForContentPolicy = false;
         deref(); // balances ref in didReceiveResponse
@@ -172,13 +175,17 @@ void MainResourceLoader::willSendRequest(ResourceRequest& newRequest, const Reso
     // Don't set this on the first request. It is set when the main load was started.
     m_documentLoader->setRequest(newRequest);
 
+    Frame* top = m_frame->tree()->top();
+    if (top != m_frame)
+        frameLoader()->checkIfDisplayInsecureContent(top->document()->securityOrigin(), newRequest.url());
+
     // FIXME: Ideally we'd stop the I/O until we hear back from the navigation policy delegate
     // listener. But there's no way to do that in practice. So instead we cancel later if the
     // listener tells us to. In practice that means the navigation policy needs to be decided
     // synchronously for these redirect cases.
     if (!redirectResponse.isNull()) {
         ref(); // balanced by deref in continueAfterNavigationPolicy
-        frameLoader()->checkNavigationPolicy(newRequest, callContinueAfterNavigationPolicy, this);
+        frameLoader()->policyChecker()->checkNavigationPolicy(newRequest, callContinueAfterNavigationPolicy, this);
     }
 }
 
@@ -201,7 +208,7 @@ void MainResourceLoader::continueAfterContentPolicy(PolicyAction contentPolicy, 
         // Prevent remote web archives from loading because they can claim to be from any domain and thus avoid cross-domain security checks (4120255).
         bool isRemoteWebArchive = equalIgnoringCase("application/x-webarchive", mimeType) && !m_substituteData.isValid() && !url.isLocalFile();
         if (!frameLoader()->canShowMIMEType(mimeType) || isRemoteWebArchive) {
-            frameLoader()->cannotShowMIMEType(r);
+            frameLoader()->policyChecker()->cannotShowMIMEType(r);
             // Check reachedTerminalState since the load may have already been cancelled inside of _handleUnimplementablePolicyWithErrorCode::.
             if (!reachedTerminalState())
                 stopLoadingForPolicyChange();
@@ -275,6 +282,29 @@ void MainResourceLoader::continueAfterContentPolicy(PolicyAction policy)
     deref(); // balances ref in didReceiveResponse
 }
 
+#if PLATFORM(QT)
+void MainResourceLoader::substituteMIMETypeFromPluginDatabase(const ResourceResponse& r)
+{
+    if (!m_frame->settings()->arePluginsEnabled())
+        return;
+
+    String filename = r.url().lastPathComponent();
+    if (filename.endsWith("/"))
+        return;
+
+    int extensionPos = filename.reverseFind('.');
+    if (extensionPos == -1)
+        return;
+
+    String extension = filename.substring(extensionPos + 1);
+    String mimeType = PluginDatabase::installedPlugins()->MIMETypeForExtension(extension);
+    if (!mimeType.isEmpty()) {
+        ResourceResponse* response = const_cast<ResourceResponse*>(&r);
+        response->setMimeType(mimeType);
+    }
+}
+#endif
+
 void MainResourceLoader::didReceiveResponse(const ResourceResponse& r)
 {
 #if ENABLE(OFFLINE_WEB_APPLICATIONS)
@@ -297,6 +327,11 @@ void MainResourceLoader::didReceiveResponse(const ResourceResponse& r)
     ASSERT(shouldLoadAsEmptyDocument(r.url()) || !defersLoading());
 #endif
 
+#if PLATFORM(QT)
+    if (r.mimeType() == "application/octet-stream")
+        substituteMIMETypeFromPluginDatabase(r);
+#endif
+
     if (m_loadingMultipartContent) {
         frameLoader()->setupForReplaceByMIMEType(r.mimeType());
         clearResourceData();
@@ -316,7 +351,25 @@ void MainResourceLoader::didReceiveResponse(const ResourceResponse& r)
     ASSERT(!m_waitingForContentPolicy);
     m_waitingForContentPolicy = true;
     ref(); // balanced by deref in continueAfterContentPolicy and didCancel
-    frameLoader()->checkContentPolicy(m_response.mimeType(), callContinueAfterContentPolicy, this);
+
+    ASSERT(frameLoader()->activeDocumentLoader());
+
+    // Always show content with valid substitute data.
+    if (frameLoader()->activeDocumentLoader()->substituteData().isValid()) {
+        callContinueAfterContentPolicy(this, PolicyUse);
+        return;
+    }
+
+#if ENABLE(FTPDIR)
+    // Respect the hidden FTP Directory Listing pref so it can be tested even if the policy delegate might otherwise disallow it
+    Settings* settings = m_frame->settings();
+    if (settings && settings->forceFTPDirectoryListings() && m_response.mimeType() == "application/x-ftp-directory") {
+        callContinueAfterContentPolicy(this, PolicyUse);
+        return;
+    }
+#endif
+
+    frameLoader()->policyChecker()->checkContentPolicy(m_response.mimeType(), callContinueAfterContentPolicy, this);
 }
 
 void MainResourceLoader::didReceiveData(const char* data, int length, long long lengthReceived, bool allAtOnce)

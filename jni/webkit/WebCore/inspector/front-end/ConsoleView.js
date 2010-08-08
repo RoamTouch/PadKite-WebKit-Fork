@@ -27,6 +27,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+const ExpressionStopCharacters = " =:[({;,!+-*/&|^<>";
+
 WebInspector.ConsoleView = function(drawer)
 {
     WebInspector.View.call(this, document.getElementById("console-view"));
@@ -43,8 +45,9 @@ WebInspector.ConsoleView = function(drawer)
     this.messagesElement.addEventListener("click", this._messagesClicked.bind(this), true);
 
     this.promptElement = document.getElementById("console-prompt");
-    this.promptElement.handleKeyEvent = this._promptKeyDown.bind(this);
-    this.prompt = new WebInspector.TextPrompt(this.promptElement, this.completions.bind(this), " .=:[({;");
+    this.promptElement.className = "source-code";
+    this.promptElement.addEventListener("keydown", this._promptKeyDown.bind(this), true);
+    this.prompt = new WebInspector.TextPrompt(this.promptElement, this.completions.bind(this), ExpressionStopCharacters + ".");
 
     this.topGroup = new WebInspector.ConsoleGroup(null, 0);
     this.messagesElement.insertBefore(this.topGroup.element, this.promptElement);
@@ -55,12 +58,132 @@ WebInspector.ConsoleView = function(drawer)
     this.toggleConsoleButton.title = WebInspector.UIString("Show console.");
     this.toggleConsoleButton.addEventListener("click", this._toggleConsoleButtonClicked.bind(this), false);
 
-    var anchoredStatusBar = document.getElementById("anchored-status-bar-items");
-    anchoredStatusBar.appendChild(this.toggleConsoleButton);
+    // Will hold the list of filter elements
+    this.filterBarElement = document.getElementById("console-filter");
 
+    function createDividerElement() {
+        var dividerElement = document.createElement("div");
+        dividerElement.addStyleClass("divider");
+        this.filterBarElement.appendChild(dividerElement);
+    }
+
+    var updateFilterHandler = this._updateFilter.bind(this);
+    function createFilterElement(category) {
+        var categoryElement = document.createElement("li");
+        categoryElement.category = category;
+        categoryElement.addStyleClass(categoryElement.category);            
+        categoryElement.addEventListener("click", updateFilterHandler, false);
+
+        var label = category.toString();
+        categoryElement.appendChild(document.createTextNode(label));
+
+        this.filterBarElement.appendChild(categoryElement);
+        return categoryElement;
+    }
+    
+    this.allElement = createFilterElement.call(this, "All");
+    createDividerElement.call(this);
+    this.errorElement = createFilterElement.call(this, "Errors");
+    this.warningElement = createFilterElement.call(this, "Warnings");
+    this.logElement = createFilterElement.call(this, "Logs");
+
+    this.filter(this.allElement, false);
+
+    this._shortcuts = {};
+
+    var shortcut;
+    var clearConsoleHandler = this.requestClearMessages.bind(this);
+
+    shortcut = WebInspector.KeyboardShortcut.makeKey("k", WebInspector.KeyboardShortcut.Modifiers.Meta);
+    this._shortcuts[shortcut] = clearConsoleHandler;
+    this._shortcuts[shortcut].isMacOnly = true;
+    shortcut = WebInspector.KeyboardShortcut.makeKey("l", WebInspector.KeyboardShortcut.Modifiers.Ctrl);
+    this._shortcuts[shortcut] = clearConsoleHandler;
+
+    // Since the Context Menu for the Console View will always be the same, we can create it in
+    // the constructor.
+    this._contextMenu = new WebInspector.ContextMenu();
+    this._contextMenu.appendItem(WebInspector.UIString("Clear Console"), clearConsoleHandler);
+    this.messagesElement.addEventListener("contextmenu", this._handleContextMenuEvent.bind(this), true);
+    
+    this._customFormatters = {
+        "object": this._formatobject,
+        "array":  this._formatarray,
+        "node":   this._formatnode,
+        "string": this._formatstring
+    };
 }
 
 WebInspector.ConsoleView.prototype = {
+    
+    _updateFilter: function(e)
+    {
+        var isMac = WebInspector.isMac();
+        var selectMultiple = false;
+        if (isMac && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey)
+            selectMultiple = true;
+        if (!isMac && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey)
+            selectMultiple = true;
+
+        this.filter(e.target, selectMultiple);
+    },
+    
+    filter: function(target, selectMultiple)
+    {
+        function unselectAll()
+        {
+            this.allElement.removeStyleClass("selected");
+            this.errorElement.removeStyleClass("selected");
+            this.warningElement.removeStyleClass("selected");
+            this.logElement.removeStyleClass("selected");
+            
+            this.messagesElement.removeStyleClass("filter-all");
+            this.messagesElement.removeStyleClass("filter-errors");
+            this.messagesElement.removeStyleClass("filter-warnings");
+            this.messagesElement.removeStyleClass("filter-logs");
+        }
+        
+        var targetFilterClass = "filter-" + target.category.toLowerCase();
+
+        if (target.category == "All") {
+            if (target.hasStyleClass("selected")) {
+                // We can't unselect all, so we break early here
+                return;
+            }
+
+            unselectAll.call(this);
+        } else {
+            // Something other than all is being selected, so we want to unselect all
+            if (this.allElement.hasStyleClass("selected")) {
+                this.allElement.removeStyleClass("selected");
+                this.messagesElement.removeStyleClass("filter-all");
+            }
+        }
+        
+        if (!selectMultiple) {
+            // If multiple selection is off, we want to unselect everything else
+            // and just select ourselves.
+            unselectAll.call(this);
+            
+            target.addStyleClass("selected");
+            this.messagesElement.addStyleClass(targetFilterClass);
+            
+            return;
+        }
+        
+        if (target.hasStyleClass("selected")) {
+            // If selectMultiple is turned on, and we were selected, we just
+            // want to unselect ourselves.
+            target.removeStyleClass("selected");
+            this.messagesElement.removeStyleClass(targetFilterClass);
+        } else {
+            // If selectMultiple is turned on, and we weren't selected, we just
+            // want to select ourselves.
+            target.addStyleClass("selected");
+            this.messagesElement.addStyleClass(targetFilterClass);
+        }
+    },
+    
     _toggleConsoleButtonClicked: function()
     {
         this.drawer.visibleView = this;
@@ -70,6 +193,7 @@ WebInspector.ConsoleView.prototype = {
     {
         mainElement.appendChild(this.element);
         statusBarElement.appendChild(this.clearButton);
+        statusBarElement.appendChild(this.filterBarElement);
     },
 
     show: function()
@@ -94,40 +218,7 @@ WebInspector.ConsoleView.prototype = {
     addMessage: function(msg)
     {
         if (msg instanceof WebInspector.ConsoleMessage && !(msg instanceof WebInspector.ConsoleCommandResult)) {
-            msg.totalRepeatCount = msg.repeatCount;
-            msg.repeatDelta = msg.repeatCount;
-
-            var messageRepeated = false;
-
-            if (msg.isEqual && msg.isEqual(this.previousMessage)) {
-                // Because sometimes we get a large number of repeated messages and sometimes
-                // we get them one at a time, we need to know the difference between how many
-                // repeats we used to have and how many we have now.
-                msg.repeatDelta -= this.previousMessage.totalRepeatCount;
-
-                if (!isNaN(this.repeatCountBeforeCommand))
-                    msg.repeatCount -= this.repeatCountBeforeCommand;
-
-                if (!this.commandSincePreviousMessage) {
-                    // Recreate the previous message element to reset the repeat count.
-                    var messagesElement = this.currentGroup.messagesElement;
-                    messagesElement.removeChild(messagesElement.lastChild);
-                    messagesElement.appendChild(msg.toMessageElement());
-
-                    messageRepeated = true;
-                }
-            } else
-                delete this.repeatCountBeforeCommand;
-
-            // Increment the error or warning count
-            switch (msg.level) {
-            case WebInspector.ConsoleMessage.MessageLevel.Warning:
-                WebInspector.warnings += msg.repeatDelta;
-                break;
-            case WebInspector.ConsoleMessage.MessageLevel.Error:
-                WebInspector.errors += msg.repeatDelta;
-                break;
-            }
+            this._incrementErrorWarningCount(msg);
 
             // Add message to the resource panel
             if (msg.url in WebInspector.resourceURLMap) {
@@ -138,13 +229,9 @@ WebInspector.ConsoleView.prototype = {
 
             this.commandSincePreviousMessage = false;
             this.previousMessage = msg;
-
-            if (messageRepeated)
-                return;
         } else if (msg instanceof WebInspector.ConsoleCommand) {
             if (this.previousMessage) {
                 this.commandSincePreviousMessage = true;
-                this.repeatCountBeforeCommand = this.previousMessage.totalRepeatCount;
             }
         }
 
@@ -172,10 +259,44 @@ WebInspector.ConsoleView.prototype = {
         this.promptElement.scrollIntoView(false);
     },
 
-    clearMessages: function(clearInspectorController)
+    updateMessageRepeatCount: function(count)
     {
-        if (clearInspectorController)
-            InspectorController.clearMessages();
+        var msg = this.previousMessage;
+        var prevRepeatCount = msg.totalRepeatCount;
+        
+        if (!this.commandSincePreviousMessage) {
+            msg.repeatDelta = count - prevRepeatCount;
+            msg.repeatCount = msg.repeatCount + msg.repeatDelta;
+            msg.totalRepeatCount = count;
+            msg._updateRepeatCount();
+            this._incrementErrorWarningCount(msg);
+        } else {
+            msgCopy = new WebInspector.ConsoleMessage(msg.source, msg.type, msg.level, msg.line, msg.url, msg.groupLevel, count - prevRepeatCount);
+            msgCopy.totalRepeatCount = count;
+            msgCopy.setMessageBody(msg.args);
+            this.addMessage(msgCopy);
+        }
+    },
+
+    _incrementErrorWarningCount: function(msg)
+    {
+        switch (msg.level) {
+            case WebInspector.ConsoleMessage.MessageLevel.Warning:
+                WebInspector.warnings += msg.repeatDelta;
+                break;
+            case WebInspector.ConsoleMessage.MessageLevel.Error:
+                WebInspector.errors += msg.repeatDelta;
+                break;
+        }
+    },
+
+    requestClearMessages: function()
+    {
+        InjectedScriptAccess.getDefault().clearConsoleMessages(function() {});
+    },
+
+    clearMessages: function()
+    {
         if (WebInspector.panels.resources)
             WebInspector.panels.resources.clearMessages();
 
@@ -189,15 +310,13 @@ WebInspector.ConsoleView.prototype = {
         WebInspector.warnings = 0;
 
         delete this.commandSincePreviousMessage;
-        delete this.repeatCountBeforeCommand;
         delete this.previousMessage;
     },
 
     completions: function(wordRange, bestMatchOnly, completionsReadyCallback)
     {
         // Pass less stop characters to rangeOfWord so the range will be a more complete expression.
-        const expressionStopCharacters = " =:{;";
-        var expressionRange = wordRange.startContainer.rangeOfWord(wordRange.startOffset, expressionStopCharacters, this.promptElement, "backward");
+        var expressionRange = wordRange.startContainer.rangeOfWord(wordRange.startOffset, ExpressionStopCharacters, this.promptElement, "backward");
         var expressionString = expressionRange.toString();
         var lastIndex = expressionString.length - 1;
 
@@ -212,10 +331,23 @@ WebInspector.ConsoleView.prototype = {
             return;
 
         var reportCompletions = this._reportCompletions.bind(this, bestMatchOnly, completionsReadyCallback, dotNotation, bracketNotation, prefix);
-        this._evalInInspectedWindow(expressionString, reportCompletions);
+        // Collect comma separated object properties for the completion.
+
+        var includeInspectorCommandLineAPI = (!dotNotation && !bracketNotation);
+        var callFrameId = WebInspector.panels.scripts.selectedCallFrameId();
+        var injectedScriptAccess;
+        if (WebInspector.panels.scripts && WebInspector.panels.scripts.paused) {
+            var selectedCallFrame = WebInspector.panels.scripts.sidebarPanes.callstack.selectedCallFrame;
+            injectedScriptAccess = InjectedScriptAccess.get(selectedCallFrame.injectedScriptId);
+        } else
+            injectedScriptAccess = InjectedScriptAccess.getDefault();
+        injectedScriptAccess.getCompletions(expressionString, includeInspectorCommandLineAPI, callFrameId, reportCompletions);
     },
 
-    _reportCompletions: function(bestMatchOnly, completionsReadyCallback, dotNotation, bracketNotation, prefix, result) {
+    _reportCompletions: function(bestMatchOnly, completionsReadyCallback, dotNotation, bracketNotation, prefix, result, isException) {
+        if (isException)
+            return;
+
         if (bracketNotation) {
             if (prefix.length && prefix[0] === "'")
                 var quoteUsed = "'";
@@ -224,16 +356,7 @@ WebInspector.ConsoleView.prototype = {
         }
 
         var results = [];
-        var properties = Object.properties(result);
-        if (!dotNotation && !bracketNotation && result._inspectorCommandLineAPI) {
-            var commandLineAPI = Object.properties(result._inspectorCommandLineAPI);
-            for (var i = 0; i < commandLineAPI.length; ++i) {
-                var property = commandLineAPI[i];
-                if (property.charAt(0) !== "_")
-                    properties.push(property);
-            }
-        }
-        properties.sort();
+        var properties = Object.sortedProperties(result);
 
         for (var i = 0; i < properties.length; ++i) {
             var property = properties[i];
@@ -256,12 +379,23 @@ WebInspector.ConsoleView.prototype = {
             if (bestMatchOnly)
                 break;
         }
-        setTimeout(completionsReadyCallback, 0, results);
+        completionsReadyCallback(results);
     },
 
     _clearButtonClicked: function()
     {
-        this.clearMessages(true);
+        this.requestClearMessages();
+    },
+
+    _handleContextMenuEvent: function(event)
+    {
+        if (!window.getSelection().isCollapsed) {
+            // If there is a selection, we want to show our normal context menu
+            // (with Copy, etc.), and not Clear Console.
+            return;
+        }
+
+        this._contextMenu.show(event);
     },
 
     _messagesSelectStart: function(event)
@@ -288,122 +422,50 @@ WebInspector.ConsoleView.prototype = {
         if (!link || !link.representedNode)
             return;
 
-        WebInspector.updateFocusedNode(link.representedNode);
+        WebInspector.updateFocusedNode(link.representedNode.id);
         event.stopPropagation();
         event.preventDefault();
     },
 
     _promptKeyDown: function(event)
     {
-        switch (event.keyIdentifier) {
-            case "Enter":
-                this._enterKeyPressed(event);
-                return;
-        }
-
-        this.prompt.handleKeyEvent(event);
-    },
-
-    _evalInInspectedWindow: function(expression, callback)
-    {
-        if (WebInspector.panels.scripts && WebInspector.panels.scripts.paused) {
-            WebInspector.panels.scripts.evaluateInSelectedCallFrame(expression, false, callback);
+        if (isEnterKey(event)) {
+            this._enterKeyPressed(event);
             return;
         }
-        this.doEvalInWindow(expression, callback);
-    },
 
-    _ensureCommandLineAPIInstalled: function(inspectedWindow)
-    {
-        if (!inspectedWindow._inspectorCommandLineAPI) {
-            inspectedWindow.eval("window._inspectorCommandLineAPI = { \
-                $: function() { return document.getElementById.apply(document, arguments) }, \
-                $$: function() { return document.querySelectorAll.apply(document, arguments) }, \
-                $x: function(xpath, context) { \
-                    var nodes = []; \
-                    try { \
-                        var doc = context || document; \
-                        var results = doc.evaluate(xpath, doc, null, XPathResult.ANY_TYPE, null); \
-                        var node; \
-                        while (node = results.iterateNext()) nodes.push(node); \
-                    } catch (e) {} \
-                    return nodes; \
-                }, \
-                dir: function() { return console.dir.apply(console, arguments) }, \
-                dirxml: function() { return console.dirxml.apply(console, arguments) }, \
-                keys: function(o) { var a = []; for (var k in o) a.push(k); return a; }, \
-                values: function(o) { var a = []; for (var k in o) a.push(o[k]); return a; }, \
-                profile: function() { return console.profile.apply(console, arguments) }, \
-                profileEnd: function() { return console.profileEnd.apply(console, arguments) }, \
-                _inspectedNodes: [], \
-                get $0() { return _inspectorCommandLineAPI._inspectedNodes[0] }, \
-                get $1() { return _inspectorCommandLineAPI._inspectedNodes[1] }, \
-                get $2() { return _inspectorCommandLineAPI._inspectedNodes[2] }, \
-                get $3() { return _inspectorCommandLineAPI._inspectedNodes[3] }, \
-                get $4() { return _inspectorCommandLineAPI._inspectedNodes[4] } \
-            };");
-
-            inspectedWindow._inspectorCommandLineAPI.clear = InspectorController.wrapCallback(this.clearMessages.bind(this));
-            inspectedWindow._inspectorCommandLineAPI.inspect = InspectorController.wrapCallback(inspectObject.bind(this));
-
-            function inspectObject(o)
-            {
-                if (arguments.length === 0)
-                    return;
-
-                InspectorController.inspectedWindow().console.log(o);
-                if (Object.type(o, InspectorController.inspectedWindow()) === "node") {
-                    WebInspector.showElementsPanel();
-                    WebInspector.panels.elements.treeOutline.revealAndSelectNode(o);
-                } else {
-                    switch (Object.describe(o)) {
-                        case "Database":
-                            WebInspector.showDatabasesPanel();
-                            WebInspector.panels.databases.selectDatabase(o);
-                            break;
-                        case "Storage":
-                            WebInspector.showDatabasesPanel();
-                            WebInspector.panels.databases.selectDOMStorage(o);
-                            break;
-                    }
-                }
+        var shortcut = WebInspector.KeyboardShortcut.makeKeyFromEvent(event);
+        var handler = this._shortcuts[shortcut];
+        if (handler) {
+            if (!this._shortcuts[shortcut].isMacOnly || WebInspector.isMac()) {
+                handler();
+                event.preventDefault();
+                return;
             }
         }
     },
 
-    addInspectedNode: function(node)
+    evalInInspectedWindow: function(expression, objectGroup, callback)
     {
-        var inspectedWindow = InspectorController.inspectedWindow();
-        this._ensureCommandLineAPIInstalled(inspectedWindow);
-        var inspectedNodes = inspectedWindow._inspectorCommandLineAPI._inspectedNodes;
-        inspectedNodes.unshift(node);
-        if (inspectedNodes.length >= 5)
-            inspectedNodes.pop();
+        if (WebInspector.panels.scripts && WebInspector.panels.scripts.paused) {
+            WebInspector.panels.scripts.evaluateInSelectedCallFrame(expression, false, objectGroup, callback);
+            return;
+        }
+        this.doEvalInWindow(expression, objectGroup, callback);
     },
 
-    doEvalInWindow: function(expression, callback)
+    doEvalInWindow: function(expression, objectGroup, callback)
     {
         if (!expression) {
             // There is no expression, so the completion should happen against global properties.
             expression = "this";
         }
 
-        // Surround the expression in with statements to inject our command line API so that
-        // the window object properties still take more precedent than our API functions.
-        expression = "with (window._inspectorCommandLineAPI) { with (window) { " + expression + " } }";
-
-        var self = this;
-        function delayedEvaluation()
+        function evalCallback(result)
         {
-            var inspectedWindow = InspectorController.inspectedWindow();
-            self._ensureCommandLineAPIInstalled(inspectedWindow);
-            try {
-                callback(inspectedWindow.eval(expression));
-            } catch (e) {
-                callback(e, true);
-            }
-        }
-        setTimeout(delayedEvaluation, 0);
+            callback(result.value, result.isException);
+        };
+        InjectedScriptAccess.getDefault().evaluate(expression, objectGroup, evalCallback);
     },
 
     _enterKeyPressed: function(event)
@@ -431,46 +493,23 @@ WebInspector.ConsoleView.prototype = {
             self.prompt.text = "";
             self.addMessage(new WebInspector.ConsoleCommandResult(result, exception, commandMessage));
         }
-        this._evalInInspectedWindow(str, printResult);
+        this.evalInInspectedWindow(str, "console", printResult);
     },
 
     _format: function(output, forceObjectFormat)
     {
-        var inspectedWindow = InspectorController.inspectedWindow();
-        if (forceObjectFormat)
-            var type = "object";
-        else if (output instanceof inspectedWindow.NodeList)
-            var type = "array";
-        else
-            var type = Object.type(output, inspectedWindow);
+        var isProxy = (output != null && typeof output === "object");
+        var type = (forceObjectFormat ? "object" : Object.proxyType(output));
 
-        // We don't perform any special formatting on these types, so we just
-        // pass them through the simple _formatvalue function.
-        var undecoratedTypes = {
-            "undefined": 1,
-            "null": 1,
-            "boolean": 1,
-            "number": 1,
-            "date": 1,
-            "function": 1,
-        };
-
-        var formatter;
-        if (forceObjectFormat)
-            formatter = "_formatobject";
-        else if (type in undecoratedTypes)
-            formatter = "_formatvalue";
-        else {
-            formatter = "_format" + type;
-            if (!(formatter in this)) {
-                formatter = "_formatobject";
-                type = "object";
-            }
+        var formatter = this._customFormatters[type];
+        if (!formatter || !isProxy) {
+            formatter = this._formatvalue;
+            output = output.description || output;
         }
 
         var span = document.createElement("span");
-        span.addStyleClass("console-formatted-" + type);
-        this[formatter](output, span);
+        span.className = "console-formatted-" + type + " source-code";
+        formatter.call(this, output, span);
         return span;
     },
 
@@ -479,66 +518,70 @@ WebInspector.ConsoleView.prototype = {
         elem.appendChild(document.createTextNode(val));
     },
 
-    _formatstring: function(str, elem)
+    _formatobject: function(obj, elem)
     {
-        elem.appendChild(document.createTextNode("\"" + str + "\""));
+        elem.appendChild(new WebInspector.ObjectPropertiesSection(obj, obj.description, null, true).element);
     },
 
-    _formatregexp: function(re, elem)
+    _formatnode: function(object, elem)
     {
-        var formatted = String(re).replace(/([\\\/])/g, "\\$1").replace(/\\(\/[gim]*)$/, "$1").substring(1);
-        elem.appendChild(document.createTextNode(formatted));
+        function printNode(nodeId)
+        {
+            if (!nodeId)
+                return;
+            var treeOutline = new WebInspector.ElementsTreeOutline();
+            treeOutline.showInElementsPanelEnabled = true;
+            treeOutline.rootDOMNode = WebInspector.domAgent.nodeForId(nodeId);
+            treeOutline.element.addStyleClass("outline-disclosure");
+            if (!treeOutline.children[0].hasChildren)
+                treeOutline.element.addStyleClass("single-node");
+            elem.appendChild(treeOutline.element);
+        }
+
+        InjectedScriptAccess.get(object.injectedScriptId).pushNodeToFrontend(object, printNode);
     },
 
     _formatarray: function(arr, elem)
     {
+        InjectedScriptAccess.get(arr.injectedScriptId).getProperties(arr, false, false, this._printArray.bind(this, elem));
+    },
+
+    _formatstring: function(output, elem)
+    {
+        var span = document.createElement("span");
+        span.className = "console-formatted-string source-code";
+        span.appendChild(WebInspector.linkifyStringAsFragment(output.description));
+
+        // Make black quotes.
+        elem.removeStyleClass("console-formatted-string");
+        elem.appendChild(document.createTextNode("\""));
+        elem.appendChild(span);
+        elem.appendChild(document.createTextNode("\""));
+    },
+
+    _printArray: function(elem, properties)
+    {
+        if (!properties)
+            return;
+
+        var elements = [];
+        for (var i = 0; i < properties.length; ++i) {
+            var name = properties[i].name;
+            if (name == parseInt(name))
+                elements[name] = this._format(properties[i].value);
+        }
+
         elem.appendChild(document.createTextNode("["));
-        for (var i = 0; i < arr.length; ++i) {
-            elem.appendChild(this._format(arr[i]));
-            if (i < arr.length - 1)
+        for (var i = 0; i < elements.length; ++i) {
+            var element = elements[i];
+            if (element)
+                elem.appendChild(element);
+            else
+                elem.appendChild(document.createTextNode("undefined"))
+            if (i < elements.length - 1)
                 elem.appendChild(document.createTextNode(", "));
         }
         elem.appendChild(document.createTextNode("]"));
-    },
-
-    _formatnode: function(node, elem)
-    {
-        var treeOutline = new WebInspector.ElementsTreeOutline();
-        treeOutline.rootDOMNode = node;
-        treeOutline.element.addStyleClass("outline-disclosure");
-        if (!treeOutline.children[0].hasChildren)
-            treeOutline.element.addStyleClass("single-node");
-        elem.appendChild(treeOutline.element);
-    },
-
-    _formatobject: function(obj, elem)
-    {
-        elem.appendChild(new WebInspector.ObjectPropertiesSection(new WebInspector.ObjectProxy(obj), Object.describe(obj, true), null, null, true).element);
-    },
-
-    _formaterror: function(obj, elem)
-    {
-        var messageElement = document.createElement("span");
-        messageElement.className = "error-message";
-        messageElement.textContent = obj.name + ": " + obj.message;
-        elem.appendChild(messageElement);
-
-        if (obj.sourceURL) {
-            var urlElement = document.createElement("a");
-            urlElement.className = "webkit-html-resource-link";
-            urlElement.href = obj.sourceURL;
-            urlElement.lineNumber = obj.line;
-            urlElement.preferredPanel = "scripts";
-
-            if (obj.line > 0)
-                urlElement.textContent = WebInspector.displayNameForURL(obj.sourceURL) + ":" + obj.line;
-            else
-                urlElement.textContent = WebInspector.displayNameForURL(obj.sourceURL);
-
-            elem.appendChild(document.createTextNode(" ("));
-            elem.appendChild(urlElement);
-            elem.appendChild(document.createTextNode(")"));
-        }
     }
 }
 
@@ -553,6 +596,8 @@ WebInspector.ConsoleMessage = function(source, type, level, line, url, groupLeve
     this.url = url;
     this.groupLevel = groupLevel;
     this.repeatCount = repeatCount;
+    this.repeatDelta = repeatCount;
+    this.totalRepeatCount = repeatCount;
     if (arguments.length > 7)
         this.setMessageBody(Array.prototype.slice.call(arguments, 7));
 }
@@ -560,10 +605,11 @@ WebInspector.ConsoleMessage = function(source, type, level, line, url, groupLeve
 WebInspector.ConsoleMessage.prototype = {
     setMessageBody: function(args)
     {
+        this.args = args;
         switch (this.type) {
             case WebInspector.ConsoleMessage.MessageType.Trace:
                 var span = document.createElement("span");
-                span.addStyleClass("console-formatted-trace");
+                span.className = "console-formatted-trace source-code";
                 var stack = Array.prototype.slice.call(args);
                 var funcNames = stack.map(function(f) {
                     return f || WebInspector.UIString("(anonymous function)");
@@ -590,70 +636,85 @@ WebInspector.ConsoleMessage.prototype = {
 
     _format: function(parameters)
     {
+        // This node is used like a Builder. Values are continually appended onto it.
         var formattedResult = document.createElement("span");
-
         if (!parameters.length)
             return formattedResult;
 
-        function formatForConsole(obj)
-        {
-            return WebInspector.console._format(obj);
-        }
+        // Formatting code below assumes that parameters are all wrappers whereas frontend console
+        // API allows passing arbitrary values as messages (strings, numbers, etc.). Wrap them here.
+        for (var i = 0; i < parameters.length; ++i)
+            if (typeof parameters[i] !== "object" && typeof parameters[i] !== "function")
+                parameters[i] = WebInspector.ObjectProxy.wrapPrimitiveValue(parameters[i]);
 
-        function formatAsObjectForConsole(obj)
-        {
-            return WebInspector.console._format(obj, true);
-        }
+        // There can be string log and string eval result. We distinguish between them based on message type.
+        var shouldFormatMessage = Object.proxyType(parameters[0]) === "string" && this.type !== WebInspector.ConsoleMessage.MessageType.Result;
 
-        if (Object.type(parameters[0], InspectorController.inspectedWindow()) === "string") {
-            var formatters = {}
-            for (var i in String.standardFormatters)
-                formatters[i] = String.standardFormatters[i];
-
-            // Firebug uses %o for formatting objects.
-            formatters.o = formatForConsole;
-            // Firebug allows both %i and %d for formatting integers.
-            formatters.i = formatters.d;
-            // Support %O to force object formating, instead of the type-based %o formatting.
-            formatters.O = formatAsObjectForConsole;
-
-            function append(a, b)
-            {
-                if (!(b instanceof Node))
-                    a.appendChild(WebInspector.linkifyStringAsFragment(b.toString()));
-                else
-                    a.appendChild(b);
-                return a;
-            }
-
-            var result = String.format(parameters[0], parameters.slice(1), formatters, formattedResult, append);
-            formattedResult = result.formattedResult;
+        // Multiple parameters with the first being a format string. Save unused substitutions.
+        if (shouldFormatMessage) {
+            // Multiple parameters with the first being a format string. Save unused substitutions.
+            var result = this._formatWithSubstitutionString(parameters, formattedResult);
             parameters = result.unusedSubstitutions;
             if (parameters.length)
                 formattedResult.appendChild(document.createTextNode(" "));
         }
 
+        // Single parameter, or unused substitutions from above.
         for (var i = 0; i < parameters.length; ++i) {
-            if (typeof parameters[i] === "string")
-                formattedResult.appendChild(WebInspector.linkifyStringAsFragment(parameters[i]));
+            // Inline strings when formatting.
+            if (shouldFormatMessage && parameters[i].type === "string")
+                formattedResult.appendChild(document.createTextNode(parameters[i].description));
             else
-                formattedResult.appendChild(formatForConsole(parameters[i]));
-
+                formattedResult.appendChild(WebInspector.console._format(parameters[i]));
             if (i < parameters.length - 1)
                 formattedResult.appendChild(document.createTextNode(" "));
         }
-
         return formattedResult;
+    },
+
+    _formatWithSubstitutionString: function(parameters, formattedResult)
+    {
+        var formatters = {}
+        for (var i in String.standardFormatters)
+            formatters[i] = String.standardFormatters[i];
+
+        function consoleFormatWrapper(force)
+        {
+            return function(obj) {
+                return WebInspector.console._format(obj, force);
+            };
+        }
+
+        // Firebug uses %o for formatting objects.
+        formatters.o = consoleFormatWrapper();
+        // Firebug allows both %i and %d for formatting integers.
+        formatters.i = formatters.d;
+        // Support %O to force object formatting, instead of the type-based %o formatting.
+        formatters.O = consoleFormatWrapper(true);
+
+        function append(a, b)
+        {
+            if (!(b instanceof Node))
+                a.appendChild(WebInspector.linkifyStringAsFragment(b.toString()));
+            else
+                a.appendChild(b);
+            return a;
+        }
+
+        // String.format does treat formattedResult like a Builder, result is an object.
+        return String.format(parameters[0].description, parameters.slice(1), formatters, formattedResult, append);
     },
 
     toMessageElement: function()
     {
-        if (this.propertiesSection)
-            return this.propertiesSection.element;
+        if (this._element)
+            return this._element;
 
         var element = document.createElement("div");
         element.message = this;
         element.className = "console-message";
+
+        this._element = element;
 
         switch (this.source) {
             case WebInspector.ConsoleMessage.MessageSource.HTML:
@@ -683,6 +744,9 @@ WebInspector.ConsoleMessage.prototype = {
             case WebInspector.ConsoleMessage.MessageLevel.Log:
                 element.addStyleClass("console-log-level");
                 break;
+            case WebInspector.ConsoleMessage.MessageLevel.Debug:
+                element.addStyleClass("console-debug-level");
+                break;
             case WebInspector.ConsoleMessage.MessageLevel.Warning:
                 element.addStyleClass("console-warning-level");
                 break;
@@ -691,23 +755,13 @@ WebInspector.ConsoleMessage.prototype = {
                 break;
         }
         
-        if (this.type === WebInspector.ConsoleMessage.MessageType.StartGroup) {
+        if (this.type === WebInspector.ConsoleMessage.MessageType.StartGroup)
             element.addStyleClass("console-group-title");
-        }
 
         if (this.elementsTreeOutline) {
             element.addStyleClass("outline-disclosure");
             element.appendChild(this.elementsTreeOutline.element);
             return element;
-        }
-
-        if (this.repeatCount > 1) {
-            var messageRepeatCountElement = document.createElement("span");
-            messageRepeatCountElement.className = "bubble";
-            messageRepeatCountElement.textContent = this.repeatCount;
-
-            element.appendChild(messageRepeatCountElement);
-            element.addStyleClass("repeated-message");
         }
 
         if (this.url && this.url !== "undefined") {
@@ -728,11 +782,27 @@ WebInspector.ConsoleMessage.prototype = {
         }
 
         var messageTextElement = document.createElement("span");
-        messageTextElement.className = "console-message-text";
+        messageTextElement.className = "console-message-text source-code";
+        if (this.type === WebInspector.ConsoleMessage.MessageType.Assert)
+            messageTextElement.appendChild(document.createTextNode(WebInspector.UIString("Assertion failed: ")));
         messageTextElement.appendChild(this.formattedMessage);
         element.appendChild(messageTextElement);
 
+        if (this.repeatCount > 1)
+            this._updateRepeatCount();
+
         return element;
+    },
+
+    _updateRepeatCount: function() {
+        if (!this.repeatCountElement) {
+            this.repeatCountElement = document.createElement("span");
+            this.repeatCountElement.className = "bubble";
+    
+            this._element.insertBefore(this.repeatCountElement, this._element.firstChild);
+            this._element.addStyleClass("repeated-message");
+        }
+        this.repeatCountElement.textContent = this.repeatCount;
     },
 
     toString: function()
@@ -776,6 +846,12 @@ WebInspector.ConsoleMessage.prototype = {
             case WebInspector.ConsoleMessage.MessageType.EndGroup:
                 typeString = "End Group";
                 break;
+            case WebInspector.ConsoleMessage.MessageType.Assert:
+                typeString = "Assert";
+                break;
+            case WebInspector.ConsoleMessage.MessageType.Result:
+                typeString = "Result";
+                break;
         }
         
         var levelString;
@@ -788,6 +864,9 @@ WebInspector.ConsoleMessage.prototype = {
                 break;
             case WebInspector.ConsoleMessage.MessageLevel.Warning:
                 levelString = "Warning";
+                break;
+            case WebInspector.ConsoleMessage.MessageLevel.Debug:
+                levelString = "Debug";
                 break;
             case WebInspector.ConsoleMessage.MessageLevel.Error:
                 levelString = "Error";
@@ -828,14 +907,17 @@ WebInspector.ConsoleMessage.MessageType = {
     Object: 1,
     Trace: 2,
     StartGroup: 3,
-    EndGroup: 4
+    EndGroup: 4,
+    Assert: 5,
+    Result: 6
 }
 
 WebInspector.ConsoleMessage.MessageLevel = {
     Tip: 0,
     Log: 1,
     Warning: 2,
-    Error: 3
+    Error: 3,
+    Debug: 4
 }
 
 WebInspector.ConsoleCommand = function(command)
@@ -851,7 +933,7 @@ WebInspector.ConsoleCommand.prototype = {
         element.className = "console-user-command";
 
         var commandTextElement = document.createElement("span");
-        commandTextElement.className = "console-message-text";
+        commandTextElement.className = "console-message-text source-code";
         commandTextElement.textContent = this.command;
         element.appendChild(commandTextElement);
 
@@ -859,16 +941,29 @@ WebInspector.ConsoleCommand.prototype = {
     }
 }
 
+WebInspector.ConsoleTextMessage = function(text, level)
+{
+    level = level || WebInspector.ConsoleMessage.MessageLevel.Log;
+    WebInspector.ConsoleMessage.call(this, WebInspector.ConsoleMessage.MessageSource.JS, WebInspector.ConsoleMessage.MessageType.Log, level, 0, null, null, 1, text);
+}
+
+WebInspector.ConsoleTextMessage.prototype.__proto__ = WebInspector.ConsoleMessage.prototype;
+
 WebInspector.ConsoleCommandResult = function(result, exception, originatingCommand)
 {
     var level = (exception ? WebInspector.ConsoleMessage.MessageLevel.Error : WebInspector.ConsoleMessage.MessageLevel.Log);
-    var message = (exception ? String(result) : result);
+    var message = result;
+    if (exception) {
+        // Distinguish between strings and errors (no need to quote latter).
+        message = WebInspector.ObjectProxy.wrapPrimitiveValue(result);
+        message.type = "error";
+    }
     var line = (exception ? result.line : -1);
     var url = (exception ? result.sourceURL : null);
 
-    WebInspector.ConsoleMessage.call(this, WebInspector.ConsoleMessage.MessageSource.JS, WebInspector.ConsoleMessage.MessageType.Log, level, line, url, null, 1, message);
-
     this.originatingCommand = originatingCommand;
+
+    WebInspector.ConsoleMessage.call(this, WebInspector.ConsoleMessage.MessageSource.JS, WebInspector.ConsoleMessage.MessageType.Result, level, line, url, null, 1, message);
 }
 
 WebInspector.ConsoleCommandResult.prototype = {

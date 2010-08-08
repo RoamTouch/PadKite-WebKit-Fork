@@ -64,12 +64,8 @@ namespace WebCore {
         WorkerContextExecutionProxy(WorkerContext*);
         ~WorkerContextExecutionProxy();
 
-        void removeEventListener(V8EventListener*);
-
         // Finds/creates event listener wrappers.
         PassRefPtr<V8EventListener> findOrCreateEventListener(v8::Local<v8::Value> listener, bool isInline, bool findOnly);
-        PassRefPtr<V8EventListener> findOrCreateObjectEventListener(v8::Local<v8::Value> object, bool isInline, bool findOnly);
-        PassRefPtr<V8EventListener> findOrCreateEventListenerHelper(v8::Local<v8::Value> object, bool isInline, bool findOnly, bool createObjectEventListener);
 
         // Track the event so that we can detach it from the JS wrapper when a worker
         // terminates. This is needed because we need to be able to dispose these
@@ -88,17 +84,6 @@ namespace WebCore {
         // Returns WorkerContextExecutionProxy object of the currently executing context. 0 will be returned if the current executing context is not the worker context.
         static WorkerContextExecutionProxy* retrieve();
 
-        // We have to keep all these conversion functions here before WorkerContextExecutionProxy is refactor-ed.
-        template<typename T>
-        static v8::Handle<v8::Value> convertToV8Object(V8ClassIndex::V8WrapperType type, PassRefPtr<T> impl)
-        {
-            return convertToV8Object(type, impl.get());
-        }
-        static v8::Handle<v8::Value> convertToV8Object(V8ClassIndex::V8WrapperType, void* impl);
-        static v8::Handle<v8::Value> convertEventToV8Object(Event*);
-        static v8::Handle<v8::Value> convertEventTargetToV8Object(EventTarget*);
-        static v8::Handle<v8::Value> convertWorkerContextToV8Object(WorkerContext*);
-
     private:
         void initV8IfNeeded();
         void initContextIfNeeded();
@@ -107,15 +92,14 @@ namespace WebCore {
         // Run an already compiled script.
         v8::Local<v8::Value> runScript(v8::Handle<v8::Script>);
 
-        static v8::Local<v8::Object> toV8(V8ClassIndex::V8WrapperType descriptorType, V8ClassIndex::V8WrapperType cptrType, void* impl);
-
         static bool forgetV8EventObject(Event*);
+
+        static const int kWorkerMaxStackSize = 500 * 1024;
 
         WorkerContext* m_workerContext;
         v8::Persistent<v8::Context> m_context;
         int m_recursion;
 
-        OwnPtr<V8EventListenerList> m_listeners;
         Vector<Event*> m_events;
     };
 

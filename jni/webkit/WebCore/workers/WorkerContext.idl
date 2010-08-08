@@ -30,10 +30,12 @@ module threads {
         Conditional=WORKERS,
         CustomMarkFunction,
         DelegatingGetOwnPropertySlot,
+        EventTarget,
         ExtendsDOMGlobalObject,
         IsWorkerContext,
         LegacyParent=JSWorkerContextBase,
-        NoStaticTables
+        NoStaticTables,
+        OmitConstructor
     ] WorkerContext {
 
         // WorkerGlobalScope
@@ -69,6 +71,10 @@ module threads {
         boolean dispatchEvent(in Event evt)
             raises(EventException);
 
+#if defined(ENABLE_NOTIFICATIONS) && ENABLE_NOTIFICATIONS
+        // Notification interface
+        readonly attribute [EnabledAtRuntime] NotificationCenter webkitNotifications;
+#endif
 
         // Constructors
         attribute MessageEventConstructor MessageEvent;
@@ -77,7 +83,13 @@ module threads {
 #if ENABLE_CHANNEL_MESSAGING
         attribute [JSCCustomGetter] MessageChannelConstructor MessageChannel;
 #endif
+#if ENABLE_EVENTSOURCE
+        attribute [JSCCustomGetter] EventSourceConstructor EventSource;
+#endif
         attribute [JSCCustomGetter] XMLHttpRequestConstructor XMLHttpRequest;
+#if defined(ENABLE_WEB_SOCKETS) && ENABLE_WEB_SOCKETS
+        attribute [JSCCustomGetter,EnabledAtRuntime] WebSocketConstructor WebSocket; // Usable with the new operator
+#endif
     };
 
 }

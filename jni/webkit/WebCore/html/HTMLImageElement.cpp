@@ -118,6 +118,8 @@ void HTMLImageElement::parseMappedAttribute(MappedAttribute* attr)
         setAttributeEventListener(eventNames().abortEvent, createAttributeEventListener(this, attr));
     else if (attrName == onloadAttr)
         setAttributeEventListener(eventNames().loadEvent, createAttributeEventListener(this, attr));
+    else if (attrName == onbeforeloadAttr)
+        setAttributeEventListener(eventNames().beforeloadEvent, createAttributeEventListener(this, attr));
     else if (attrName == compositeAttr) {
         if (!parseCompositeOperator(attr->value(), m_compositeOperator))
             m_compositeOperator = CompositeSourceOver;
@@ -129,7 +131,7 @@ void HTMLImageElement::parseMappedAttribute(MappedAttribute* attr)
             document->addNamedItem(newName);
         }
         m_name = newName;
-    } else if (attr->name() == idAttr) {
+    } else if (attr->name() == idAttributeName()) {
         const AtomicString& newId = attr->value();
         if (inDocument() && document()->isHTMLDocument()) {
             HTMLDocument* document = static_cast<HTMLDocument*>(this->document());
@@ -167,7 +169,7 @@ void HTMLImageElement::attach()
 {
     HTMLElement::attach();
 
-    if (renderer() && renderer()->isImage()) {
+    if (renderer() && renderer()->isImage() && m_imageLoader.haveFiredBeforeLoadEvent()) {
         RenderImage* imageObj = toRenderImage(renderer());
         if (imageObj->hasImage())
             return;
@@ -205,6 +207,30 @@ void HTMLImageElement::removedFromDocument()
     }
 
     HTMLElement::removedFromDocument();
+}
+
+void HTMLImageElement::insertedIntoTree(bool deep)
+{
+    if (!m_form) {
+        // m_form can be non-null if it was set in constructor.
+        for (Node* ancestor = parentNode(); ancestor; ancestor = ancestor->parentNode()) {
+            if (ancestor->hasTagName(formTag)) {
+                m_form = static_cast<HTMLFormElement*>(ancestor);
+                m_form->registerImgElement(this);
+                break;
+            }
+        }
+    }
+
+    HTMLElement::insertedIntoTree(deep);
+}
+
+void HTMLImageElement::removedFromTree(bool deep)
+{
+    if (m_form)
+        m_form->removeImgElement(this);
+    m_form = 0;
+    HTMLElement::removedFromTree(deep);
 }
 
 int HTMLImageElement::width(bool ignorePendingStylesheets) const
@@ -279,44 +305,9 @@ bool HTMLImageElement::isURLAttribute(Attribute* attr) const
         || (attr->name() == usemapAttr && attr->value().string()[0] != '#');
 }
 
-String HTMLImageElement::name() const
-{
-    return getAttribute(nameAttr);
-}
-
-void HTMLImageElement::setName(const String& value)
-{
-    setAttribute(nameAttr, value);
-}
-
-String HTMLImageElement::align() const
-{
-    return getAttribute(alignAttr);
-}
-
-void HTMLImageElement::setAlign(const String& value)
-{
-    setAttribute(alignAttr, value);
-}
-
-String HTMLImageElement::alt() const
+const AtomicString& HTMLImageElement::alt() const
 {
     return getAttribute(altAttr);
-}
-
-void HTMLImageElement::setAlt(const String& value)
-{
-    setAttribute(altAttr, value);
-}
-
-String HTMLImageElement::border() const
-{
-    return getAttribute(borderAttr);
-}
-
-void HTMLImageElement::setBorder(const String& value)
-{
-    setAttribute(borderAttr, value);
 }
 
 bool HTMLImageElement::draggable() const
@@ -381,16 +372,6 @@ void HTMLImageElement::setSrc(const String& value)
     setAttribute(srcAttr, value);
 }
 
-String HTMLImageElement::useMap() const
-{
-    return getAttribute(usemapAttr);
-}
-
-void HTMLImageElement::setUseMap(const String& value)
-{
-    setAttribute(usemapAttr, value);
-}
-
 int HTMLImageElement::vspace() const
 {
     // ### return actual vspace
@@ -439,7 +420,8 @@ void HTMLImageElement::addSubresourceAttributeURLs(ListHashSet<KURL>& urls) cons
     HTMLElement::addSubresourceAttributeURLs(urls);
 
     addSubresourceURL(urls, src());
-    addSubresourceURL(urls, document()->completeURL(useMap()));
+    // FIXME: What about when the usemap attribute begins with "#"?
+    addSubresourceURL(urls, document()->completeURL(getAttribute(usemapAttr)));
 }
 
 }

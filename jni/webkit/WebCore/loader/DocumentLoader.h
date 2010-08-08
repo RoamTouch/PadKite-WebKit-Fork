@@ -44,7 +44,6 @@ namespace WebCore {
     class ArchiveResource;
     class ArchiveResourceCollection;
 #endif
-    class CachedPage;
     class Frame;
     class FrameLoader;
     class MainResourceLoader;
@@ -91,7 +90,7 @@ namespace WebCore {
         const KURL& responseURL() const;
         const String& responseMIMEType() const;
         
-        void replaceRequestURLForAnchorScroll(const KURL&);
+        void replaceRequestURLForSameDocumentNavigation(const KURL&);
         bool isStopping() const { return m_isStopping; }
         void stopLoading(DatabasePolicy = DatabasePolicyStop);
         void setCommitted(bool committed) { m_committed = committed; }
@@ -159,7 +158,7 @@ namespace WebCore {
         KURL urlForHistory() const;
         bool urlForHistoryReflectsFailure() const;
 
-        // These accessors accomodate WebCore's somewhat fickle custom of creating history
+        // These accessors accommodate WebCore's somewhat fickle custom of creating history
         // items for redirects, but only sometimes. For "source" and "destination",
         // these accessors return the URL that would have been used if a history
         // item were created. This allows WebKit to link history items reflecting
@@ -173,10 +172,6 @@ namespace WebCore {
 
         bool didCreateGlobalHistoryEntry() const { return m_didCreateGlobalHistoryEntry; }
         void setDidCreateGlobalHistoryEntry(bool didCreateGlobalHistoryEntry) { m_didCreateGlobalHistoryEntry = didCreateGlobalHistoryEntry; }
-        
-        void loadFromCachedPage(PassRefPtr<CachedPage>);
-        void setLoadingFromCachedPage(bool loading) { m_loadingFromCachedPage = loading; }
-        bool isLoadingFromCachedPage() const { return m_loadingFromCachedPage; }
         
         void setDefersLoading(bool);
 
@@ -264,7 +259,6 @@ namespace WebCore {
         bool m_gotFirstByte;
         bool m_primaryLoadComplete;
         bool m_isClientRedirect;
-        bool m_loadingFromCachedPage;
 
         String m_pageTitle;
 

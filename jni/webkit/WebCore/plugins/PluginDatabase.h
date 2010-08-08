@@ -46,12 +46,15 @@ namespace WebCore {
     class Frame;
     class IntSize;
     class KURL;
+    class PluginDatabaseClient;
     class PluginPackage;
 
     typedef HashSet<RefPtr<PluginPackage>, PluginPackageHash> PluginSet;
 
-    class PluginDatabase {
+    class PluginDatabase : public Noncopyable {
     public:
+        PluginDatabase();
+
         // The first call to installedPlugins creates the plugin database
         // and by default populates it with the plugins installed on the system.
         // For testing purposes, it is possible to not populate the database
@@ -78,8 +81,15 @@ namespace WebCore {
             m_pluginDirectories = directories;
         }
 
+        void setClient(PluginDatabaseClient* client)
+        {
+            m_client = client;
+        }
+
         static Vector<String> defaultPluginDirectories();
         Vector<String> pluginDirectories() const { return m_pluginDirectories; }
+
+        String MIMETypeForExtension(const String& extension) const;
 
     private:
         void getPluginPathsInDirectories(HashSet<String>&) const;
@@ -88,8 +98,6 @@ namespace WebCore {
         // Returns whether the plugin was actually added or not (it won't be added if it's a duplicate of an existing plugin).
         bool add(PassRefPtr<PluginPackage>);
         void remove(PluginPackage*);
-
-        String MIMETypeForExtension(const String& extension) const;
 
         Vector<String> m_pluginDirectories;
         HashSet<String> m_registeredMIMETypes;
@@ -103,6 +111,7 @@ namespace WebCore {
         friend class ::android::WebSettings;
 #endif
         HashMap<String, RefPtr<PluginPackage> > m_preferredPlugins;
+        PluginDatabaseClient* m_client;
     };
 
 } // namespace WebCore

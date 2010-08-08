@@ -27,6 +27,8 @@
 #include "config.h"
 #include "ContextMenu.h"
 
+#if ENABLE(CONTEXT_MENUS)
+
 #include "ContextMenuController.h"
 #include "ContextMenuClient.h"
 #include "CSSComputedStyleDeclaration.h"
@@ -38,6 +40,7 @@
 #include "Editor.h"
 #include "Frame.h"
 #include "FrameLoader.h"
+#include "InspectorController.h"
 #include "KURL.h"
 #include "LocalizedStrings.h"
 #include "Node.h"
@@ -273,7 +276,9 @@ void ContextMenu::populate()
     ContextMenuItem LookInDictionaryItem(ActionType, ContextMenuItemTagLookUpInDictionary, 
         contextMenuItemTagLookUpInDictionary());
 #endif
+#if !PLATFORM(GTK)
     ContextMenuItem SearchWebItem(ActionType, ContextMenuItemTagSearchWeb, contextMenuItemTagSearchWeb());
+#endif
     ContextMenuItem CopyItem(ActionType, ContextMenuItemTagCopy, contextMenuItemTagCopy());
     ContextMenuItem BackItem(ActionType, ContextMenuItemTagGoBack, contextMenuItemTagGoBack());
     ContextMenuItem ForwardItem(ActionType, ContextMenuItemTagGoForward,  contextMenuItemTagGoForward());
@@ -338,8 +343,10 @@ void ContextMenu::populate()
 #if PLATFORM(MAC)
                     appendItem(SearchSpotlightItem);
 #endif
+#if !PLATFORM(GTK)
                     appendItem(SearchWebItem);
                     appendItem(*separatorItem());
+#endif
 #if PLATFORM(MAC)
                     appendItem(LookInDictionaryItem);
                     appendItem(*separatorItem());
@@ -359,10 +366,10 @@ void ContextMenu::populate()
                 appendItem(StopItem);
                 appendItem(ReloadItem);
 #else
-                if (loader->canGoBackOrForward(-1))
+                if (frame->page() && frame->page()->canGoBackOrForward(-1))
                     appendItem(BackItem);
 
-                if (loader->canGoBackOrForward(1))
+                if (frame->page() && frame->page()->canGoBackOrForward(1))
                     appendItem(ForwardItem);
 
                 // use isLoadingInAPISense rather than isLoading because Stop/Reload are
@@ -442,8 +449,10 @@ void ContextMenu::populate()
 #if PLATFORM(MAC)
             appendItem(SearchSpotlightItem);
 #endif
+#if !PLATFORM(GTK)
             appendItem(SearchWebItem);
             appendItem(*separatorItem());
+#endif
      
 #if PLATFORM(MAC)
             appendItem(LookInDictionaryItem);
@@ -463,10 +472,12 @@ void ContextMenu::populate()
         if (!inPasswordField) {
             appendItem(*separatorItem());
 #ifndef BUILDING_ON_TIGER
+#if !PLATFORM(GTK)
             ContextMenuItem SpellingAndGrammarMenuItem(SubmenuType, ContextMenuItemTagSpellingMenu, 
                 contextMenuItemTagSpellingMenu());
             createAndAppendSpellingAndGrammarSubMenu(m_hitTestResult, SpellingAndGrammarMenuItem);
             appendItem(SpellingAndGrammarMenuItem);
+#endif
 #else
             ContextMenuItem SpellingMenuItem(SubmenuType, ContextMenuItemTagSpellingMenu, 
                 contextMenuItemTagSpellingMenu());
@@ -483,10 +494,17 @@ void ContextMenu::populate()
             createAndAppendTransformationsSubMenu(m_hitTestResult, transformationsMenuItem);
             appendItem(transformationsMenuItem);
 #endif
-            ContextMenuItem  FontMenuItem(SubmenuType, ContextMenuItemTagFontMenu, 
-                contextMenuItemTagFontMenu());
-            createAndAppendFontSubMenu(m_hitTestResult, FontMenuItem);
-            appendItem(FontMenuItem);
+#if PLATFORM(GTK)
+            bool shouldShowFontMenu = frame->editor()->canEditRichly();
+#else
+            bool shouldShowFontMenu = true;
+#endif
+            if (shouldShowFontMenu) {
+                ContextMenuItem FontMenuItem(SubmenuType, ContextMenuItemTagFontMenu, 
+                    contextMenuItemTagFontMenu());
+                createAndAppendFontSubMenu(m_hitTestResult, FontMenuItem);
+                appendItem(FontMenuItem);
+            }
 #if PLATFORM(MAC)
             ContextMenuItem SpeechMenuItem(SubmenuType, ContextMenuItemTagSpeechMenu, contextMenuItemTagSpeechMenu());
             createAndAppendSpeechSubMenu(m_hitTestResult, SpeechMenuItem);
@@ -514,6 +532,7 @@ void ContextMenu::populate()
     }
 }
 
+#if ENABLE(INSPECTOR)
 void ContextMenu::addInspectElementItem()
 {
     Node* node = m_hitTestResult.innerNonSharedNode();
@@ -535,6 +554,7 @@ void ContextMenu::addInspectElementItem()
     appendItem(*separatorItem());
     appendItem(InspectElementItem);
 }
+#endif // ENABLE(INSPECTOR)
 
 void ContextMenu::checkOrEnableIfNeeded(ContextMenuItem& item) const
 {
@@ -717,10 +737,10 @@ void ContextMenu::checkOrEnableIfNeeded(ContextMenuItem& item) const
 #endif
 #if PLATFORM(GTK)
         case ContextMenuItemTagGoBack:
-            shouldEnable = frame->loader()->canGoBackOrForward(-1);
+            shouldEnable = frame->page() && frame->page()->canGoBackOrForward(-1);
             break;
         case ContextMenuItemTagGoForward:
-            shouldEnable = frame->loader()->canGoBackOrForward(1);
+            shouldEnable = frame->page() && frame->page()->canGoBackOrForward(1);
             break;
         case ContextMenuItemTagStop:
             shouldEnable = frame->loader()->documentLoader()->isLoadingInAPISense();
@@ -772,7 +792,10 @@ void ContextMenu::checkOrEnableIfNeeded(ContextMenuItem& item) const
         case ContextMenuItemTagTextDirectionMenu:
         case ContextMenuItemTagPDFSinglePageScrolling:
         case ContextMenuItemTagPDFFacingPagesScrolling:
+#if ENABLE(INSPECTOR)
         case ContextMenuItemTagInspectElement:
+#endif
+        case ContextMenuItemBaseCustomTag:
         case ContextMenuItemBaseApplicationTag:
             break;
     }
@@ -781,4 +804,6 @@ void ContextMenu::checkOrEnableIfNeeded(ContextMenuItem& item) const
     item.setEnabled(shouldEnable);
 }
 
-}
+} // namespace WebCore
+
+#endif // ENABLE(CONTEXT_MENUS)

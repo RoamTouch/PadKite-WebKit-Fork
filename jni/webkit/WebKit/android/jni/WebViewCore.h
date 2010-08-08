@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -27,6 +27,7 @@
 #define WEBVIEWCORE_H
 
 #include "android_npapi.h"
+#include "FileChooser.h"
 #include "CacheBuilder.h"
 #include "CachedHistory.h"
 #include "PictureSet.h"
@@ -45,6 +46,7 @@ namespace WebCore {
     class AtomicString;
     class Color;
     class FrameView;
+    class HTMLAnchorElement;
     class HTMLSelectElement;
     class RenderPart;
     class RenderText;
@@ -56,20 +58,23 @@ namespace WebCore {
     class PageGroup;
 }
 
+#if USE(ACCELERATED_COMPOSITING)
+namespace WebCore {
+    class GraphicsLayerAndroid;
+    class LayerAndroid;
+}
+#endif
+
 struct PluginWidgetAndroid;
 class SkPicture;
 class SkIRect;
 
 namespace android {
 
-    enum PluginState {
-        kGainFocus_PluginState  = 0,
-        kLoseFocus_PluginState  = 1,
-    };
-
+    class CachedFrame;
+    class CachedNode;
     class CachedRoot;
     class ListBoxReply;
-    class SurfaceCallback;
 
     class WebCoreReply : public WebCoreRefObject {
     public:
@@ -129,6 +134,12 @@ namespace android {
          * of the DOM is drawn.
          */
         void contentDraw();
+
+#if USE(ACCELERATED_COMPOSITING)
+        GraphicsLayerAndroid* graphicsRootLayer() const;
+        void immediateRepaint();
+        void setUIRootLayer(const LayerAndroid* layer);
+#endif
 
         /** Invalidate the view/screen, NOT the content/DOM, but expressed in
          *  content/DOM coordinates (i.e. they need to eventually be scaled,
@@ -236,15 +247,21 @@ namespace android {
          */
         void geolocationPermissionsHidePrompt();
 
-        void addMessageToConsole(const String& message, unsigned int lineNumber, const String& sourceID);
+        void addMessageToConsole(const String& message, unsigned int lineNumber, const String& sourceID, int msgLevel);
+
+        /**
+         * Tell the Java side of the scrollbar mode
+         */
+        void setScrollbarModes(ScrollbarMode horizontalMode, ScrollbarMode verticalMode);
 
         //
         // Followings support calls from Java to native WebCore
         //
 
-        WebCore::String retrieveHref(WebCore::Frame* frame, WebCore::Node* node);
 
-        WebCore::String getSelection(SkRegion* );
+        WebCore::String retrieveHref(WebCore::Frame* frame, WebCore::Node* node);
+        WebCore::String retrieveAnchorText(WebCore::Frame* frame, WebCore::Node* node);
+        WebCore::String requestLabel(WebCore::Frame* , WebCore::Node* );
 
         // Create a single picture to represent the drawn DOM (used by navcache)
         void recordPicture(SkPicture* picture);
@@ -252,6 +269,7 @@ namespace android {
         // Create a set of pictures to represent the drawn DOM, driven by
         // the invalidated region and the time required to draw (used to draw)
         void recordPictureSet(PictureSet* master);
+        void moveFocus(WebCore::Frame* frame, WebCore::Node* node);
         void moveMouse(WebCore::Frame* frame, int x, int y);
         void moveMouseIfLatest(int moveGeneration,
             WebCore::Frame* frame, int x, int y);
@@ -279,7 +297,7 @@ namespace android {
         /**
          * Handle touch event
          */
-        bool handleTouchEvent(int action, int x, int y);
+        bool handleTouchEvent(int action, int x, int y, int metaState);
 
         /**
          * Handle motionUp event from the UI thread (called touchUp in the
@@ -321,7 +339,11 @@ namespace android {
          * Scroll the focused textfield to (x, y) in document space
          */
         void scrollFocusedTextInput(float x, int y);
-        void setFocusControllerActive(bool active);
+        /**
+         * Set the FocusController's active and focused states, so that
+         * the caret will draw (true) or not.
+         */
+        void setFocusControllerActive(WebCore::Frame*, bool active);
 
         void saveDocumentState(WebCore::Frame* frame);
 
@@ -348,6 +370,8 @@ namespace android {
          */
         void addPlugin(PluginWidgetAndroid*);
         void removePlugin(PluginWidgetAndroid*);
+        // returns true if the pluginwidgit is in our active list
+        bool isPlugin(PluginWidgetAndroid*) const;
         void invalPlugin(PluginWidgetAndroid*);
         void drawPlugins();
 
@@ -360,31 +384,41 @@ namespace android {
         // send this event to all of the plugins in our list
         void sendPluginEvent(const ANPEvent&);
 
-        // send this event to all of the plugins who have the given flag set
-        void sendPluginEvent(const ANPEvent& evt, ANPEventFlag flag);
+        // lookup the plugin widget struct given an NPP
+        PluginWidgetAndroid* getPluginWidget(NPP npp);
 
         // return the cursorNode if it is a plugin
         Node* cursorNodeIsPlugin();
 
-        // notify the plugin of an update in state
-        void updatePluginState(Frame* frame, Node* node, PluginState state);
-
         // Notify the Java side whether it needs to pass down the touch events
         void needTouchEvents(bool);
 
+        void requestKeyboardWithSelection(const WebCore::Node*, int selStart, int selEnd);
         // Notify the Java side that webkit is requesting a keyboard
-        void requestKeyboard(bool);
+        void requestKeyboard(bool showKeyboard);
 
-        // Creates a full screen surface (i.e. View on an Activity) for a plugin
-        void startFullScreenPluginActivity(const char* libName,
-                                           const char* className, NPP npp);
+        // Generates a class loader that contains classes from the plugin's apk
+        jclass getPluginClass(const WebCore::String& libName, const char* className);
 
-        // Creates a Surface (i.e. View) for a plugin
-        jobject createSurface(const char* libName, const char* className,
-                              NPP npp, int x, int y, int width, int height);
+        // Creates a full screen surface for a plugin
+        void showFullScreenPlugin(jobject webkitPlugin, NPP npp);
+
+        // Instructs the UI thread to discard the plugin's full-screen surface
+        void hideFullScreenPlugin();
+
+        // Adds the plugin's view (aka surface) to the view hierarchy
+        jobject addSurface(jobject view, int x, int y, int width, int height);
+
+        // Updates a Surface coordinates and dimensions for a plugin
+        void updateSurface(jobject childView, int x, int y, int width, int height);
 
         // Destroys a SurfaceView for a plugin
         void destroySurface(jobject childView);
+
+        // Returns the context (android.content.Context) of the WebView
+        jobject getContext();
+
+        bool validNodeAndBounds(Frame* , Node* , const IntRect& );
 
         // Make the rect (left, top, width, height) visible. If it can be fully
         // fit, center it on the screen. Otherwise make sure the point specified
@@ -394,8 +428,15 @@ namespace android {
             int contentHeight, float xPercentInDoc, float xPercentInView,
             float yPercentInDoc, float yPercentInView);
 
+        // Scale the rect (x, y, width, height) to make it just fit and centered
+        // in the current view.
+        void centerFitRect(int x, int y, int width, int height);
+
         // other public functions
     public:
+        // Open a file chooser for selecting a file to upload
+        void openFileChooser(PassRefPtr<WebCore::FileChooser> );
+
         // reset the picture set to empty
         void clearContent();
 
@@ -404,14 +445,18 @@ namespace android {
 
         // draw the picture set with the specified background color
         bool drawContent(SkCanvas* , SkColor );
+        bool focusBoundsChanged();
         bool pictureReady();
 
         // record the inval area, and the picture size
         bool recordContent(SkRegion* , SkIPoint* );
         int screenWidth() const { return m_screenWidth; }
+        int screenHeight() const { return m_screenHeight; }
         float scale() const { return m_scale; }
         float screenWidthScale() const { return m_screenWidthScale; }
         WebCore::Frame* mainFrame() const { return m_mainFrame; }
+        void updateCursorBounds(const CachedRoot* root,
+                const CachedFrame* cachedFrame, const CachedNode* cachedNode);
         void updateFrameCacheIfLoading();
 
         // utility to split slow parts of the picture set
@@ -421,7 +466,6 @@ namespace android {
         static Mutex gFrameCacheMutex;
         CachedRoot* m_frameCacheKit; // nav data being built by webcore
         SkPicture* m_navPictureKit;
-        int m_generation; // copy of the number bumped by WebViewNative
         int m_moveGeneration; // copy of state in WebViewNative triggered by move
         int m_touchGeneration; // copy of state in WebViewNative triggered by touch
         int m_lastGeneration; // last action using up to date cache
@@ -439,8 +483,8 @@ namespace android {
         // field safely from our respective threads
         static Mutex gButtonMutex;
         WTF::Vector<Container> m_buttons;
-        static bool isPaused() { return s_isPaused; }
-        static void setIsPaused(bool isPaused) { s_isPaused = isPaused; }
+        bool isPaused() const { return m_isPaused; }
+        void setIsPaused(bool isPaused) { m_isPaused = isPaused; }
         // end of shared members
 
         // internal functions
@@ -466,7 +510,6 @@ namespace android {
         WebCore::IntRect m_lastFocusedBounds;
         int m_lastFocusedSelStart;
         int m_lastFocusedSelEnd;
-        int m_lastMoveGeneration;
         static Mutex m_contentMutex; // protects ui/core thread pictureset access
         PictureSet m_content; // the set of pictures to draw (accessed by UI too)
         SkRegion m_addInval; // the accumulated inval region (not yet drawn)
@@ -474,6 +517,7 @@ namespace android {
         // Used in passToJS to avoid updating the UI text field until after the
         // key event has been processed.
         bool m_blockTextfieldUpdates;
+        bool m_focusBoundsChanged;
         bool m_skipContentDraw;
         // Passed in with key events to know when they were generated.  Store it
         // with the cache so that we can ignore stale text changes.
@@ -497,7 +541,7 @@ namespace android {
         unsigned m_domtree_version;
         bool m_check_domtree_version;
         PageGroup* m_groupForVisitedLinks;
-        static bool s_isPaused;
+        bool m_isPaused;
 
         SkTDArray<PluginWidgetAndroid*> m_plugins;
         WebCore::Timer<WebViewCore> m_pluginInvalTimer;
@@ -510,9 +554,30 @@ namespace android {
         void rebuildPictureSet(PictureSet* );
         void sendNotifyProgressFinished();
         bool handleMouseClick(WebCore::Frame* framePtr, WebCore::Node* nodePtr);
+        WebCore::HTMLAnchorElement* retrieveAnchorElement(WebCore::Frame* frame, WebCore::Node* node);
+
+#if ENABLE(TOUCH_EVENTS)
+        bool m_forwardingTouchEvents;
+        IntPoint m_lastTouchPoint;
+#endif
+
 #if DEBUG_NAV_UI
         uint32_t m_now;
 #endif
+
+    private:
+        // called from constructor, to add this to a global list
+        static void addInstance(WebViewCore*);
+        // called from destructor, to remove this from a global list
+        static void removeInstance(WebViewCore*);
+    public:
+        // call only from webkit thread (like add/remove), return true if inst
+        // is still alive
+        static bool isInstance(WebViewCore*);
+
+        // if there exists at least on WebViewCore instance then we return the
+        // application context, otherwise NULL is returned.
+        static jobject getApplicationContext();
     };
 
 }   // namespace android

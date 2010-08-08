@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -29,6 +29,8 @@
 #include "Document.h"
 #include "Element.h"
 #include "Node.h"
+#include "NodeRenderStyle.h"
+#include "RenderStyle.h"
 #include "SkCanvas.h"
 #include "SkNinePatch.h"
 
@@ -39,7 +41,9 @@ static bool             s_decoded;      // True if all assets were decoded
 static const int        s_margin = 2;
 static const SkIRect    s_mar = { s_margin, s_margin,
                                 RenderSkinCombo::extraWidth(), s_margin };
-    
+static SkIRect          s_subset;
+
+
 RenderSkinCombo::RenderSkinCombo()
 {
 }
@@ -52,6 +56,10 @@ void RenderSkinCombo::Init(android::AssetManager* am)
     // but is that necessary in the final version?
     s_decoded = RenderSkinAndroid::DecodeBitmap(am, "images/combobox-noHighlight.png", &s_bitmap[kNormal]);
     s_decoded = RenderSkinAndroid::DecodeBitmap(am, "images/combobox-disabled.png", &s_bitmap[kDisabled]) && s_decoded;
+
+    int width = s_bitmap[kNormal].width();
+    int height = s_bitmap[kNormal].height();
+    s_subset.set(width - RenderSkinCombo::extraWidth()  + s_margin, 0, width, height);
 }
 
 
@@ -65,8 +73,27 @@ bool RenderSkinCombo::Draw(SkCanvas* canvas, Node* element, int x, int y, int wi
         height = (s_margin<<1) + 1;
     }
     SkRect bounds;
+
+    bounds.set(SkIntToScalar(x+1), SkIntToScalar(y+1), SkIntToScalar(x + width-1), SkIntToScalar(y + height-1));
+    RenderStyle* style = element->renderStyle();
+    SkPaint paint;
+    paint.setColor(style->backgroundColor().rgb());
+    canvas->drawRect(bounds, paint);
+
     bounds.set(SkIntToScalar(x), SkIntToScalar(y), SkIntToScalar(x + width), SkIntToScalar(y + height));
-    SkNinePatch::DrawNine(canvas, bounds, s_bitmap[state], s_mar);
+
+    if (style->borderLeftColor().isValid() ||
+        style->borderRightColor().isValid() ||
+        style->borderTopColor().isValid() ||
+        style->borderBottomColor().isValid()) {
+        bounds.fLeft += SkIntToScalar(width - RenderSkinCombo::extraWidth());
+        bounds.fRight -= SkIntToScalar(style->borderRightWidth());
+        bounds.fTop += SkIntToScalar(style->borderTopWidth());
+        bounds.fBottom -= SkIntToScalar(style->borderBottomWidth());
+        canvas->drawBitmapRect(s_bitmap[state], &s_subset, bounds);
+    } else {
+        SkNinePatch::DrawNine(canvas, bounds, s_bitmap[state], s_mar);
+    }
     return false;
 }
 

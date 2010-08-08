@@ -127,7 +127,7 @@ IntPoint Widget::convertFromContainingWindowToRoot(const Widget*, const IntPoint
 }
 #endif
 
-#if !PLATFORM(MAC) && !PLATFORM(GTK) && !PLATFORM(ANDROID)
+#if !PLATFORM(MAC) && !PLATFORM(GTK) && !OS(ANDROID)
 void Widget::releasePlatformWidget()
 {
 }

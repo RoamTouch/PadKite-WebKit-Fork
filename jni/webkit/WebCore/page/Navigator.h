@@ -21,6 +21,7 @@
 #define Navigator_h
 
 #include "NavigatorBase.h"
+#include "PlatformString.h"
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
@@ -32,7 +33,13 @@ namespace WebCore {
     class MimeTypeArray;
     class PluginData;
     class PluginArray;
-    class String;
+#if PLATFORM(ANDROID)
+    class ApplicationInstalledCallback;
+    class Connection;
+#endif
+
+
+    typedef int ExceptionCode;
 
     class Navigator : public NavigatorBase, public RefCounted<Navigator> {
     public:
@@ -55,12 +62,37 @@ namespace WebCore {
         // This is used for GC marking.
         Geolocation* optionalGeolocation() const { return m_geolocation.get(); }
 
+#if PLATFORM(ANDROID)
+        Connection* connection() const;
+#endif
+
+#if PLATFORM(ANDROID) && ENABLE(APPLICATION_INSTALLED)
+        bool isApplicationInstalled(const String& name, PassRefPtr<ApplicationInstalledCallback> callback);
+        void onPackageResult();
+#endif
+
+#if ENABLE(DOM_STORAGE)
+        // Relinquishes the storage lock, if one exists.
+        void getStorageUpdates();
+#endif
+
+        void registerProtocolHandler(const String& scheme, const String& url, const String& title, ExceptionCode& ec);
+        void registerContentHandler(const String& mimeType, const String& url, const String& title, ExceptionCode& ec);
+
     private:
         Navigator(Frame*);
         Frame* m_frame;
         mutable RefPtr<PluginArray> m_plugins;
         mutable RefPtr<MimeTypeArray> m_mimeTypes;
         mutable RefPtr<Geolocation> m_geolocation;
+#if PLATFORM(ANDROID)
+        mutable RefPtr<Connection> m_connection;
+#endif
+
+#if PLATFORM(ANDROID) && ENABLE(APPLICATION_INSTALLED)
+        RefPtr<ApplicationInstalledCallback> m_applicationInstalledCallback;
+        String m_applicationNameQuery;
+#endif
     };
 
 }

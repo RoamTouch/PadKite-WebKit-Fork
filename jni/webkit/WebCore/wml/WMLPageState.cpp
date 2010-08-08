@@ -24,6 +24,7 @@
 #if ENABLE(WML)
 #include "WMLPageState.h"
 
+#include "BackForwardList.h"
 #include "CString.h"
 #include "Document.h"
 #include "Frame.h"
@@ -35,7 +36,6 @@ namespace WebCore {
 
 WMLPageState::WMLPageState(Page* page)
     : m_page(page)
-    , m_activeCard(0)
     , m_hasAccessControlData(false)
 {
 }

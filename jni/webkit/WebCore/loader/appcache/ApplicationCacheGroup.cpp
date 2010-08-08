@@ -32,6 +32,7 @@
 #include "ApplicationCacheHost.h"
 #include "ApplicationCacheResource.h"
 #include "ApplicationCacheStorage.h"
+#include "Chrome.h"
 #include "ChromeClient.h"
 #include "DocumentLoader.h"
 #include "DOMApplicationCache.h"
@@ -158,7 +159,7 @@ void ApplicationCacheGroup::selectCache(Frame* frame, const KURL& passedManifest
             // Restart the current navigation from the top of the navigation algorithm, undoing any changes that were made
             // as part of the initial load.
             // The navigation will not result in the same resource being loaded, because "foreign" entries are never picked during navigation.
-            frame->loader()->scheduleLocationChange(documentLoader->url(), frame->loader()->referrer(), true);
+            frame->redirectScheduler()->scheduleLocationChange(documentLoader->url(), frame->loader()->referrer(), true);
         }
         
         return;
@@ -622,7 +623,7 @@ void ApplicationCacheGroup::didFinishLoadingManifest()
         ASSERT(newestManifest);
     
         if (!m_manifestResource || // The resource will be null if HTTP response was 304 Not Modified.
-            newestManifest->data()->size() == m_manifestResource->data()->size() && !memcmp(newestManifest->data()->data(), m_manifestResource->data()->data(), newestManifest->data()->size())) {
+            (newestManifest->data()->size() == m_manifestResource->data()->size() && !memcmp(newestManifest->data()->data(), m_manifestResource->data()->data(), newestManifest->data()->size()))) {
 
             m_completionType = NoUpdate;
             m_manifestResource = 0;
@@ -672,6 +673,7 @@ void ApplicationCacheGroup::didFinishLoadingManifest()
     
     m_cacheBeingUpdated->setOnlineWhitelist(manifest.onlineWhitelistedURLs);
     m_cacheBeingUpdated->setFallbackURLs(manifest.fallbackURLs);
+    m_cacheBeingUpdated->setAllowsAllNetworkRequests(manifest.allowAllNetworkRequests);
     
     startLoadingEntry();
 }
@@ -776,7 +778,6 @@ void ApplicationCacheGroup::checkIfLoadIsComplete()
         RefPtr<ApplicationCache> oldNewestCache = (m_newestCache == m_cacheBeingUpdated) ? 0 : m_newestCache;
 
         setNewestCache(m_cacheBeingUpdated.release());
-
         if (cacheStorage().storeNewestCache(this)) {
             // New cache stored, now remove the old cache.
             if (oldNewestCache)
@@ -852,7 +853,7 @@ void ApplicationCacheGroup::startLoadingEntry()
 
     ASSERT(!m_currentHandle);
     
-    m_currentHandle = createResourceHandle(KURL(it->first), m_newestCache ? m_newestCache->resourceForURL(it->first) : 0);
+    m_currentHandle = createResourceHandle(KURL(ParsedURLString, it->first), m_newestCache ? m_newestCache->resourceForURL(it->first) : 0);
 }
 
 void ApplicationCacheGroup::deliverDelayedMainResources()
@@ -879,7 +880,7 @@ void ApplicationCacheGroup::deliverDelayedMainResources()
 void ApplicationCacheGroup::addEntry(const String& url, unsigned type)
 {
     ASSERT(m_cacheBeingUpdated);
-    ASSERT(!KURL(url).hasFragmentIdentifier());
+    ASSERT(!KURL(ParsedURLString, url).hasFragmentIdentifier());
     
     // Don't add the URL if we already have an master resource in the cache
     // (i.e., the main resource finished loading before the manifest).
@@ -947,9 +948,9 @@ void ApplicationCacheGroup::scheduleReachedMaxAppCacheSizeCallback()
 
 class CallCacheListenerTask : public ScriptExecutionContext::Task {
 public:
-    static PassRefPtr<CallCacheListenerTask> create(PassRefPtr<DocumentLoader> loader, ApplicationCacheHost::EventID eventID)
+    static PassOwnPtr<CallCacheListenerTask> create(PassRefPtr<DocumentLoader> loader, ApplicationCacheHost::EventID eventID)
     {
-        return adoptRef(new CallCacheListenerTask(loader, eventID));
+        return new CallCacheListenerTask(loader, eventID);
     }
 
     virtual void performTask(ScriptExecutionContext* context)
@@ -962,7 +963,7 @@ public:
     
         ASSERT(frame->loader()->documentLoader() == m_documentLoader.get());
 
-        m_documentLoader->applicationCacheHost()->notifyEventListener(m_eventID);
+        m_documentLoader->applicationCacheHost()->notifyDOMApplicationCache(m_eventID);
     }
 
 private:

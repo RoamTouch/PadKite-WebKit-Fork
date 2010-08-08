@@ -59,9 +59,7 @@ GraphicsLayer::GraphicsLayer(GraphicsLayerClient* client)
     : m_client(client)
     , m_anchorPoint(0.5f, 0.5f, 0)
     , m_opacity(1)
-#ifndef NDEBUG
     , m_zPosition(0)
-#endif
     , m_backgroundColorSet(false)
     , m_contentsOpaque(false)
     , m_preserves3D(false)
@@ -69,13 +67,14 @@ GraphicsLayer::GraphicsLayer(GraphicsLayerClient* client)
     , m_usingTiledLayer(false)
     , m_masksToBounds(false)
     , m_drawsContent(false)
-    , m_paintingPhase(GraphicsLayerPaintAllMask)
+    , m_paintingPhase(GraphicsLayerPaintAll)
     , m_geometryOrientation(CompositingCoordinatesTopDown)
     , m_contentsOrientation(CompositingCoordinatesTopDown)
     , m_parent(0)
-#ifndef NDEBUG
+    , m_maskLayer(0)
+    , m_replicaLayer(0)
+    , m_replicatedLayer(0)
     , m_repaintCount(0)
-#endif
 {
 }
 
@@ -83,6 +82,31 @@ GraphicsLayer::~GraphicsLayer()
 {
     removeAllChildren();
     removeFromParent();
+}
+
+bool GraphicsLayer::hasAncestor(GraphicsLayer* ancestor) const
+{
+    for (GraphicsLayer* curr = parent(); curr; curr = curr->parent()) {
+        if (curr == ancestor)
+            return true;
+    }
+    
+    return false;
+}
+
+bool GraphicsLayer::setChildren(const Vector<GraphicsLayer*>& newChildren)
+{
+    // If the contents of the arrays are the same, nothing to do.
+    if (newChildren == m_children)
+        return false;
+
+    removeAllChildren();
+    
+    size_t listSize = newChildren.size();
+    for (size_t i = 0; i < listSize; ++i)
+        addChild(newChildren[i]);
+    
+    return true;
 }
 
 void GraphicsLayer::addChild(GraphicsLayer* childLayer)
@@ -192,6 +216,14 @@ void GraphicsLayer::removeFromParent()
     }
 }
 
+void GraphicsLayer::setReplicatedByLayer(GraphicsLayer* layer)
+{
+    if (layer)
+        layer->setReplicatedLayer(this);
+
+    m_replicaLayer = layer;
+}
+
 void GraphicsLayer::setBackgroundColor(const Color& color)
 {
     m_backgroundColor = color;
@@ -218,7 +250,6 @@ void GraphicsLayer::resumeAnimations()
 {
 }
 
-#ifndef NDEBUG
 void GraphicsLayer::updateDebugIndicators()
 {
     if (GraphicsLayer::showDebugBorders()) {
@@ -240,7 +271,6 @@ void GraphicsLayer::setZPosition(float position)
 {
     m_zPosition = position;
 }
-#endif
 
 float GraphicsLayer::accumulatedOpacity() const
 {
@@ -434,14 +464,27 @@ void GraphicsLayer::dumpProperties(TextStream& ts, int indent) const
     }
     ts << ")\n";
 
-    writeIndent(ts, indent + 1);
-    ts << "(children " << m_children.size() << "\n";
+    if (m_replicaLayer) {
+        writeIndent(ts, indent + 1);
+        ts << "(replica layer " << m_replicaLayer << ")\n";
+        m_replicaLayer->dumpLayer(ts, indent+2);
+    }
+
+    if (m_replicatedLayer) {
+        writeIndent(ts, indent + 1);
+        ts << "(replicated layer " << m_replicatedLayer << ")\n";
+    }
     
-    unsigned i;
-    for (i = 0; i < m_children.size(); i++)
-        m_children[i]->dumpLayer(ts, indent+2);
-    writeIndent(ts, indent + 1);
-    ts << ")\n";
+    if (m_children.size()) {
+        writeIndent(ts, indent + 1);
+        ts << "(children " << m_children.size() << "\n";
+        
+        unsigned i;
+        for (i = 0; i < m_children.size(); i++)
+            m_children[i]->dumpLayer(ts, indent+2);
+        writeIndent(ts, indent + 1);
+        ts << ")\n";
+    }
 }
 
 } // namespace WebCore

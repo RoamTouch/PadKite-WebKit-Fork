@@ -50,10 +50,33 @@ bool Font::canReturnFallbackFontsForComplexText()
 void Font::drawGlyphs(GraphicsContext* context, const SimpleFontData* font, const GlyphBuffer& glyphBuffer, int from, int numGlyphs, const FloatPoint& point) const
 {
     CGContextRef cgContext = context->platformContext();
+    bool newShouldUseFontSmoothing = shouldUseSmoothing();
+
+    switch(fontDescription().fontSmoothing()) {
+    case Antialiased: {
+        context->setShouldAntialias(true);
+        newShouldUseFontSmoothing = false;
+        break;
+    }
+    case SubpixelAntialiased: {
+        context->setShouldAntialias(true);
+        newShouldUseFontSmoothing = true;
+        break;
+    }
+    case NoSmoothing: {
+        context->setShouldAntialias(false);
+        newShouldUseFontSmoothing = false;
+        break;
+    }
+    case AutoSmoothing: {
+        // For the AutoSmooth case, don't do anything! Keep the default settings.
+        break; 
+    }
+    default: 
+        ASSERT_NOT_REACHED();
+    }
 
     bool originalShouldUseFontSmoothing = wkCGContextGetShouldSmoothFonts(cgContext);
-    bool newShouldUseFontSmoothing = shouldUseSmoothing();
-    
     if (originalShouldUseFontSmoothing != newShouldUseFontSmoothing)
         CGContextSetShouldSmoothFonts(cgContext, newShouldUseFontSmoothing);
     
@@ -92,6 +115,7 @@ void Font::drawGlyphs(GraphicsContext* context, const SimpleFontData* font, cons
     IntSize shadowSize;
     int shadowBlur;
     Color shadowColor;
+    ColorSpace fillColorSpace = context->fillColorSpace();
     context->getShadow(shadowSize, shadowBlur, shadowColor);
 
     bool hasSimpleShadow = context->textDrawingMode() == cTextFill && shadowColor.isValid() && !shadowBlur;
@@ -100,14 +124,14 @@ void Font::drawGlyphs(GraphicsContext* context, const SimpleFontData* font, cons
         context->clearShadow();
         Color fillColor = context->fillColor();
         Color shadowFillColor(shadowColor.red(), shadowColor.green(), shadowColor.blue(), shadowColor.alpha() * fillColor.alpha() / 255);
-        context->setFillColor(shadowFillColor);
+        context->setFillColor(shadowFillColor, fillColorSpace);
         CGContextSetTextPosition(cgContext, point.x() + shadowSize.width(), point.y() + shadowSize.height());
         CGContextShowGlyphsWithAdvances(cgContext, glyphBuffer.glyphs(from), glyphBuffer.advances(from), numGlyphs);
         if (font->syntheticBoldOffset()) {
             CGContextSetTextPosition(cgContext, point.x() + shadowSize.width() + font->syntheticBoldOffset(), point.y() + shadowSize.height());
             CGContextShowGlyphsWithAdvances(cgContext, glyphBuffer.glyphs(from), glyphBuffer.advances(from), numGlyphs);
         }
-        context->setFillColor(fillColor);
+        context->setFillColor(fillColor, fillColorSpace);
     }
 
     CGContextSetTextPosition(cgContext, point.x(), point.y());
@@ -118,7 +142,7 @@ void Font::drawGlyphs(GraphicsContext* context, const SimpleFontData* font, cons
     }
 
     if (hasSimpleShadow)
-        context->setShadow(shadowSize, shadowBlur, shadowColor);
+        context->setShadow(shadowSize, shadowBlur, shadowColor, fillColorSpace);
 
     if (originalShouldUseFontSmoothing != newShouldUseFontSmoothing)
         CGContextSetShouldSmoothFonts(cgContext, originalShouldUseFontSmoothing);

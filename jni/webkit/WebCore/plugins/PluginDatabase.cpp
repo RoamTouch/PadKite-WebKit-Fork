@@ -29,6 +29,7 @@
 
 #include "Frame.h"
 #include "KURL.h"
+#include "PluginDatabaseClient.h"
 #include "PluginPackage.h"
 #include <stdlib.h>
 
@@ -40,6 +41,11 @@
 namespace WebCore {
 
 typedef HashMap<String, RefPtr<PluginPackage> > PluginPackageByNameMap;
+
+PluginDatabase::PluginDatabase()
+    : m_client(0)
+{
+}
 
 PluginDatabase* PluginDatabase::installedPlugins(bool populate)
 {
@@ -116,9 +122,11 @@ bool PluginDatabase::refresh()
             remove(oldPackage.get());
         }
 
-        RefPtr<PluginPackage> package = PluginPackage::createPackage(*it, lastModified);
-        if (package && add(package.release()))
-            pluginSetChanged = true;
+        if (!m_client || m_client->shouldLoadPluginAtPath(*it)) {
+            RefPtr<PluginPackage> package = PluginPackage::createPackage(*it, lastModified);
+            if (package && (!m_client || m_client->shouldLoadPluginPackage(package.get())) && add(package.release()))
+                pluginSetChanged = true;
+        }
     }
 
     // Cache all the paths we found with their timestamps for next time.
@@ -317,7 +325,7 @@ void PluginDatabase::clear()
     m_preferredPlugins.clear();
 }
 
-#if !PLATFORM(WIN_OS) || PLATFORM(WX)
+#if (!OS(WINCE)) && (!OS(SYMBIAN)) && (!OS(WINDOWS) || !ENABLE(NETSCAPE_PLUGIN_API))
 // For Safari/Win the following three methods are implemented
 // in PluginDatabaseWin.cpp, but if we can use WebCore constructs
 // for the logic we should perhaps move it here under XP_WIN?
@@ -352,6 +360,8 @@ Vector<String> PluginDatabase::defaultPluginDirectories()
     paths.append("/usr/lib/netscape/plugins-libc6");
     paths.append("/usr/lib64/netscape/plugins");
     paths.append("/usr/lib64/mozilla/plugins");
+    paths.append("/usr/lib/nsbrowser/plugins");
+    paths.append("/usr/lib64/nsbrowser/plugins");
 
     String mozHome(getenv("MOZILLA_HOME"));
     mozHome.append("/plugins");
@@ -375,7 +385,7 @@ Vector<String> PluginDatabase::defaultPluginDirectories()
     // Add paths specific to each port
 #if PLATFORM(QT)
     Vector<String> qtPaths;
-    String qtPath(getenv("QTWEBKIT_PLUGIN_PATH"));
+    String qtPath(qgetenv("QTWEBKIT_PLUGIN_PATH").constData());
     qtPath.split(UChar(':'), /* allowEmptyEntries */ false, qtPaths);
     paths.append(qtPaths);
 #endif
@@ -428,6 +438,6 @@ void PluginDatabase::getPluginPathsInDirectories(HashSet<String>& paths) const
     }
 }
 
-#endif // !PLATFORM(WIN_OS)
+#endif // !OS(SYMBIAN) && !OS(WINDOWS)
 
 }

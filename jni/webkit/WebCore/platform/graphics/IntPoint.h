@@ -55,13 +55,19 @@ class QPoint;
 QT_END_NAMESPACE
 #elif PLATFORM(GTK)
 typedef struct _GdkPoint GdkPoint;
+#elif PLATFORM(HAIKU)
+class BPoint;
 #endif
 
 #if PLATFORM(WX)
 class wxPoint;
 #endif
 
-#if (PLATFORM(SKIA) || PLATFORM(SGL))
+#if PLATFORM(BREWMP)
+typedef struct _point AEEPoint;
+#endif
+
+#if PLATFORM(SKIA)
 struct SkPoint;
 struct SkIPoint;
 #endif
@@ -121,6 +127,9 @@ public:
 #elif PLATFORM(GTK)
     IntPoint(const GdkPoint&);
     operator GdkPoint() const;
+#elif PLATFORM(HAIKU)
+    explicit IntPoint(const BPoint&);
+    operator BPoint() const;
 #endif
 
 #if PLATFORM(WX)
@@ -128,7 +137,12 @@ public:
     operator wxPoint() const;
 #endif
 
-#if (PLATFORM(SKIA) || PLATFORM(SGL))
+#if PLATFORM(BREWMP)
+    IntPoint(const AEEPoint&);
+    operator AEEPoint() const;
+#endif
+
+#if PLATFORM(SKIA)
     IntPoint(const SkIPoint&);
     operator SkIPoint() const;
     operator SkPoint() const;

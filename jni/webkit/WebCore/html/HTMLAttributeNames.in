@@ -13,17 +13,31 @@ alink
 alt
 archive
 aria-activedescendant
+aria-atomic
+aria-busy
 aria-checked
+aria-controls
 aria-describedby
 aria-disabled
+aria-dropeffect
+aria-expanded
+aria-flowto
+aria-grabbed
+aria-haspopup
 aria-hidden
 aria-label
 aria-labeledby
 aria-labelledby
 aria-level
+aria-live
+aria-multiselectable
+aria-orientation
+aria-owns
 aria-pressed
 aria-readonly
+aria-relevant
 aria-required
+aria-selected
 aria-valuemax
 aria-valuemin
 aria-valuenow
@@ -49,7 +63,7 @@ charset
 checked
 cellborder
 cite
-class exportString
+class
 classid
 clear
 code
@@ -78,6 +92,7 @@ expanded
 face
 focused
 for
+formnovalidate
 frame
 frameborder
 headers
@@ -97,6 +112,7 @@ lang
 language
 leftmargin
 link
+list
 longdesc
 loop
 playcount
@@ -117,11 +133,13 @@ name
 nohref
 noresize
 noshade
+novalidate
 nowrap
 object
 onabort
 onbeforecopy
 onbeforecut
+onbeforeload
 onbeforepaste
 onbeforeunload
 onblur
@@ -147,6 +165,7 @@ onerror
 onfocus
 onhashchange
 oninput
+oninvalid
 onkeydown
 onkeypress
 onkeyup
@@ -162,10 +181,14 @@ onmouseup
 onmousewheel
 ononline
 onoffline
+onorientationchange
+onpagehide
+onpageshow
 onpaste
 onpause
 onplay
 onplaying
+onpopstate
 onprogress
 onratechange
 onreset
@@ -181,18 +204,18 @@ onstorage
 onsuspend
 onsubmit
 ontimeupdate
-/* #if ENABLE(TOUCH_EVENTS) // Android */
 ontouchstart
 ontouchmove
 ontouchend
 ontouchcancel
-/* #endif */
 onunload
 onvolumechange
 onwaiting
 onwebkitanimationstart
 onwebkitanimationiteration
 onwebkitanimationend
+onwebkitbeginfullscreen
+onwebkitendfullscreen
 onwebkittransitionend
 pattern
 placeholder
@@ -212,6 +235,7 @@ role
 rows
 rowspan
 rules
+sandbox
 scheme
 scope
 scrollamount
@@ -227,6 +251,7 @@ spellcheck
 src
 standby
 start
+step
 style
 summary
 tabindex

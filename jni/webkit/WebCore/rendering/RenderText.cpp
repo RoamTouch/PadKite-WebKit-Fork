@@ -25,7 +25,9 @@
 #include "config.h"
 #include "RenderText.h"
 
+#include "AXObjectCache.h"
 #include "CharacterNames.h"
+#include "EllipsisBox.h"
 #include "FloatQuad.h"
 #include "FrameView.h"
 #include "InlineTextBox.h"
@@ -207,7 +209,7 @@ void RenderText::deleteTextBoxes()
 PassRefPtr<StringImpl> RenderText::originalText() const
 {
     Node* e = node();
-    return e ? static_cast<Text*>(e)->string() : 0;
+    return e ? static_cast<Text*>(e)->dataImpl() : 0;
 }
 
 void RenderText::absoluteRects(Vector<IntRect>& rects, int tx, int ty)
@@ -286,7 +288,7 @@ void RenderText::absoluteQuadsForRange(Vector<FloatQuad>& quads, unsigned start,
         } else {
             unsigned realEnd = min(box->end() + 1, end);
             IntRect r = box->selectionRect(0, 0, start, realEnd);
-            if (!r.isEmpty()) {
+            if (r.height()) {
                 if (!useSelectionHeight) {
                     // change the height and y position because selectionRect uses selection-specific values
                     r.setHeight(box->height());
@@ -328,23 +330,23 @@ VisiblePosition RenderText::positionForPoint(const IntPoint& point)
     int offset;
 
     // FIXME: We should be able to roll these special cases into the general cases in the loop below.
-    if (firstTextBox() && point.y() <  firstTextBox()->root()->bottomOverflow() && point.x() < firstTextBox()->m_x) {
+    if (firstTextBox() && point.y() <  firstTextBox()->root()->lineBottom() && point.x() < firstTextBox()->m_x) {
         // at the y coordinate of the first line or above
         // and the x coordinate is to the left of the first text box left edge
         offset = firstTextBox()->offsetForPosition(point.x());
         return createVisiblePosition(offset + firstTextBox()->start(), DOWNSTREAM);
     }
-    if (lastTextBox() && point.y() >= lastTextBox()->root()->topOverflow() && point.x() >= lastTextBox()->m_x + lastTextBox()->m_width) {
+    if (lastTextBox() && point.y() >= lastTextBox()->root()->lineTop() && point.x() >= lastTextBox()->m_x + lastTextBox()->m_width) {
         // at the y coordinate of the last line or below
         // and the x coordinate is to the right of the last text box right edge
         offset = lastTextBox()->offsetForPosition(point.x());
-        return createVisiblePosition(offset + lastTextBox()->start(), DOWNSTREAM);
+        return createVisiblePosition(offset + lastTextBox()->start(), VP_UPSTREAM_IF_POSSIBLE);
     }
 
     InlineTextBox* lastBoxAbove = 0;
     for (InlineTextBox* box = firstTextBox(); box; box = box->nextTextBox()) {
-        if (point.y() >= box->root()->topOverflow()) {
-            int bottom = box->root()->nextRootBox() ? box->root()->nextRootBox()->topOverflow() : box->root()->bottomOverflow();
+        if (point.y() >= box->root()->lineTop()) {
+            int bottom = box->root()->nextRootBox() ? box->root()->nextRootBox()->lineTop() : box->root()->lineBottom();
             if (point.y() < bottom) {
                 offset = box->offsetForPosition(point.x());
 
@@ -387,8 +389,8 @@ IntRect RenderText::localCaretRect(InlineBox* inlineBox, int caretOffset, int* e
 
     InlineTextBox* box = static_cast<InlineTextBox*>(inlineBox);
 
-    int height = box->root()->bottomOverflow() - box->root()->topOverflow();
-    int top = box->root()->topOverflow();
+    int height = box->root()->lineBottom() - box->root()->lineTop();
+    int top = box->root()->lineTop();
 
     int left = box->positionForOffset(caretOffset);
 
@@ -757,6 +759,17 @@ void RenderText::calcPrefWidths(int leadWidth, HashSet<const SimpleFontData*>& f
     setPrefWidthsDirty(false);
 }
 
+bool RenderText::isAllCollapsibleWhitespace()
+{
+    int length = textLength();
+    const UChar* text = characters();
+    for (int i = 0; i < length; i++) {
+        if (!style()->isCollapsibleWhiteSpace(text[i]))
+            return false;
+    }
+    return true;
+}
+    
 bool RenderText::containsOnlyWhitespace(unsigned from, unsigned len) const
 {
     unsigned currPos;
@@ -813,7 +826,9 @@ void RenderText::setSelectionState(SelectionState state)
         }
     }
 
-    containingBlock()->setSelectionState(state);
+    // The returned value can be null in case of an orphaned tree.
+    if (RenderBlock* cb = containingBlock())
+        cb->setSelectionState(state);
 }
 
 void RenderText::setTextWithOffset(PassRefPtr<StringImpl> text, unsigned offset, unsigned len, bool force)
@@ -1001,6 +1016,10 @@ void RenderText::setText(PassRefPtr<StringImpl> text, bool force)
     setTextInternal(text);
     setNeedsLayoutAndPrefWidthsRecalc();
     m_knownNotToUseFallbackFonts = false;
+    
+    AXObjectCache* axObjectCache = document()->axObjectCache();
+    if (axObjectCache->accessibilityEnabled())
+        axObjectCache->contentChanged(this);
 }
 
 int RenderText::lineHeight(bool firstLine, bool) const
@@ -1047,8 +1066,15 @@ void RenderText::positionLineBox(InlineBox* box)
     if (!s->len()) {
         // We want the box to be destroyed.
         s->remove();
+        if (m_firstTextBox == s)
+            m_firstTextBox = s->nextTextBox();
+        else
+            s->prevTextBox()->setNextLineBox(s->nextTextBox());
+        if (m_lastTextBox == s)
+            m_lastTextBox = s->prevTextBox();
+        else
+            s->nextTextBox()->setPreviousLineBox(s->prevTextBox());
         s->destroy(renderArena());
-        m_firstTextBox = m_lastTextBox = 0;
         return;
     }
 
@@ -1151,8 +1177,24 @@ IntRect RenderText::selectionRectForRepaint(RenderBoxModelObject* repaintContain
         return IntRect();
 
     IntRect rect;
-    for (InlineTextBox* box = firstTextBox(); box; box = box->nextTextBox())
+    for (InlineTextBox* box = firstTextBox(); box; box = box->nextTextBox()) {
         rect.unite(box->selectionRect(0, 0, startPos, endPos));
+
+        // Check if there are ellipsis which fall within the selection.
+        unsigned short truncation = box->truncation();
+        if (truncation != cNoTruncation) {
+            if (EllipsisBox* ellipsis = box->root()->ellipsisBox()) {
+                int ePos = min<int>(endPos - box->start(), box->len());
+                int sPos = max<int>(startPos - box->start(), 0);
+                // The ellipsis should be considered to be selected if the end of
+                // the selection is past the beginning of the truncation and the
+                // beginning of the selection is before or at the beginning of the
+                // truncation.
+                if (ePos >= truncation && sPos <= truncation)
+                    rect.unite(ellipsis->selectionRect(0, 0));
+            }
+        }
+    }
 
     if (clipToVisibleContent)
         computeRectForRepaint(repaintContainer, rect);
@@ -1349,7 +1391,7 @@ void RenderText::checkConsistency() const
 #ifdef CHECK_CONSISTENCY
     const InlineTextBox* prev = 0;
     for (const InlineTextBox* child = m_firstTextBox; child != 0; child = child->nextTextBox()) {
-        ASSERT(child->object() == this);
+        ASSERT(child->renderer() == this);
         ASSERT(child->prevTextBox() == prev);
         prev = child;
     }

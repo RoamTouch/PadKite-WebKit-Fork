@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -27,16 +27,15 @@
 
 #if ENABLE(DATABASE)
 
-#include <JNIHelp.h>
+#include "JavaSharedClient.h"
+#include "KURL.h"
+#include "WebCoreJni.h"
 
+#include <JNIHelp.h>
+#include <JNIUtility.h>
 #include <WebCore/loader/appcache/ApplicationCacheStorage.h>
 #include <WebCore/page/SecurityOrigin.h>
 #include <WebCore/storage/DatabaseTracker.h>
-
-#include "JavaSharedClient.h"
-#include "jni_utility.h"
-#include "KURL.h"
-#include "WebCoreJni.h"
 
 namespace android {
 
@@ -93,9 +92,9 @@ static unsigned long long GetUsageForOrigin(JNIEnv* env, jobject obj, jstring or
         if (manifestOrigin.get() == 0)
             continue;
         if (manifestOrigin->isSameSchemeHostPort(securityOrigin.get())) {
-            int64_t size = 0;
-            WebCore::cacheStorage().cacheGroupSize(manifestUrls[i].string(), &size);
-            usage += size;
+            int64_t cacheSize = 0;
+            WebCore::cacheStorage().cacheGroupSize(manifestUrls[i].string(), &cacheSize);
+            usage += cacheSize;
         }
     }
     return usage;
@@ -133,6 +132,11 @@ static void DeleteAllData(JNIEnv* env, jobject obj)
     WebCore::cacheStorage().empty();
 }
 
+static void SetAppCacheMaximumSize(JNIEnv* env, jobject obj, unsigned long long size)
+{
+    WebCore::cacheStorage().setMaximumSize(size);
+}
+
 /*
  * JNI registration
  */
@@ -148,7 +152,9 @@ static JNINativeMethod gWebStorageMethods[] = {
     { "nativeDeleteOrigin", "(Ljava/lang/String;)V",
         (void*) DeleteOrigin },
     { "nativeDeleteAllData", "()V",
-        (void*) DeleteAllData }
+        (void*) DeleteAllData },
+    { "nativeSetAppCacheMaximumSize", "(J)V",
+        (void*) SetAppCacheMaximumSize }
 };
 
 int register_webstorage(JNIEnv* env)
@@ -163,4 +169,3 @@ int register_webstorage(JNIEnv* env)
 }
 
 #endif //ENABLE(DATABASE)
-

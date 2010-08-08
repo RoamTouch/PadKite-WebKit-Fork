@@ -43,7 +43,7 @@ class CacheLoader extends StreamLoader {
     protected boolean setupStreamAndSendStatus() {
         mDataStream = mCacheResult.inStream;
         mContentLength = mCacheResult.contentLength;
-        mHandler.status(1, 1, mCacheResult.httpStatusCode, "OK");
+        mLoadListener.status(1, 1, mCacheResult.httpStatusCode, "OK");
         return true;
     }
 
@@ -66,6 +66,10 @@ class CacheLoader extends StreamLoader {
 
         if (!TextUtils.isEmpty(mCacheResult.contentdisposition)) {
             headers.setContentDisposition(mCacheResult.contentdisposition);
+        }
+
+        if (!TextUtils.isEmpty(mCacheResult.crossDomain)) {
+            headers.setXPermittedCrossDomainPolicies(mCacheResult.crossDomain);
         }
     }
 }

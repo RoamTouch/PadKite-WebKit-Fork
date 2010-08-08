@@ -19,6 +19,7 @@ package android.webkit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 import java.util.Map.Entry;
 
@@ -50,9 +51,10 @@ public class WebViewDatabase {
     // 7 -> 8 Move cache to its own db
     // 8 -> 9 Store both scheme and host when storing passwords
     // 9 -> 10 Update httpauth table UNIQUE
-    private static final int CACHE_DATABASE_VERSION = 3;
+    private static final int CACHE_DATABASE_VERSION = 4;
     // 1 -> 2 Add expires String
     // 2 -> 3 Add content-disposition
+    // 3 -> 4 Add crossdomain (For x-permitted-cross-domain-policies header)
 
     private static WebViewDatabase mInstance = null;
 
@@ -125,6 +127,8 @@ public class WebViewDatabase {
 
     private static final String CACHE_CONTENTDISPOSITION_COL = "contentdisposition";
 
+    private static final String CACHE_CROSSDOMAIN_COL = "crossdomain";
+
     // column id strings for "password" table
     private static final String PASSWORD_HOST_COL = "host";
 
@@ -165,6 +169,7 @@ public class WebViewDatabase {
     private static int mCacheLocationColIndex;
     private static int mCacheContentLengthColIndex;
     private static int mCacheContentDispositionColIndex;
+    private static int mCacheCrossDomainColIndex;
 
     private static int mCacheTransactionRefcount;
 
@@ -234,6 +239,13 @@ public class WebViewDatabase {
             }
 
             if (mCacheDatabase != null) {
+                // use read_uncommitted to speed up READ
+                mCacheDatabase.execSQL("PRAGMA read_uncommitted = true;");
+                // as only READ can be called in the non-WebViewWorkerThread,
+                // and read_uncommitted is used, we can turn off database lock
+                // to use transaction.
+                mCacheDatabase.setLockingEnabled(false);
+
                 // use InsertHelper for faster insertion
                 mCacheInserter = new DatabaseUtils.InsertHelper(mCacheDatabase,
                         "cache");
@@ -261,6 +273,8 @@ public class WebViewDatabase {
                         .getColumnIndex(CACHE_CONTENTLENGTH_COL);
                 mCacheContentDispositionColIndex = mCacheInserter
                         .getColumnIndex(CACHE_CONTENTDISPOSITION_COL);
+                mCacheCrossDomainColIndex = mCacheInserter
+                        .getColumnIndex(CACHE_CROSSDOMAIN_COL);
             }
         }
 
@@ -370,6 +384,7 @@ public class WebViewDatabase {
                     + " TEXT," + CACHE_HTTP_STATUS_COL + " INTEGER, "
                     + CACHE_LOCATION_COL + " TEXT, " + CACHE_CONTENTLENGTH_COL
                     + " INTEGER, " + CACHE_CONTENTDISPOSITION_COL + " TEXT, "
+                    + CACHE_CROSSDOMAIN_COL + " TEXT,"
                     + " UNIQUE (" + CACHE_URL_COL + ") ON CONFLICT REPLACE);");
             mCacheDatabase.execSQL("CREATE INDEX cacheUrlIndex ON cache ("
                     + CACHE_URL_COL + ")");
@@ -381,10 +396,17 @@ public class WebViewDatabase {
             return false;
         }
 
-        Cursor cursor = mDatabase.query(mTableNames[tableId], ID_PROJECTION,
-                null, null, null, null, null);
-        boolean ret = cursor.moveToFirst() == true;
-        cursor.close();
+        Cursor cursor = null;
+        boolean ret = false;
+        try {
+            cursor = mDatabase.query(mTableNames[tableId], ID_PROJECTION,
+                    null, null, null, null, null);
+            ret = cursor.moveToFirst() == true;
+        } catch (IllegalStateException e) {
+            Log.e(LOGTAG, "hasEntries", e);
+        } finally {
+            if (cursor != null) cursor.close();
+        }
         return ret;
     }
 
@@ -412,33 +434,39 @@ public class WebViewDatabase {
             };
             final String selection = "(" + COOKIES_DOMAIN_COL
                     + " GLOB '*' || ?)";
-            Cursor cursor = mDatabase.query(mTableNames[TABLE_COOKIES_ID],
-                    columns, selection, new String[] { domain }, null, null,
-                    null);
-            if (cursor.moveToFirst()) {
-                int domainCol = cursor.getColumnIndex(COOKIES_DOMAIN_COL);
-                int pathCol = cursor.getColumnIndex(COOKIES_PATH_COL);
-                int nameCol = cursor.getColumnIndex(COOKIES_NAME_COL);
-                int valueCol = cursor.getColumnIndex(COOKIES_VALUE_COL);
-                int expiresCol = cursor.getColumnIndex(COOKIES_EXPIRES_COL);
-                int secureCol = cursor.getColumnIndex(COOKIES_SECURE_COL);
-                do {
-                    Cookie cookie = new Cookie();
-                    cookie.domain = cursor.getString(domainCol);
-                    cookie.path = cursor.getString(pathCol);
-                    cookie.name = cursor.getString(nameCol);
-                    cookie.value = cursor.getString(valueCol);
-                    if (cursor.isNull(expiresCol)) {
-                        cookie.expires = -1;
-                    } else {
-                        cookie.expires = cursor.getLong(expiresCol);
-                    }
-                    cookie.secure = cursor.getShort(secureCol) != 0;
-                    cookie.mode = Cookie.MODE_NORMAL;
-                    list.add(cookie);
-                } while (cursor.moveToNext());
+            Cursor cursor = null;
+            try {
+                cursor = mDatabase.query(mTableNames[TABLE_COOKIES_ID],
+                        columns, selection, new String[] { domain }, null, null,
+                        null);
+                if (cursor.moveToFirst()) {
+                    int domainCol = cursor.getColumnIndex(COOKIES_DOMAIN_COL);
+                    int pathCol = cursor.getColumnIndex(COOKIES_PATH_COL);
+                    int nameCol = cursor.getColumnIndex(COOKIES_NAME_COL);
+                    int valueCol = cursor.getColumnIndex(COOKIES_VALUE_COL);
+                    int expiresCol = cursor.getColumnIndex(COOKIES_EXPIRES_COL);
+                    int secureCol = cursor.getColumnIndex(COOKIES_SECURE_COL);
+                    do {
+                        Cookie cookie = new Cookie();
+                        cookie.domain = cursor.getString(domainCol);
+                        cookie.path = cursor.getString(pathCol);
+                        cookie.name = cursor.getString(nameCol);
+                        cookie.value = cursor.getString(valueCol);
+                        if (cursor.isNull(expiresCol)) {
+                            cookie.expires = -1;
+                        } else {
+                            cookie.expires = cursor.getLong(expiresCol);
+                        }
+                        cookie.secure = cursor.getShort(secureCol) != 0;
+                        cookie.mode = Cookie.MODE_NORMAL;
+                        list.add(cookie);
+                    } while (cursor.moveToNext());
+                }
+            } catch (IllegalStateException e) {
+                Log.e(LOGTAG, "getCookiesForDomain", e);
+            } finally {
+                if (cursor != null) cursor.close();
             }
-            cursor.close();
             return list;
         }
     }
@@ -548,19 +576,33 @@ public class WebViewDatabase {
     }
 
     //
-    // cache functions, can only be called from WebCoreThread
+    // cache functions
     //
 
+    // only called from WebViewWorkerThread
     boolean startCacheTransaction() {
         if (++mCacheTransactionRefcount == 1) {
+            if (!Thread.currentThread().equals(
+                    WebViewWorker.getHandler().getLooper().getThread())) {
+                Log.w(LOGTAG, "startCacheTransaction should be called from "
+                        + "WebViewWorkerThread instead of from "
+                        + Thread.currentThread().getName());
+            }
             mCacheDatabase.beginTransaction();
             return true;
         }
         return false;
     }
 
+    // only called from WebViewWorkerThread
     boolean endCacheTransaction() {
         if (--mCacheTransactionRefcount == 0) {
+            if (!Thread.currentThread().equals(
+                    WebViewWorker.getHandler().getLooper().getThread())) {
+                Log.w(LOGTAG, "endCacheTransaction should be called from "
+                        + "WebViewWorkerThread instead of from "
+                        + Thread.currentThread().getName());
+            }
             try {
                 mCacheDatabase.setTransactionSuccessful();
             } finally {
@@ -582,12 +624,12 @@ public class WebViewDatabase {
             return null;
         }
 
-        Cursor cursor = mCacheDatabase.rawQuery("SELECT filepath, lastmodify, etag, expires, "
-                    + "expiresstring, mimetype, encoding, httpstatus, location, contentlength, "
-                    + "contentdisposition FROM cache WHERE url = ?",
-                new String[] { url });
-
+        Cursor cursor = null;
+        final String query = "SELECT filepath, lastmodify, etag, expires, "
+                + "expiresstring, mimetype, encoding, httpstatus, location, contentlength, "
+                + "contentdisposition, crossdomain FROM cache WHERE url = ?";
         try {
+            cursor = mCacheDatabase.rawQuery(query, new String[] { url });
             if (cursor.moveToFirst()) {
                 CacheResult ret = new CacheResult();
                 ret.localPath = cursor.getString(0);
@@ -601,8 +643,11 @@ public class WebViewDatabase {
                 ret.location = cursor.getString(8);
                 ret.contentLength = cursor.getLong(9);
                 ret.contentdisposition = cursor.getString(10);
+                ret.crossDomain = cursor.getString(11);
                 return ret;
             }
+        } catch (IllegalStateException e) {
+            Log.e(LOGTAG, "getCache", e);
         } finally {
             if (cursor != null) cursor.close();
         }
@@ -647,6 +692,7 @@ public class WebViewDatabase {
         mCacheInserter.bind(mCacheContentLengthColIndex, c.contentLength);
         mCacheInserter.bind(mCacheContentDispositionColIndex,
                 c.contentdisposition);
+        mCacheInserter.bind(mCacheCrossDomainColIndex, c.crossDomain);
         mCacheInserter.execute();
     }
 
@@ -666,64 +712,108 @@ public class WebViewDatabase {
             return false;
         }
 
-        Cursor cursor = mCacheDatabase.query("cache", ID_PROJECTION,
-                null, null, null, null, null);
-        boolean ret = cursor.moveToFirst() == true;
-        cursor.close();
+        Cursor cursor = null;
+        boolean ret = false;
+        try {
+            cursor = mCacheDatabase.query("cache", ID_PROJECTION,
+                    null, null, null, null, null);
+            ret = cursor.moveToFirst() == true;
+        } catch (IllegalStateException e) {
+            Log.e(LOGTAG, "hasCache", e);
+        } finally {
+            if (cursor != null) cursor.close();
+        }
         return ret;
     }
 
     long getCacheTotalSize() {
         long size = 0;
-        Cursor cursor = mCacheDatabase.rawQuery(
-                "SELECT SUM(contentlength) as sum FROM cache", null);
-        if (cursor.moveToFirst()) {
-            size = cursor.getLong(0);
+        Cursor cursor = null;
+        final String query = "SELECT SUM(contentlength) as sum FROM cache";
+        try {
+            cursor = mCacheDatabase.rawQuery(query, null);
+            if (cursor.moveToFirst()) {
+                size = cursor.getLong(0);
+            }
+        } catch (IllegalStateException e) {
+            Log.e(LOGTAG, "getCacheTotalSize", e);
+        } finally {
+            if (cursor != null) cursor.close();
         }
-        cursor.close();
         return size;
     }
 
-    ArrayList<String> trimCache(long amount) {
+    List<String> trimCache(long amount) {
         ArrayList<String> pathList = new ArrayList<String>(100);
-        Cursor cursor = mCacheDatabase.rawQuery(
-                "SELECT contentlength, filepath FROM cache ORDER BY expires ASC",
-                null);
-        if (cursor.moveToFirst()) {
-            int batchSize = 100;
-            StringBuilder pathStr = new StringBuilder(20 + 16 * batchSize);
-            pathStr.append("DELETE FROM cache WHERE filepath IN (?");
-            for (int i = 1; i < batchSize; i++) {
-                pathStr.append(", ?");
-            }
-            pathStr.append(")");
-            SQLiteStatement statement = mCacheDatabase.compileStatement(pathStr
-                    .toString());
-            // as bindString() uses 1-based index, initialize index to 1
-            int index = 1;
-            do {
-                long length = cursor.getLong(0);
-                if (length == 0) {
-                    continue;
+        Cursor cursor = null;
+        final String query = "SELECT contentlength, filepath FROM cache ORDER BY expires ASC";
+        try {
+            cursor = mCacheDatabase.rawQuery(query, null);
+            if (cursor.moveToFirst()) {
+                int batchSize = 100;
+                StringBuilder pathStr = new StringBuilder(20 + 16 * batchSize);
+                pathStr.append("DELETE FROM cache WHERE filepath IN (?");
+                for (int i = 1; i < batchSize; i++) {
+                    pathStr.append(", ?");
                 }
-                amount -= length;
-                String filePath = cursor.getString(1);
-                statement.bindString(index, filePath);
-                pathList.add(filePath);
-                if (index++ == batchSize) {
-                    statement.execute();
-                    statement.clearBindings();
-                    index = 1;
+                pathStr.append(")");
+                SQLiteStatement statement = null;
+                try {
+                    statement = mCacheDatabase.compileStatement(
+                            pathStr.toString());
+                    // as bindString() uses 1-based index, initialize index to 1
+                    int index = 1;
+                    do {
+                        long length = cursor.getLong(0);
+                        if (length == 0) {
+                            continue;
+                        }
+                        amount -= length;
+                        String filePath = cursor.getString(1);
+                        statement.bindString(index, filePath);
+                        pathList.add(filePath);
+                        if (index++ == batchSize) {
+                            statement.execute();
+                            statement.clearBindings();
+                            index = 1;
+                        }
+                    } while (cursor.moveToNext() && amount > 0);
+                    if (index > 1) {
+                        // there may be old bindings from the previous statement
+                        // if index is less than batchSize, which is Ok.
+                        statement.execute();
+                    }
+                } catch (IllegalStateException e) {
+                    Log.e(LOGTAG, "trimCache SQLiteStatement", e);
+                } finally {
+                    if (statement != null) statement.close();
                 }
-            } while (cursor.moveToNext() && amount > 0);
-            if (index > 1) {
-                // there may be old bindings from the previous statement if
-                // index is less than batchSize, which is Ok.
-                statement.execute();
             }
-            statement.close();
+        } catch (IllegalStateException e) {
+            Log.e(LOGTAG, "trimCache Cursor", e);
+        } finally {
+            if (cursor != null) cursor.close();
         }
-        cursor.close();
+        return pathList;
+    }
+
+    List<String> getAllCacheFileNames() {
+        ArrayList<String> pathList = null;
+        Cursor cursor = null;
+        try {
+            cursor = mCacheDatabase.rawQuery("SELECT filepath FROM cache",
+                    null);
+            if (cursor != null && cursor.moveToFirst()) {
+                pathList = new ArrayList<String>(cursor.getCount());
+                do {
+                    pathList.add(cursor.getString(0));
+                } while (cursor.moveToNext());
+            }
+        } catch (IllegalStateException e) {
+            Log.e(LOGTAG, "getAllCacheFileNames", e);
+        } finally {
+            if (cursor != null) cursor.close();
+        }
         return pathList;
     }
 
@@ -773,17 +863,23 @@ public class WebViewDatabase {
         final String selection = "(" + PASSWORD_HOST_COL + " == ?)";
         synchronized (mPasswordLock) {
             String[] ret = null;
-            Cursor cursor = mDatabase.query(mTableNames[TABLE_PASSWORD_ID],
-                    columns, selection, new String[] { schemePlusHost }, null,
-                    null, null);
-            if (cursor.moveToFirst()) {
-                ret = new String[2];
-                ret[0] = cursor.getString(
-                        cursor.getColumnIndex(PASSWORD_USERNAME_COL));
-                ret[1] = cursor.getString(
-                        cursor.getColumnIndex(PASSWORD_PASSWORD_COL));
+            Cursor cursor = null;
+            try {
+                cursor = mDatabase.query(mTableNames[TABLE_PASSWORD_ID],
+                        columns, selection, new String[] { schemePlusHost }, null,
+                        null, null);
+                if (cursor.moveToFirst()) {
+                    ret = new String[2];
+                    ret[0] = cursor.getString(
+                            cursor.getColumnIndex(PASSWORD_USERNAME_COL));
+                    ret[1] = cursor.getString(
+                            cursor.getColumnIndex(PASSWORD_PASSWORD_COL));
+                }
+            } catch (IllegalStateException e) {
+                Log.e(LOGTAG, "getUsernamePassword", e);
+            } finally {
+                if (cursor != null) cursor.close();
             }
-            cursor.close();
             return ret;
         }
     }
@@ -864,17 +960,23 @@ public class WebViewDatabase {
                 + HTTPAUTH_REALM_COL + " == ?)";
         synchronized (mHttpAuthLock) {
             String[] ret = null;
-            Cursor cursor = mDatabase.query(mTableNames[TABLE_HTTPAUTH_ID],
-                    columns, selection, new String[] { host, realm }, null,
-                    null, null);
-            if (cursor.moveToFirst()) {
-                ret = new String[2];
-                ret[0] = cursor.getString(
-                        cursor.getColumnIndex(HTTPAUTH_USERNAME_COL));
-                ret[1] = cursor.getString(
-                        cursor.getColumnIndex(HTTPAUTH_PASSWORD_COL));
+            Cursor cursor = null;
+            try {
+                cursor = mDatabase.query(mTableNames[TABLE_HTTPAUTH_ID],
+                        columns, selection, new String[] { host, realm }, null,
+                        null, null);
+                if (cursor.moveToFirst()) {
+                    ret = new String[2];
+                    ret[0] = cursor.getString(
+                            cursor.getColumnIndex(HTTPAUTH_USERNAME_COL));
+                    ret[1] = cursor.getString(
+                            cursor.getColumnIndex(HTTPAUTH_PASSWORD_COL));
+                }
+            } catch (IllegalStateException e) {
+                Log.e(LOGTAG, "getHttpAuthUsernamePassword", e);
+            } finally {
+                if (cursor != null) cursor.close();
             }
-            cursor.close();
             return ret;
         }
     }
@@ -922,18 +1024,24 @@ public class WebViewDatabase {
         final String selection = "(" + FORMURL_URL_COL + " == ?)";
         synchronized (mFormLock) {
             long urlid = -1;
-            Cursor cursor = mDatabase.query(mTableNames[TABLE_FORMURL_ID],
-                    ID_PROJECTION, selection, new String[] { url }, null, null,
-                    null);
-            if (cursor.moveToFirst()) {
-                urlid = cursor.getLong(cursor.getColumnIndex(ID_COL));
-            } else {
-                ContentValues c = new ContentValues();
-                c.put(FORMURL_URL_COL, url);
-                urlid = mDatabase.insert(
-                        mTableNames[TABLE_FORMURL_ID], null, c);
+            Cursor cursor = null;
+            try {
+                cursor = mDatabase.query(mTableNames[TABLE_FORMURL_ID],
+                        ID_PROJECTION, selection, new String[] { url }, null, null,
+                        null);
+                if (cursor.moveToFirst()) {
+                    urlid = cursor.getLong(cursor.getColumnIndex(ID_COL));
+                } else {
+                    ContentValues c = new ContentValues();
+                    c.put(FORMURL_URL_COL, url);
+                    urlid = mDatabase.insert(
+                            mTableNames[TABLE_FORMURL_ID], null, c);
+                }
+            } catch (IllegalStateException e) {
+                Log.e(LOGTAG, "setFormData", e);
+            } finally {
+                if (cursor != null) cursor.close();
             }
-            cursor.close();
             if (urlid >= 0) {
                 Set<Entry<String, String>> set = formdata.entrySet();
                 Iterator<Entry<String, String>> iter = set.iterator();
@@ -966,27 +1074,39 @@ public class WebViewDatabase {
         final String dataSelection = "(" + FORMDATA_URLID_COL + " == ?) AND ("
                 + FORMDATA_NAME_COL + " == ?)";
         synchronized (mFormLock) {
-            Cursor cursor = mDatabase.query(mTableNames[TABLE_FORMURL_ID],
-                    ID_PROJECTION, urlSelection, new String[] { url }, null,
-                    null, null);
-            if (cursor.moveToFirst()) {
-                long urlid = cursor.getLong(cursor.getColumnIndex(ID_COL));
-                Cursor dataCursor = mDatabase.query(
-                        mTableNames[TABLE_FORMDATA_ID],
-                        new String[] { ID_COL, FORMDATA_VALUE_COL },
-                        dataSelection,
-                        new String[] { Long.toString(urlid), name }, null,
+            Cursor cursor = null;
+            try {
+                cursor = mDatabase.query(mTableNames[TABLE_FORMURL_ID],
+                        ID_PROJECTION, urlSelection, new String[] { url }, null,
                         null, null);
-                if (dataCursor.moveToFirst()) {
-                    int valueCol =
-                            dataCursor.getColumnIndex(FORMDATA_VALUE_COL);
-                    do {
-                        values.add(dataCursor.getString(valueCol));
-                    } while (dataCursor.moveToNext());
+                if (cursor.moveToFirst()) {
+                    long urlid = cursor.getLong(cursor.getColumnIndex(ID_COL));
+                    Cursor dataCursor = null;
+                    try {
+                        dataCursor = mDatabase.query(
+                                mTableNames[TABLE_FORMDATA_ID],
+                                new String[] { ID_COL, FORMDATA_VALUE_COL },
+                                dataSelection,
+                                new String[] { Long.toString(urlid), name },
+                                null, null, null);
+                        if (dataCursor.moveToFirst()) {
+                            int valueCol = dataCursor.getColumnIndex(
+                                    FORMDATA_VALUE_COL);
+                            do {
+                                values.add(dataCursor.getString(valueCol));
+                            } while (dataCursor.moveToNext());
+                        }
+                    } catch (IllegalStateException e) {
+                        Log.e(LOGTAG, "getFormData dataCursor", e);
+                    } finally {
+                        if (dataCursor != null) dataCursor.close();
+                    }
                 }
-                dataCursor.close();
+            } catch (IllegalStateException e) {
+                Log.e(LOGTAG, "getFormData cursor", e);
+            } finally {
+                if (cursor != null) cursor.close();
             }
-            cursor.close();
             return values;
         }
     }

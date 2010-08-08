@@ -2,8 +2,6 @@
     Copyright (C) 2004, 2005 Nikolas Zimmermann <wildfox@kde.org>
                   2004, 2005, 2006, 2007 Rob Buis <buis@kde.org>
 
-    This file is part of the KDE project
-
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -62,9 +60,9 @@ unsigned short SVGColor::colorType() const
     return m_colorType;
 }
 
-RGBColor* SVGColor::rgbColor() const
+PassRefPtr<RGBColor> SVGColor::rgbColor() const
 {
-    return RGBColor::create(m_color.rgb()).releaseRef();
+    return RGBColor::create(m_color.rgb());
 }
 
 void SVGColor::setRGBColor(const String& rgbColor, ExceptionCode& ec)

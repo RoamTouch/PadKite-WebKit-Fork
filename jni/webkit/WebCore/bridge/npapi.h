@@ -56,6 +56,12 @@
 #    endif /* XP_WIN */
 #endif /* _WIN32 */
 
+#ifdef __SYMBIAN32__
+#   ifndef XP_SYMBIAN
+#       define XP_SYMBIAN 1
+#   endif
+#endif  /* __SYMBIAN32__ */
+
 #ifdef __MWERKS__
 #    define _declspec __declspec
 #    ifdef macintosh
@@ -64,11 +70,13 @@
 #        endif /* XP_MAC */
 #    endif /* macintosh */
 #    ifdef __INTEL__
-#        undef NULL
-#        ifndef XP_WIN
-#            define XP_WIN 1
-#        endif /* __INTEL__ */
-#    endif /* XP_PC */
+#       ifndef XP_SYMBIAN
+#           undef NULL
+#           ifndef XP_WIN
+#               define XP_WIN 1
+#           endif /* XP_WIN */
+#       endif /* XP_SYMBIAN */
+#    endif /* __INTEL__ */
 #endif /* __MWERKS__ */
 
 #if defined(__APPLE_CC__) && !defined(__MACOS_CLASSIC__) && !defined(XP_UNIX)
@@ -99,6 +107,11 @@
     #include <stdio.h>
 #endif
 
+#if defined(XP_SYMBIAN)
+    #include <QEvent>
+    #include <QRegion>
+#endif
+
 #ifdef XP_WIN
     #include <windows.h>
 #endif
@@ -113,6 +126,14 @@
 /*----------------------------------------------------------------------*/
 /*             Definition of Basic Types                                */
 /*----------------------------------------------------------------------*/
+
+/* QNX sets the _INT16 and friends defines, but does not typedef the types */
+#ifdef __QNXNTO__
+#undef _UINT16
+#undef _INT16
+#undef _UINT32
+#undef _INT32
+#endif
 
 #ifndef _UINT16
 #define _UINT16
@@ -354,6 +375,12 @@ typedef enum {
 #endif
 
 #ifdef ANDROID
+    /* Used when the plugin returns 0 from NPN_WriteReady and wishes the browser
+     * to wait a certain amount of millis before calling NPN_WriteReady again.
+     */
+    NPPDataDeliveryDelayMs = 100,
+
+    // TODO(reed): upstream
     NPPFakeValueToForce32Bits = 0x7FFFFFFF
 #endif
 } NPPVariable;
@@ -519,9 +546,9 @@ typedef struct _NPWindow
     uint32    height;
     NPRect    clipRect;    /* Clipping rectangle in port coordinates */
                         /* Used by MAC only.              */
-#ifdef XP_UNIX
+#if defined(XP_UNIX) || defined(XP_SYMBIAN)
     void *    ws_info;    /* Platform-dependent additonal data */
-#endif /* XP_UNIX */
+#endif /* XP_UNIX || XP_SYMBIAN */
     NPWindowType type;    /* Is this a window or a drawable? */
 } NPWindow;
 
@@ -571,6 +598,8 @@ typedef enum {
 typedef EventRecord    NPEvent;
 #endif
 
+#elif defined(XP_SYMBIAN)
+typedef QEvent NPEvent;
 #elif defined(XP_WIN)
 typedef struct _NPEvent
 {
@@ -601,6 +630,8 @@ typedef CGPathRef NPCGRegion;
 typedef HRGN NPRegion;
 #elif defined(XP_UNIX)
 typedef Region NPRegion;
+#elif defined(XP_SYMBIAN)
+typedef QRegion* NPRegion;
 #else
 typedef void *NPRegion;
 #endif /* XP_MAC */

@@ -27,20 +27,20 @@
 
 namespace WebCore {
 
+// Renderer for iframes. Is subclassed in RenderEmbeddedObject for object and embed.
 class RenderPartObject : public RenderPart {
 public:
     RenderPartObject(Element*);
-    virtual ~RenderPartObject();
 
-    void updateWidget(bool onlyCreateNonNetscapePlugins);
+#ifdef FLATTEN_IFRAME
+protected:
+    virtual void calcWidth();
+    virtual void calcHeight();
+#endif
 
 private:
     virtual const char* renderName() const { return "RenderPartObject"; }
 
-#ifdef FLATTEN_IFRAME
-    virtual void calcWidth();
-    virtual void calcHeight();
-#endif
     virtual void layout();
 
     virtual void viewCleared();

@@ -26,46 +26,13 @@
 
 #include "config.h"
 
-#if ENABLE(ASSEMBLER) && PLATFORM(ARM)
+#if ENABLE(ASSEMBLER) && CPU(ARM_TRADITIONAL)
 
 #include "ARMAssembler.h"
 
 namespace JSC {
 
 // Patching helpers
-
-ARMWord* ARMAssembler::getLdrImmAddress(ARMWord* insn, uint32_t* constPool)
-{
-    // Must be an ldr ..., [pc +/- imm]
-    ASSERT((*insn & 0x0f7f0000) == 0x051f0000);
-
-    if (constPool && (*insn & 0x1))
-        return reinterpret_cast<ARMWord*>(constPool + ((*insn & SDT_OFFSET_MASK) >> 1));
-
-    ARMWord addr = reinterpret_cast<ARMWord>(insn) + 2 * sizeof(ARMWord);
-    if (*insn & DT_UP)
-        return reinterpret_cast<ARMWord*>(addr + (*insn & SDT_OFFSET_MASK));
-    else
-        return reinterpret_cast<ARMWord*>(addr - (*insn & SDT_OFFSET_MASK));
-}
-
-void ARMAssembler::linkBranch(void* code, JmpSrc from, void* to)
-{
-    ARMWord* insn = reinterpret_cast<ARMWord*>(code) + (from.m_offset / sizeof(ARMWord));
-
-    if (!from.m_latePatch) {
-        int diff = reinterpret_cast<ARMWord*>(to) - reinterpret_cast<ARMWord*>(insn + 2);
-
-        if ((diff <= BOFFSET_MAX && diff >= BOFFSET_MIN)) {
-            *insn = B | getConditionalField(*insn) | (diff & BRANCH_MASK);
-            ExecutableAllocator::cacheFlush(insn, sizeof(ARMWord));
-            return;
-        }
-    }
-    ARMWord* addr = getLdrImmAddress(insn);
-    *addr = reinterpret_cast<ARMWord>(to);
-    ExecutableAllocator::cacheFlush(addr, sizeof(ARMWord));
-}
 
 void ARMAssembler::patchConstantPoolLoad(void* loadAddr, void* constPoolAddr)
 {
@@ -118,7 +85,7 @@ ARMWord ARMAssembler::getOp2(ARMWord imm)
     if ((imm & 0x00ffffff) == 0)
         return OP2_IMM | (imm >> 24) | (rol << 8);
 
-    return 0;
+    return INVALID_IMM;
 }
 
 int ARMAssembler::genInt(int reg, ARMWord imm, bool positive)
@@ -236,25 +203,18 @@ ARMWord ARMAssembler::getImm(ARMWord imm, int tmpReg, bool invert)
 
     // Do it by 1 instruction
     tmp = getOp2(imm);
-    if (tmp)
+    if (tmp != INVALID_IMM)
         return tmp;
 
     tmp = getOp2(~imm);
-    if (tmp) {
+    if (tmp != INVALID_IMM) {
         if (invert)
             return tmp | OP2_INV_IMM;
         mvn_r(tmpReg, tmp);
         return tmpReg;
     }
 
-    // Do it by 2 instruction
-    if (genInt(tmpReg, imm, true))
-        return tmpReg;
-    if (genInt(tmpReg, ~imm, false))
-        return tmpReg;
-
-    ldr_imm(tmpReg, imm);
-    return tmpReg;
+    return encodeComplexImm(imm, tmpReg);
 }
 
 void ARMAssembler::moveImm(ARMWord imm, int dest)
@@ -263,24 +223,41 @@ void ARMAssembler::moveImm(ARMWord imm, int dest)
 
     // Do it by 1 instruction
     tmp = getOp2(imm);
-    if (tmp) {
+    if (tmp != INVALID_IMM) {
         mov_r(dest, tmp);
         return;
     }
 
     tmp = getOp2(~imm);
-    if (tmp) {
+    if (tmp != INVALID_IMM) {
         mvn_r(dest, tmp);
         return;
     }
 
+    encodeComplexImm(imm, dest);
+}
+
+ARMWord ARMAssembler::encodeComplexImm(ARMWord imm, int dest)
+{
+#if WTF_ARM_ARCH_AT_LEAST(7)
+    ARMWord tmp = getImm16Op2(imm);
+    if (tmp != INVALID_IMM) {
+        movw_r(dest, tmp);
+        return dest;
+    }
+    movw_r(dest, getImm16Op2(imm & 0xffff));
+    movt_r(dest, getImm16Op2(imm >> 16));
+    return dest;
+#else
     // Do it by 2 instruction
     if (genInt(dest, imm, true))
-        return;
+        return dest;
     if (genInt(dest, ~imm, false))
-        return;
+        return dest;
 
     ldr_imm(dest, imm);
+    return dest;
+#endif
 }
 
 // Memory load/store helpers
@@ -291,10 +268,10 @@ void ARMAssembler::dataTransfer32(bool isLoad, RegisterID srcDst, RegisterID bas
         if (offset <= 0xfff)
             dtr_u(isLoad, srcDst, base, offset);
         else if (offset <= 0xfffff) {
-            add_r(ARM::S0, base, OP2_IMM | (offset >> 12) | (10 << 8));
-            dtr_u(isLoad, srcDst, ARM::S0, offset & 0xfff);
+            add_r(ARMRegisters::S0, base, OP2_IMM | (offset >> 12) | (10 << 8));
+            dtr_u(isLoad, srcDst, ARMRegisters::S0, offset & 0xfff);
         } else {
-            ARMWord reg = getImm(offset, ARM::S0);
+            ARMWord reg = getImm(offset, ARMRegisters::S0);
             dtr_ur(isLoad, srcDst, base, reg);
         }
     } else {
@@ -302,10 +279,10 @@ void ARMAssembler::dataTransfer32(bool isLoad, RegisterID srcDst, RegisterID bas
         if (offset <= 0xfff)
             dtr_d(isLoad, srcDst, base, offset);
         else if (offset <= 0xfffff) {
-            sub_r(ARM::S0, base, OP2_IMM | (offset >> 12) | (10 << 8));
-            dtr_d(isLoad, srcDst, ARM::S0, offset & 0xfff);
+            sub_r(ARMRegisters::S0, base, OP2_IMM | (offset >> 12) | (10 << 8));
+            dtr_d(isLoad, srcDst, ARMRegisters::S0, offset & 0xfff);
         } else {
-            ARMWord reg = getImm(offset, ARM::S0);
+            ARMWord reg = getImm(offset, ARMRegisters::S0);
             dtr_dr(isLoad, srcDst, base, reg);
         }
     }
@@ -319,19 +296,19 @@ void ARMAssembler::baseIndexTransfer32(bool isLoad, RegisterID srcDst, RegisterI
     op2 = lsl(index, scale);
 
     if (offset >= 0 && offset <= 0xfff) {
-        add_r(ARM::S0, base, op2);
-        dtr_u(isLoad, srcDst, ARM::S0, offset);
+        add_r(ARMRegisters::S0, base, op2);
+        dtr_u(isLoad, srcDst, ARMRegisters::S0, offset);
         return;
     }
     if (offset <= 0 && offset >= -0xfff) {
-        add_r(ARM::S0, base, op2);
-        dtr_d(isLoad, srcDst, ARM::S0, -offset);
+        add_r(ARMRegisters::S0, base, op2);
+        dtr_d(isLoad, srcDst, ARMRegisters::S0, -offset);
         return;
     }
 
-    ldr_un_imm(ARM::S0, offset);
-    add_r(ARM::S0, ARM::S0, op2);
-    dtr_ur(isLoad, srcDst, base, ARM::S0);
+    ldr_un_imm(ARMRegisters::S0, offset);
+    add_r(ARMRegisters::S0, ARMRegisters::S0, op2);
+    dtr_ur(isLoad, srcDst, base, ARMRegisters::S0);
 }
 
 void ARMAssembler::doubleTransfer(bool isLoad, FPRegisterID srcDst, RegisterID base, int32_t offset)
@@ -342,8 +319,8 @@ void ARMAssembler::doubleTransfer(bool isLoad, FPRegisterID srcDst, RegisterID b
             return;
         }
         if (offset <= 0x3ffff && offset >= 0) {
-            add_r(ARM::S0, base, OP2_IMM | (offset >> 10) | (11 << 8));
-            fdtr_u(isLoad, srcDst, ARM::S0, (offset >> 2) & 0xff);
+            add_r(ARMRegisters::S0, base, OP2_IMM | (offset >> 10) | (11 << 8));
+            fdtr_u(isLoad, srcDst, ARMRegisters::S0, (offset >> 2) & 0xff);
             return;
         }
         offset = -offset;
@@ -353,27 +330,43 @@ void ARMAssembler::doubleTransfer(bool isLoad, FPRegisterID srcDst, RegisterID b
             return;
         }
         if (offset <= 0x3ffff && offset >= 0) {
-            sub_r(ARM::S0, base, OP2_IMM | (offset >> 10) | (11 << 8));
-            fdtr_d(isLoad, srcDst, ARM::S0, (offset >> 2) & 0xff);
+            sub_r(ARMRegisters::S0, base, OP2_IMM | (offset >> 10) | (11 << 8));
+            fdtr_d(isLoad, srcDst, ARMRegisters::S0, (offset >> 2) & 0xff);
             return;
         }
         offset = -offset;
     }
 
-    ldr_un_imm(ARM::S0, offset);
-    add_r(ARM::S0, ARM::S0, base);
-    fdtr_u(isLoad, srcDst, ARM::S0, 0);
+    ldr_un_imm(ARMRegisters::S0, offset);
+    add_r(ARMRegisters::S0, ARMRegisters::S0, base);
+    fdtr_u(isLoad, srcDst, ARMRegisters::S0, 0);
 }
 
 void* ARMAssembler::executableCopy(ExecutablePool* allocator)
 {
+    // 64-bit alignment is required for next constant pool and JIT code as well
+    m_buffer.flushWithoutBarrier(true);
+    if (m_buffer.uncheckedSize() & 0x7)
+        bkpt(0);
+
     char* data = reinterpret_cast<char*>(m_buffer.executableCopy(allocator));
 
     for (Jumps::Iterator iter = m_jumps.begin(); iter != m_jumps.end(); ++iter) {
-        ARMWord* ldrAddr = reinterpret_cast<ARMWord*>(data + *iter);
-        ARMWord* offset = getLdrImmAddress(ldrAddr);
-        if (*offset != 0xffffffff)
-            linkBranch(data, JmpSrc(*iter), data + *offset);
+        // The last bit is set if the constant must be placed on constant pool.
+        int pos = (*iter) & (~0x1);
+        ARMWord* ldrAddr = reinterpret_cast<ARMWord*>(data + pos);
+        ARMWord* addr = getLdrImmAddress(ldrAddr);
+        if (*addr != 0xffffffff) {
+            if (!(*iter & 1)) {
+                int diff = reinterpret_cast<ARMWord*>(data + *addr) - (ldrAddr + DefaultPrefetching);
+
+                if ((diff <= BOFFSET_MAX && diff >= BOFFSET_MIN)) {
+                    *ldrAddr = B | getConditionalField(*ldrAddr) | (diff & BRANCH_MASK);
+                    continue;
+                }
+            }
+            *addr = reinterpret_cast<ARMWord>(data + *addr);
+        }
     }
 
     return data;
@@ -381,4 +374,4 @@ void* ARMAssembler::executableCopy(ExecutablePool* allocator)
 
 } // namespace JSC
 
-#endif // ENABLE(ASSEMBLER) && PLATFORM(ARM)
+#endif // ENABLE(ASSEMBLER) && CPU(ARM_TRADITIONAL)

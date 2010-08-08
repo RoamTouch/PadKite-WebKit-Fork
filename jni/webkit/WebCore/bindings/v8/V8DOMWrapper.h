@@ -31,13 +31,18 @@
 #ifndef V8DOMWrapper_h
 #define V8DOMWrapper_h
 
+#include "Document.h"
 #include "Event.h"
 #include "Node.h"
 #include "NodeFilter.h"
 #include "PlatformString.h" // for WebCore::String
-#include "V8CustomBinding.h"
+#include "V8CustomXPathNSResolver.h"
+#include "V8DOMMap.h"
+#include "V8Event.h"
 #include "V8Index.h"
 #include "V8Utilities.h"
+#include "V8XPathNSResolver.h"
+#include "XPathNSResolver.h"
 #include <v8.h>
 
 namespace WebCore {
@@ -86,7 +91,16 @@ namespace WebCore {
     class StyleSheetList;
     class V8EventListener;
     class V8ObjectEventListener;
+    class V8Proxy;
+#if ENABLE(WEB_SOCKETS)
+    class WebSocket;
+#endif
     class WorkerContext;
+
+    enum ListenerLookupType {
+        ListenerFindOnly,
+        ListenerFindOrCreate,
+    };
 
     class V8DOMWrapper {
     public:
@@ -96,85 +110,19 @@ namespace WebCore {
 #endif
 
         // Sets contents of a DOM wrapper.
-        static void setDOMWrapper(v8::Handle<v8::Object>, int type, void* ptr);
-
-        static v8::Handle<v8::Object> lookupDOMWrapper(V8ClassIndex::V8WrapperType type, v8::Handle<v8::Object> object)
+        static void setDOMWrapper(v8::Handle<v8::Object> object, int type, void* cptr)
         {
-            return object.IsEmpty() ? object : object->FindInstanceInPrototypeChain(getTemplate(type));
+            ASSERT(object->InternalFieldCount() >= 2);
+            object->SetPointerInInternalField(v8DOMWrapperObjectIndex, cptr);
+            object->SetInternalField(v8DOMWrapperTypeIndex, v8::Integer::New(type));
         }
 
-        // A helper function extract native object pointer from a DOM wrapper
-        // and cast to the specified type.
-        template <class C>
-        static C* convertDOMWrapperToNative(v8::Handle<v8::Object> object)
+        static v8::Handle<v8::Object> lookupDOMWrapper(v8::Handle<v8::FunctionTemplate> functionTemplate, v8::Handle<v8::Object> object)
         {
-            ASSERT(maybeDOMWrapper(object));
-            return reinterpret_cast<C*>(object->GetPointerFromInternalField(V8Custom::kDOMWrapperObjectIndex));
-        }
-
-        template <class C>
-        static C* convertDOMWrapperToNode(v8::Handle<v8::Object> object)
-        {
-            ASSERT(maybeDOMWrapper(object));
-            ASSERT(domWrapperType(object) == V8ClassIndex::NODE);
-            return convertDOMWrapperToNative<C>(object);
-        }
-
-        template<typename T>
-        static v8::Handle<v8::Value> convertToV8Object(V8ClassIndex::V8WrapperType type, PassRefPtr<T> imp)
-        {
-            return convertToV8Object(type, imp.get());
-        }
-
-        static v8::Handle<v8::Value> convertToV8Object(V8ClassIndex::V8WrapperType, void*);
-
-        // Fast-path for Node objects.
-        static v8::Handle<v8::Value> convertNodeToV8Object(PassRefPtr<Node> node)
-        {
-            return convertNodeToV8Object(node.get());
-        }
-
-        static v8::Handle<v8::Value> convertNodeToV8Object(Node*);
-
-        template <class C>
-        static C* convertToNativeObject(V8ClassIndex::V8WrapperType type, v8::Handle<v8::Object> object)
-        {
-            // Native event listener is per frame, it cannot be handled by this generic function.
-            ASSERT(type != V8ClassIndex::EVENTLISTENER);
-            ASSERT(type != V8ClassIndex::EVENTTARGET);
-
-            ASSERT(maybeDOMWrapper(object));
-
-#ifndef NDEBUG
-            const bool typeIsValid =
-#define MAKE_CASE(TYPE, NAME) (type != V8ClassIndex::TYPE) &&
-                DOM_NODE_TYPES(MAKE_CASE)
-#if ENABLE(SVG)
-                SVG_NODE_TYPES(MAKE_CASE)
-#endif
-#undef MAKE_CASE
-                true;
-            ASSERT(typeIsValid);
-#endif
-
-            return convertDOMWrapperToNative<C>(object);
+            return object.IsEmpty() ? object : object->FindInstanceInPrototypeChain(functionTemplate);
         }
 
         static V8ClassIndex::V8WrapperType domWrapperType(v8::Handle<v8::Object>);
-
-        static v8::Handle<v8::Value> convertEventToV8Object(PassRefPtr<Event> event)
-        {
-            return convertEventToV8Object(event.get());
-        }
-
-        static v8::Handle<v8::Value> convertEventToV8Object(Event*);
-
-        static Event* convertToNativeEvent(v8::Handle<v8::Value> jsEvent)
-        {
-            if (!isDOMEventWrapper(jsEvent))
-                return 0;
-            return convertDOMWrapperToNative<Event>(v8::Handle<v8::Object>::Cast(jsEvent));
-        }
 
         static v8::Handle<v8::Value> convertEventTargetToV8Object(PassRefPtr<EventTarget> eventTarget)
         {
@@ -183,30 +131,49 @@ namespace WebCore {
 
         static v8::Handle<v8::Value> convertEventTargetToV8Object(EventTarget*);
 
-        // Wrap and unwrap JS event listeners.
-        static v8::Handle<v8::Value> convertEventListenerToV8Object(PassRefPtr<Event> eventListener)
+        static PassRefPtr<EventListener> getEventListener(Node* node, v8::Local<v8::Value> value, bool isAttribute, ListenerLookupType lookup);
+
+        static PassRefPtr<EventListener> getEventListener(SVGElementInstance* element, v8::Local<v8::Value> value, bool isAttribute, ListenerLookupType lookup);
+
+        static PassRefPtr<EventListener> getEventListener(AbstractWorker* worker, v8::Local<v8::Value> value, bool isAttribute, ListenerLookupType lookup);
+
+#if ENABLE(NOTIFICATIONS)
+        static PassRefPtr<EventListener> getEventListener(Notification* notification, v8::Local<v8::Value> value, bool isAttribute, ListenerLookupType lookup);
+#endif
+
+        static PassRefPtr<EventListener> getEventListener(WorkerContext* workerContext, v8::Local<v8::Value> value, bool isAttribute, ListenerLookupType lookup);
+
+        static PassRefPtr<EventListener> getEventListener(XMLHttpRequestUpload* upload, v8::Local<v8::Value> value, bool isAttribute, ListenerLookupType lookup);
+
+#if ENABLE(EVENTSOURCE)
+        static PassRefPtr<EventListener> getEventListener(EventSource* eventTarget, v8::Local<v8::Value> value, bool isAttribute, ListenerLookupType lookup);
+#endif
+
+        static PassRefPtr<EventListener> getEventListener(EventTarget* eventTarget, v8::Local<v8::Value> value, bool isAttribute, ListenerLookupType lookup);
+
+        static PassRefPtr<EventListener> getEventListener(V8Proxy* proxy, v8::Local<v8::Value> value, bool isAttribute, ListenerLookupType lookup);
+
+#if ENABLE(XPATH)
+        // XPath-related utilities
+        static RefPtr<XPathNSResolver> getXPathNSResolver(v8::Handle<v8::Value> value, V8Proxy* proxy = 0)
         {
-            return convertEventListenerToV8Object(eventListener.get());
+            RefPtr<XPathNSResolver> resolver;
+            if (V8XPathNSResolver::HasInstance(value))
+                resolver = V8XPathNSResolver::toNative(v8::Handle<v8::Object>::Cast(value));
+            else if (value->IsObject())
+                resolver = V8CustomXPathNSResolver::create(proxy, value->ToObject());
+            return resolver;
         }
-
-        static v8::Handle<v8::Value> convertEventListenerToV8Object(EventListener*);
-
-        // DOMImplementation is a singleton and it is handled in a special
-        // way. A wrapper is generated per document and stored in an
-        // internal field of the document.
-        static v8::Handle<v8::Value> convertDOMImplementationToV8Object(DOMImplementation*);
+#endif
 
         // Wrap JS node filter in C++.
         static PassRefPtr<NodeFilter> wrapNativeNodeFilter(v8::Handle<v8::Value>);
 
-        static v8::Persistent<v8::FunctionTemplate> getTemplate(V8ClassIndex::V8WrapperType);
         static v8::Local<v8::Function> getConstructorForContext(V8ClassIndex::V8WrapperType, v8::Handle<v8::Context>);
         static v8::Local<v8::Function> getConstructor(V8ClassIndex::V8WrapperType, v8::Handle<v8::Value> objectPrototype);
         static v8::Local<v8::Function> getConstructor(V8ClassIndex::V8WrapperType, DOMWindow*);
         static v8::Local<v8::Function> getConstructor(V8ClassIndex::V8WrapperType, WorkerContext*);
 
-        // Checks whether a DOM object has a JS wrapper.
-        static bool domObjectHasJSWrapper(void*);
         // Set JS wrapper of a DOM object, the caller in charge of increase ref.
         static void setJSWrapperForDOMObject(void*, v8::Persistent<v8::Object>);
         static void setJSWrapperForActiveDOMObject(void*, v8::Persistent<v8::Object>);
@@ -215,44 +182,18 @@ namespace WebCore {
         // Check whether a V8 value is a wrapper of type |classType|.
         static bool isWrapperOfType(v8::Handle<v8::Value>, V8ClassIndex::V8WrapperType);
 
-        static void* convertToSVGPODTypeImpl(V8ClassIndex::V8WrapperType, v8::Handle<v8::Value>);
-
-        // Check whether a V8 value is a DOM Event wrapper.
-        static bool isDOMEventWrapper(v8::Handle<v8::Value>);
-
-        static v8::Handle<v8::Value> convertStyleSheetToV8Object(StyleSheet*);
-        static v8::Handle<v8::Value> convertCSSValueToV8Object(CSSValue*);
-        static v8::Handle<v8::Value> convertCSSRuleToV8Object(CSSRule*);
-        // Returns the JS wrapper of a window object, initializes the environment
-        // of the window frame if needed.
-        static v8::Handle<v8::Value> convertWindowToV8Object(DOMWindow*);
-
-#if ENABLE(SVG)
-        static v8::Handle<v8::Value> convertSVGElementInstanceToV8Object(SVGElementInstance*);
-        static v8::Handle<v8::Value> convertSVGObjectWithContextToV8Object(V8ClassIndex::V8WrapperType, void*);
+#if ENABLE(3D_CANVAS)
+        static void setIndexedPropertiesToExternalArray(v8::Handle<v8::Object>,
+                                                        int,
+                                                        void*,
+                                                        int);
 #endif
-
-    private:
         // Set hidden references in a DOMWindow object of a frame.
         static void setHiddenWindowReference(Frame*, const int internalIndex, v8::Handle<v8::Object>);
 
-        static V8ClassIndex::V8WrapperType htmlElementType(HTMLElement*);
-#if ENABLE(SVG)
-        static V8ClassIndex::V8WrapperType svgElementType(SVGElement*);
-#endif
+        static v8::Local<v8::Object> instantiateV8Object(V8Proxy* proxy, V8ClassIndex::V8WrapperType type, void* impl);
 
-        // The first V8WrapperType specifies the function descriptor
-        // used to create JS object. The second V8WrapperType specifies
-        // the actual type of the void* for type casting.
-        // For example, a HTML element has HTMLELEMENT for the first V8WrapperType, but always
-        // use NODE as the second V8WrapperType. JS wrapper stores the second
-        // V8WrapperType and the void* as internal fields.
-        static v8::Local<v8::Object> instantiateV8Object(V8ClassIndex::V8WrapperType descType, V8ClassIndex::V8WrapperType cptrType, void* impl)
-        {
-            return instantiateV8Object(NULL, descType, cptrType, impl);
-        }
-
-        static v8::Local<v8::Object> instantiateV8Object(V8Proxy*, V8ClassIndex::V8WrapperType, V8ClassIndex::V8WrapperType, void*);
+        static v8::Handle<v8::Object> getWrapper(Node*);
     };
 
 }

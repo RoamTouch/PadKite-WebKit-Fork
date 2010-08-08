@@ -30,44 +30,41 @@ WebInspector.MetricsSidebarPane = function()
 {
     WebInspector.SidebarPane.call(this, WebInspector.UIString("Metrics"));
     this._inlineStyleId = null;
+    this._inlineStyleInjectedScriptId = null;
 }
 
 WebInspector.MetricsSidebarPane.prototype = {
     update: function(node)
     {
-        var body = this.bodyElement;
-
-        body.removeChildren();
-
         if (node)
             this.node = node;
         else
             node = this.node;
 
-        if (!node || !node.ownerDocument.defaultView)
+        if (!node || !node.ownerDocument.defaultView || node.nodeType !== Node.ELEMENT_NODE) {
+            this.bodyElement.removeChildren();
             return;
-
-        if (node.nodeType !== Node.ELEMENT_NODE)
-            return;
+        }
 
         var self = this;
         var callback = function(stylePayload) {
             if (!stylePayload)
                 return;
             var style = WebInspector.CSSStyleDeclaration.parseStyle(stylePayload);
-            self._update(node, body, style);
+            self._update(style);
         };
-        InspectorController.getComputedStyle(node, callback);
+        InjectedScriptAccess.get(node.injectedScriptId).getComputedStyle(node.id, callback);
 
         var inlineStyleCallback = function(stylePayload) {
             if (!stylePayload)
                 return;
             self._inlineStyleId = stylePayload.id;
+            self._inlineStyleInjectedScriptId = stylePayload.injectedScriptId;
         };
-        InspectorController.getInlineStyle(node, inlineStyleCallback);
+        InjectedScriptAccess.get(node.injectedScriptId).getInlineStyle(node.id, inlineStyleCallback);
     },
 
-    _update: function(node, body, style)
+    _update: function(style)
     {
         var metricsElement = document.createElement("div");
         metricsElement.className = "metrics";
@@ -169,7 +166,8 @@ WebInspector.MetricsSidebarPane.prototype = {
         }
 
         metricsElement.appendChild(previousBox);
-        body.appendChild(metricsElement);
+        this.bodyElement.removeChildren();
+        this.bodyElement.appendChild(metricsElement);
     },
 
     startEditing: function(targetElement, box, styleProperty)
@@ -208,7 +206,7 @@ WebInspector.MetricsSidebarPane.prototype = {
             self.dispatchEventToListeners("metrics edited");
             self.update();
         };
-        InspectorController.setStyleProperty(this._inlineStyleId, context.styleProperty, userInput, callback);
+        InjectedScriptAccess.get(this._inlineStyleInjectedScriptId).setStyleProperty(this._inlineStyleId, context.styleProperty, userInput, callback);
     }
 }
 

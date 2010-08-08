@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,6 +39,7 @@
 #import "KURL.h"
 #import "MIMETypeRegistry.h"
 #import "SoftLinking.h"
+#import "TimeRanges.h"
 #import "WebCoreSystemInterface.h"
 #import <QTKit/QTKit.h>
 #import <objc/objc-runtime.h>
@@ -84,6 +85,7 @@ SOFT_LINK_POINTER(QTKit, QTMovieAskUnresolvedDataRefsAttribute, NSString *)
 SOFT_LINK_POINTER(QTKit, QTMovieDataSizeAttribute, NSString *)
 SOFT_LINK_POINTER(QTKit, QTMovieDidEndNotification, NSString *)
 SOFT_LINK_POINTER(QTKit, QTMovieHasVideoAttribute, NSString *)
+SOFT_LINK_POINTER(QTKit, QTMovieHasAudioAttribute, NSString *)
 SOFT_LINK_POINTER(QTKit, QTMovieIsActiveAttribute, NSString *)
 SOFT_LINK_POINTER(QTKit, QTMovieLoadStateAttribute, NSString *)
 SOFT_LINK_POINTER(QTKit, QTMovieLoadStateDidChangeNotification, NSString *)
@@ -119,6 +121,7 @@ SOFT_LINK_POINTER(QTKit, QTMovieApertureModeAttribute, NSString *)
 #define QTMovieDataSizeAttribute getQTMovieDataSizeAttribute()
 #define QTMovieDidEndNotification getQTMovieDidEndNotification()
 #define QTMovieHasVideoAttribute getQTMovieHasVideoAttribute()
+#define QTMovieHasAudioAttribute getQTMovieHasAudioAttribute()
 #define QTMovieIsActiveAttribute getQTMovieIsActiveAttribute()
 #define QTMovieLoadStateAttribute getQTMovieLoadStateAttribute()
 #define QTMovieLoadStateDidChangeNotification getQTMovieLoadStateDidChangeNotification()
@@ -201,17 +204,18 @@ MediaPlayerPrivate::MediaPlayerPrivate(MediaPlayer* player)
     , m_seekTimer(this, &MediaPlayerPrivate::seekTimerFired)
     , m_networkState(MediaPlayer::Empty)
     , m_readyState(MediaPlayer::HaveNothing)
-    , m_startedPlaying(false)
-    , m_isStreaming(false)
-    , m_visible(false)
     , m_rect()
     , m_scaleFactor(1, 1)
     , m_enabledTrackCount(0)
     , m_totalTrackCount(0)
+    , m_reportedDuration(-1)
+    , m_cachedDuration(-1)
+    , m_timeToRestore(-1)
+    , m_startedPlaying(false)
+    , m_isStreaming(false)
+    , m_visible(false)
     , m_hasUnsupportedTracks(false)
-    , m_reportedDuration(-1.0f)
-    , m_cachedDuration(-1.0f)
-    , m_timeToRestore(-1.0f)
+    , m_videoFrameHasDrawn(false)
 #if DRAW_FRAME_RATE
     , m_frameCountWhilePlaying(0)
     , m_timeStartedPlaying(0)
@@ -230,7 +234,7 @@ MediaPlayerPrivate::~MediaPlayerPrivate()
 
 void MediaPlayerPrivate::createQTMovie(const String& url)
 {
-    NSURL *cocoaURL = KURL(url);
+    NSURL *cocoaURL = KURL(ParsedURLString, url);
     NSDictionary *movieAttributes = [NSDictionary dictionaryWithObjectsAndKeys:
                        cocoaURL, QTMovieURLAttribute,
                        [NSNumber numberWithBool:m_player->preservesPitch()], QTMovieRateChangesPreservePitchAttribute,
@@ -446,7 +450,7 @@ void MediaPlayerPrivate::createQTMovieLayer()
         // later via acceleratedRenderingStateChanged().
         GraphicsLayer* videoGraphicsLayer = m_player->mediaPlayerClient()->mediaPlayerGraphicsLayer(m_player);
         if (videoGraphicsLayer)
-            videoGraphicsLayer->setContentsToVideo((PlatformLayer *)m_qtVideoLayer.get());
+            videoGraphicsLayer->setContentsToMedia(m_qtVideoLayer.get());
     }
 #endif
 }
@@ -495,6 +499,9 @@ MediaPlayerPrivate::MediaRenderingMode MediaPlayerPrivate::preferredRenderingMod
 
 void MediaPlayerPrivate::setUpVideoRendering()
 {
+    if (!isReadyForRendering())
+        return;
+
     MediaRenderingMode currentMode = currentRenderingMode();
     MediaRenderingMode preferredMode = preferredRenderingMode();
     if (currentMode == preferredMode && currentMode != MediaRenderingNone)
@@ -553,6 +560,7 @@ void MediaPlayerPrivate::load(const String& url)
         m_player->readyStateChanged();
     }
     cancelSeek();
+    m_videoFrameHasDrawn = false;
     
     [m_objcObserver.get() setDelayCallbacks:YES];
 
@@ -560,6 +568,12 @@ void MediaPlayerPrivate::load(const String& url)
 
     [m_objcObserver.get() loadStateChanged:nil];
     [m_objcObserver.get() setDelayCallbacks:NO];
+}
+
+PlatformMedia MediaPlayerPrivate::platformMedia() const
+{
+    PlatformMedia plaftformMedia = { m_qtMovie.get() };
+    return plaftformMedia;
 }
 
 void MediaPlayerPrivate::play()
@@ -642,7 +656,7 @@ void MediaPlayerPrivate::doSeek()
         [m_qtMovie.get() setRate:0];
     [m_qtMovie.get() setCurrentTime:qttime];
 
-    // restore playback only if not at end, othewise QTMovie will loop
+    // restore playback only if not at end, otherwise QTMovie will loop
     float timeAfterSeek = currentTime();
     if (oldRate && timeAfterSeek < duration())
         [m_qtMovie.get() setRate:oldRate];
@@ -676,10 +690,6 @@ void MediaPlayerPrivate::seekTimerFired(Timer<MediaPlayerPrivate>*)
             m_player->timeChanged();
         }
     }
-}
-
-void MediaPlayerPrivate::setEndTime(float)
-{
 }
 
 bool MediaPlayerPrivate::paused() const
@@ -719,18 +729,54 @@ bool MediaPlayerPrivate::hasVideo() const
     return [[m_qtMovie.get() attributeForKey:QTMovieHasVideoAttribute] boolValue];
 }
 
+bool MediaPlayerPrivate::hasAudio() const
+{
+    if (!m_qtMovie)
+        return false;
+    return [[m_qtMovie.get() attributeForKey:QTMovieHasAudioAttribute] boolValue];
+}
+
+bool MediaPlayerPrivate::supportsFullscreen() const
+{
+#if !defined(BUILDING_ON_TIGER) && !defined(BUILDING_ON_LEOPARD)
+    return true;
+#else
+    // See <rdar://problem/7389945>
+    return false;
+#endif
+}
+
 void MediaPlayerPrivate::setVolume(float volume)
 {
+    if (m_qtMovie)
+        [m_qtMovie.get() setVolume:volume];  
+}
+
+bool MediaPlayerPrivate::hasClosedCaptions() const
+{
     if (!metaDataAvailable())
-        return;
-    [m_qtMovie.get() setVolume:volume];  
+        return false;
+    return wkQTMovieHasClosedCaptions(m_qtMovie.get());  
+}
+
+void MediaPlayerPrivate::setClosedCaptionsVisible(bool closedCaptionsVisible)
+{
+    if (metaDataAvailable()) {
+        wkQTMovieSetShowClosedCaptions(m_qtMovie.get(), closedCaptionsVisible);
+
+#if USE(ACCELERATED_COMPOSITING) && (!defined(BUILDING_ON_TIGER) && !defined(BUILDING_ON_LEOPARD))
+    if (closedCaptionsVisible && m_qtVideoLayer) {
+        // Captions will be rendered upside down unless we flag the movie as flipped (again). See <rdar://7408440>.
+        [m_qtVideoLayer.get() setGeometryFlipped:YES];
+    }
+#endif
+    }
 }
 
 void MediaPlayerPrivate::setRate(float rate)
 {
-    if (!metaDataAvailable())
-        return;
-    [m_qtMovie.get() setRate:rate];
+    if (m_qtMovie)
+        [m_qtMovie.get() setRate:rate];
 }
 
 void MediaPlayerPrivate::setPreservesPitch(bool preservesPitch)
@@ -751,17 +797,13 @@ void MediaPlayerPrivate::setPreservesPitch(bool preservesPitch)
     createQTMovie([movieAttributes valueForKey:QTMovieURLAttribute], movieAttributes);
 }
 
-int MediaPlayerPrivate::dataRate() const
+PassRefPtr<TimeRanges> MediaPlayerPrivate::buffered() const
 {
-    if (!metaDataAvailable())
-        return 0;
-    return wkQTMovieDataRate(m_qtMovie.get()); 
-}
-
-
-float MediaPlayerPrivate::maxTimeBuffered() const
-{
-    return maxTimeLoaded();
+    RefPtr<TimeRanges> timeRanges = TimeRanges::create();
+    float loaded = maxTimeLoaded();
+    if (loaded > 0)
+        timeRanges->add(0, loaded);
+    return timeRanges.release();
 }
 
 float MediaPlayerPrivate::maxTimeSeekable() const
@@ -789,11 +831,6 @@ unsigned MediaPlayerPrivate::bytesLoaded() const
     if (!dur)
         return 0;
     return totalBytes() * maxTimeLoaded() / dur;
-}
-
-bool MediaPlayerPrivate::totalBytesKnown() const
-{
-    return totalBytes() > 0;
 }
 
 unsigned MediaPlayerPrivate::totalBytes() const
@@ -933,7 +970,7 @@ void MediaPlayerPrivate::updateStates()
         }
     }
 
-    if (isReadyForRendering() && !hasSetUpVideoRendering())
+    if (!hasSetUpVideoRendering())
         setUpVideoRendering();
 
     if (seeking())
@@ -1008,8 +1045,11 @@ void MediaPlayerPrivate::didEnd()
 
     // Hang onto the current time and use it as duration from now on since QuickTime is telling us we
     // are at the end. Do this because QuickTime sometimes reports one time for duration and stops
-    // playback at another time, which causes problems in HTMLMediaElement.
-    m_cachedDuration = currentTime();
+    // playback at another time, which causes problems in HTMLMediaElement. QTKit's 'ended' event 
+    // fires when playing in reverse so don't update duration when at time zero!
+    float now = currentTime();
+    if (now > 0)
+        m_cachedDuration = now;
 
     updateStates();
     m_player->timeChanged();
@@ -1030,12 +1070,25 @@ void MediaPlayerPrivate::setVisible(bool b)
 {
     if (m_visible != b) {
         m_visible = b;
-        if (b) {
-            if (m_readyState >= MediaPlayer::HaveMetadata)
-                setUpVideoRendering();
-        } else
+        if (b)
+            setUpVideoRendering();
+        else
             tearDownVideoRendering();
     }
+}
+
+bool MediaPlayerPrivate::hasAvailableVideoFrame() const
+{
+    // When using a QTMovieLayer return true as soon as the movie reaches QTMovieLoadStatePlayable 
+    // because although we don't *know* when the first frame has decoded, by the time we get and 
+    // process the notification a frame should have propagated the VisualContext and been set on
+    // the layer.
+    if (currentRenderingMode() == MediaRenderingMovieLayer)
+        return m_readyState >= MediaPlayer::HaveCurrentData;
+
+    // When using the software renderer QuickTime signals that a frame is available so we might as well
+    // wait until we know that a frame has been drawn.
+    return m_videoFrameHasDrawn;
 }
 
 void MediaPlayerPrivate::repaint()
@@ -1052,6 +1105,7 @@ void MediaPlayerPrivate::repaint()
             m_timeStartedPlaying = [NSDate timeIntervalSinceReferenceDate];
     }
 #endif
+    m_videoFrameHasDrawn = true;
     m_player->repaint();
 }
 
@@ -1136,10 +1190,10 @@ void MediaPlayerPrivate::paint(GraphicsContext* context, const IntRect& r)
             TextRun textRun(text.characters(), text.length());
             const Color color(255, 0, 0);
             context->scale(FloatSize(1.0f, -1.0f));    
-            context->setStrokeColor(color);
+            context->setStrokeColor(color, styleToUse->colorSpace());
             context->setStrokeStyle(SolidStroke);
             context->setStrokeThickness(1.0f);
-            context->setFillColor(color);
+            context->setFillColor(color, styleToUse->colorSpace());
             context->drawText(styleToUse->font(), textRun, IntPoint(2, -3));
         }
     }
@@ -1356,7 +1410,7 @@ void MediaPlayerPrivate::acceleratedRenderingStateChanged()
     if (currentRenderingMode() == MediaRenderingMovieLayer) {
         GraphicsLayer* videoGraphicsLayer = m_player->mediaPlayerClient()->mediaPlayerGraphicsLayer(m_player);
         if (videoGraphicsLayer)
-            videoGraphicsLayer->setContentsToVideo((PlatformLayer *)m_qtVideoLayer.get());
+            videoGraphicsLayer->setContentsToMedia(m_qtVideoLayer.get());
     }
 }
 #endif

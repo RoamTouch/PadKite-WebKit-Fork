@@ -66,9 +66,15 @@ void HTMLOptionElement::detach()
     HTMLFormControlElement::detach();
 }
 
+bool HTMLOptionElement::supportsFocus() const
+{
+    return HTMLElement::supportsFocus();
+}
+
 bool HTMLOptionElement::isFocusable() const
 {
-    return HTMLElement::isFocusable();
+    // Option elements do not have a renderer so we check the renderStyle instead.
+    return supportsFocus() && renderStyle() && renderStyle()->display() != NONE;
 }
 
 const AtomicString& HTMLOptionElement::formControlType() const
@@ -92,7 +98,7 @@ void HTMLOptionElement::setText(const String &text, ExceptionCode& ec)
     }
 
     removeChildren();
-    appendChild(new Text(document(), text), ec);
+    appendChild(Text::create(document(), text), ec);
 }
 
 void HTMLOptionElement::accessKeyAction(bool)
@@ -131,6 +137,8 @@ void HTMLOptionElement::setValue(const String& value)
 
 bool HTMLOptionElement::selected() const
 {
+    if (HTMLSelectElement* select = ownerSelectElement())
+        select->recalcListItemsIfNeeded();
     return m_data.selected();
 }
 
@@ -211,14 +219,15 @@ String HTMLOptionElement::textIndentedToRespectGroupLabel() const
 
 bool HTMLOptionElement::disabled() const
 { 
-    return HTMLFormControlElement::disabled() || (parentNode() && static_cast<HTMLFormControlElement*>(parentNode())->disabled()); 
+    return ownElementDisabled() || (parentNode() && static_cast<HTMLFormControlElement*>(parentNode())->disabled()); 
 }
 
 void HTMLOptionElement::insertedIntoTree(bool deep)
 {
     if (HTMLSelectElement* select = ownerSelectElement()) {
         select->setRecalcListItems();
-        if (selected())
+        // Avoid our selected() getter since it will recalculate list items incorrectly for us.
+        if (m_data.selected())
             select->setSelectedIndex(index(), false);
         select->scrollToSelection();
     }

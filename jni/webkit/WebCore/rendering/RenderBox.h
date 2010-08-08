@@ -24,6 +24,7 @@
 #define RenderBox_h
 
 #include "RenderBoxModelObject.h"
+#include "RenderOverflow.h"
 #include "ScrollTypes.h"
 
 namespace WebCore {
@@ -73,23 +74,38 @@ public:
 
     // Bounds of the outline box in absolute coords. Respects transforms
     virtual IntRect outlineBoundsForRepaint(RenderBoxModelObject* /*repaintContainer*/) const;
-    virtual void addFocusRingRects(GraphicsContext*, int tx, int ty);
+    virtual void addFocusRingRects(Vector<IntRect>&, int tx, int ty);
 
     // Use this with caution! No type checking is done!
     RenderBox* previousSiblingBox() const;
     RenderBox* nextSiblingBox() const;
     RenderBox* parentBox() const;
 
-    // The height of a block when you include normal flow overflow spillage out of the bottom
-    // of the block (e.g., a <div style="height:25px"> that has a 100px tall image inside
-    // it would have an overflow height of borderTop() + paddingTop() + 100px.
-    virtual int overflowHeight(bool /*includeInterior*/ = true) const { return height(); }
-    virtual int overflowWidth(bool /*includeInterior*/ = true) const { return width(); }
-    virtual void setOverflowHeight(int) { }
-    virtual void setOverflowWidth(int) { }
-    virtual int overflowLeft(bool /*includeInterior*/ = true) const { return 0; }
-    virtual int overflowTop(bool /*includeInterior*/ = true) const { return 0; }
-    virtual IntRect overflowRect(bool /*includeInterior*/ = true) const { return borderBoxRect(); }
+    IntRect visibleOverflowRect() const { return hasOverflowClip() ? visualOverflowRect() : (m_overflow ? m_overflow->visibleOverflowRect() : borderBoxRect()); }
+    int topVisibleOverflow() const { return hasOverflowClip() ? topVisualOverflow() : std::min(topLayoutOverflow(), topVisualOverflow()); }
+    int bottomVisibleOverflow() const { return hasOverflowClip() ? bottomVisualOverflow() : std::max(bottomLayoutOverflow(), bottomVisualOverflow()); }
+    int leftVisibleOverflow() const { return hasOverflowClip() ? leftVisualOverflow() : std::min(leftLayoutOverflow(), leftVisualOverflow()); }
+    int rightVisibleOverflow() const { return hasOverflowClip() ? rightVisualOverflow() :  std::max(rightLayoutOverflow(), rightVisualOverflow()); }
+    
+    IntRect layoutOverflowRect() const { return m_overflow ? m_overflow->layoutOverflowRect() : borderBoxRect(); }
+    int topLayoutOverflow() const { return m_overflow? m_overflow->topLayoutOverflow() : 0; }
+    int bottomLayoutOverflow() const { return m_overflow ? m_overflow->bottomLayoutOverflow() : height(); }
+    int leftLayoutOverflow() const { return m_overflow ? m_overflow->leftLayoutOverflow() : 0; }
+    int rightLayoutOverflow() const { return m_overflow ? m_overflow->rightLayoutOverflow() : width(); }
+    
+    IntRect visualOverflowRect() const { return m_overflow ? m_overflow->visualOverflowRect() : borderBoxRect(); }
+    int topVisualOverflow() const { return m_overflow? m_overflow->topVisualOverflow() : 0; }
+    int bottomVisualOverflow() const { return m_overflow ? m_overflow->bottomVisualOverflow() : height(); }
+    int leftVisualOverflow() const { return m_overflow ? m_overflow->leftVisualOverflow() : 0; }
+    int rightVisualOverflow() const { return m_overflow ? m_overflow->rightVisualOverflow() : width(); }
+
+    void addLayoutOverflow(const IntRect&);
+    void addVisualOverflow(const IntRect&);
+    
+    void addShadowOverflow();
+    void addOverflowFromChild(RenderBox* child) { addOverflowFromChild(child, IntSize(child->x(), child->y())); }
+    void addOverflowFromChild(RenderBox* child, const IntSize& delta);
+    void clearLayoutOverflow();
 
     int contentWidth() const { return clientWidth() - paddingLeft() - paddingRight(); }
     int contentHeight() const { return clientHeight() - paddingTop() - paddingBottom(); }
@@ -229,7 +245,8 @@ public:
 
     virtual int verticalScrollbarWidth() const;
     int horizontalScrollbarHeight() const;
-    virtual bool scroll(ScrollDirection, ScrollGranularity, float multiplier = 1.0f);
+    virtual bool scroll(ScrollDirection, ScrollGranularity, float multiplier = 1.0f, Node** stopNode = 0);
+    bool canBeScrolledAndHasScrollableArea() const;
     virtual bool canBeProgramaticallyScrolled(bool) const;
     virtual void autoscroll();
     virtual void stopAutoscroll() { }
@@ -280,7 +297,7 @@ public:
     virtual bool avoidsFloats() const;
 
 #if ENABLE(SVG)
-    virtual TransformationMatrix localTransform() const;
+    virtual AffineTransform localTransform() const;
 #endif
 
 protected:
@@ -288,8 +305,8 @@ protected:
     virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
     virtual void updateBoxModelInfoFromStyle();
 
-    void paintFillLayer(const PaintInfo&, const Color&, const FillLayer*, int tx, int ty, int width, int height, CompositeOperator = CompositeSourceOver);
-    void paintFillLayers(const PaintInfo&, const Color&, const FillLayer*, int tx, int ty, int width, int height, CompositeOperator = CompositeSourceOver);
+    void paintFillLayer(const PaintInfo&, const Color&, const FillLayer*, int tx, int ty, int width, int height, CompositeOperator op, RenderObject* backgroundObject);
+    void paintFillLayers(const PaintInfo&, const Color&, const FillLayer*, int tx, int ty, int width, int height, CompositeOperator = CompositeSourceOver, RenderObject* backgroundObject = 0);
 
     void paintMaskImages(const PaintInfo&, int tx, int ty, int width, int height);
 
@@ -301,7 +318,7 @@ protected:
     
     virtual bool shouldCalculateSizeAsReplaced() const { return isReplaced() && !isInlineBlockOrInlineTable(); }
 
-    virtual void mapLocalToContainer(RenderBoxModelObject* repaintContainer, bool useTransforms, bool fixed, TransformState&) const;
+    virtual void mapLocalToContainer(RenderBoxModelObject* repaintContainer, bool fixed, bool useTransforms, TransformState&) const;
     virtual void mapAbsoluteToLocalPoint(bool fixed, bool useTransforms, TransformState&) const;
 
 private:
@@ -333,9 +350,6 @@ private:
     // These include tables, positioned objects, floats and flexible boxes.
     virtual void calcPrefWidths() { setPrefWidthsDirty(false); }
 
-protected:
-    bool isAfterContent(RenderObject* child) const;
-
 private:
     // The width/height of the contents + borders + padding.  The x/y location is relative to our container (which is not always our parent).
     IntRect m_frameRect;
@@ -359,6 +373,9 @@ protected:
 
     // For inline replaced elements, the inline box that owns us.
     InlineBox* m_inlineBoxWrapper;
+
+    // Our overflow information.
+    OwnPtr<RenderOverflow> m_overflow;
 
 private:
     // Used to store state between styleWillChange and styleDidChange

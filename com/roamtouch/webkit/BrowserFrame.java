@@ -17,20 +17,31 @@
 package android.webkit;
 
 import android.app.ActivityManager;
+import android.content.ComponentCallbacks;
 import android.content.Context;
 import android.content.res.AssetManager;
+import android.content.res.Configuration;
+import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.net.ParseException;
+import android.net.Uri;
 import android.net.WebAddress;
 import android.net.http.SslCertificate;
 import android.os.Handler;
 import android.os.Message;
+import android.provider.OpenableColumns;
 import android.util.Log;
 import android.util.TypedValue;
+import android.view.Surface;
+import android.view.ViewRoot;
+import android.view.WindowManager;
 
 import junit.framework.Assert;
 
+import java.io.InputStream;
+import java.lang.ref.WeakReference;
 import java.net.URLEncoder;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Iterator;
@@ -56,6 +67,10 @@ class BrowserFrame extends Handler {
     private int mLoadType;
     private boolean mFirstLayoutDone = true;
     private boolean mCommitted = true;
+    // Flag for blocking messages. This is used during destroy() so
+    // that if the UI thread posts any messages after the message
+    // queue has been cleared,they are ignored.
+    private boolean mBlockMessages = false;
 
     // Is this frame the main frame?
     private boolean mIsMainFrame;
@@ -66,6 +81,8 @@ class BrowserFrame extends Handler {
     // message ids
     // a message posted when a frame loading is completed
     static final int FRAME_COMPLETED = 1001;
+    // orientation change message
+    static final int ORIENTATION_CHANGED = 1002;
     // a message posted when the user decides the policy
     static final int POLICY_FUNCTION = 1003;
 
@@ -90,6 +107,70 @@ class BrowserFrame extends Handler {
     // requests from WebCore.
     static JWebCoreJavaBridge sJavaBridge;
 
+    private static class ConfigCallback implements ComponentCallbacks {
+        private final ArrayList<WeakReference<Handler>> mHandlers =
+                new ArrayList<WeakReference<Handler>>();
+        private final WindowManager mWindowManager;
+
+        ConfigCallback(WindowManager wm) {
+            mWindowManager = wm;
+        }
+
+        public synchronized void addHandler(Handler h) {
+            // No need to ever remove a Handler. If the BrowserFrame is
+            // destroyed, it will be collected and the WeakReference set to
+            // null. If it happens to still be around during a configuration
+            // change, the message will be ignored.
+            mHandlers.add(new WeakReference<Handler>(h));
+        }
+
+        public void onConfigurationChanged(Configuration newConfig) {
+            if (mHandlers.size() == 0) {
+                return;
+            }
+            int orientation =
+                    mWindowManager.getDefaultDisplay().getOrientation();
+            switch (orientation) {
+                case Surface.ROTATION_90:
+                    orientation = 90;
+                    break;
+                case Surface.ROTATION_180:
+                    orientation = 180;
+                    break;
+                case Surface.ROTATION_270:
+                    orientation = -90;
+                    break;
+                case Surface.ROTATION_0:
+                    orientation = 0;
+                    break;
+                default:
+                    break;
+            }
+            synchronized (this) {
+                // Create a list of handlers to remove. Go ahead and make it
+                // the same size to avoid resizing.
+                ArrayList<WeakReference> handlersToRemove =
+                        new ArrayList<WeakReference>(mHandlers.size());
+                for (WeakReference<Handler> wh : mHandlers) {
+                    Handler h = wh.get();
+                    if (h != null) {
+                        h.sendMessage(h.obtainMessage(ORIENTATION_CHANGED,
+                                    orientation, 0));
+                    } else {
+                        handlersToRemove.add(wh);
+                    }
+                }
+                // Now remove all the null references.
+                for (WeakReference weak : handlersToRemove) {
+                    mHandlers.remove(weak);
+                }
+            }
+        }
+
+        public void onLowMemory() {}
+    }
+    static ConfigCallback sConfigCallback;
+
     /**
      * Create a new BrowserFrame to be used in an application.
      * @param context An application context to use when retrieving assets.
@@ -101,10 +182,13 @@ class BrowserFrame extends Handler {
      */
     public BrowserFrame(Context context, WebViewCore w, CallbackProxy proxy,
             WebSettings settings, Map<String, Object> javascriptInterfaces) {
+
+        Context appContext = context.getApplicationContext();
+
         // Create a global JWebCoreJavaBridge to handle timers and
         // cookies in the WebCore thread.
         if (sJavaBridge == null) {
-            sJavaBridge = new JWebCoreJavaBridge(context);
+            sJavaBridge = new JWebCoreJavaBridge();
             // set WebCore native cache size
             ActivityManager am = (ActivityManager) context
                     .getSystemService(Context.ACTIVITY_SERVICE);
@@ -114,18 +198,27 @@ class BrowserFrame extends Handler {
                 sJavaBridge.setCacheSize(4 * 1024 * 1024);
             }
             // initialize CacheManager
-            CacheManager.init(context);
+            CacheManager.init(appContext);
             // create CookieSyncManager with current Context
-            CookieSyncManager.createInstance(context);
+            CookieSyncManager.createInstance(appContext);
             // create PluginManager with current Context
-            PluginManager.getInstance(context);
+            PluginManager.getInstance(appContext);
         }
+
+        if (sConfigCallback == null) {
+            sConfigCallback = new ConfigCallback(
+                    (WindowManager) context.getSystemService(
+                            Context.WINDOW_SERVICE));
+            ViewRoot.addConfigCallback(sConfigCallback);
+        }
+        sConfigCallback.addHandler(this);
+
         mJSInterfaceMap = javascriptInterfaces;
 
         mSettings = settings;
         mContext = context;
         mCallbackProxy = proxy;
-        mDatabase = WebViewDatabase.getInstance(context);
+        mDatabase = WebViewDatabase.getInstance(appContext);
         mWebViewCore = w;
 
         AssetManager am = context.getAssets();
@@ -138,18 +231,21 @@ class BrowserFrame extends Handler {
 
     /**
      * Load a url from the network or the filesystem into the main frame.
-     * Following the same behaviour as Safari, javascript: URLs are not
-     * passed to the main frame, instead they are evaluated immediately.
+     * Following the same behaviour as Safari, javascript: URLs are not passed
+     * to the main frame, instead they are evaluated immediately.
      * @param url The url to load.
+     * @param extraHeaders The extra headers sent with this url. This should not
+     *            include the common headers like "user-agent". If it does, it
+     *            will be replaced by the intrinsic value of the WebView.
      */
-    public void loadUrl(String url) {
+    public void loadUrl(String url, Map<String, String> extraHeaders) {
         mLoadInitFromJava = true;
         if (URLUtil.isJavaScriptUrl(url)) {
             // strip off the scheme and evaluate the string
             stringByEvaluatingJavaScriptFromString(
                     url.substring("javascript:".length()));
         } else {
-            nativeLoadUrl(url);
+            nativeLoadUrl(url, extraHeaders);
         }
         mLoadInitFromJava = false;
     }
@@ -167,21 +263,19 @@ class BrowserFrame extends Handler {
 
     /**
      * Load the content as if it was loaded by the provided base URL. The
-     * failUrl is used as the history entry for the load data. If null or
-     * an empty string is passed for the failUrl, then no history entry is
-     * created.
+     * historyUrl is used as the history entry for the load data.
      * 
      * @param baseUrl Base URL used to resolve relative paths in the content
      * @param data Content to render in the browser
      * @param mimeType Mimetype of the data being passed in
      * @param encoding Character set encoding of the provided data.
-     * @param failUrl URL to use if the content fails to load or null.
+     * @param historyUrl URL to use as the history entry.
      */
     public void loadData(String baseUrl, String data, String mimeType,
-            String encoding, String failUrl) {
+            String encoding, String historyUrl) {
         mLoadInitFromJava = true;
-        if (failUrl == null) {
-            failUrl = "";
+        if (historyUrl == null || historyUrl.length() == 0) {
+            historyUrl = "about:blank";
         }
         if (data == null) {
             data = "";
@@ -195,7 +289,7 @@ class BrowserFrame extends Handler {
         if (mimeType == null || mimeType.length() == 0) {
             mimeType = "text/html";
         }
-        nativeLoadData(baseUrl, data, mimeType, encoding, failUrl);
+        nativeLoadData(baseUrl, data, mimeType, encoding, historyUrl);
         mLoadInitFromJava = false;
     }
 
@@ -300,6 +394,7 @@ class BrowserFrame extends Handler {
         // loadType is not used yet
         if (isMainFrame) {
             mCommitted = true;
+            mWebViewCore.getWebView().mViewManager.postResetStateAll();
         }
     }
 
@@ -339,6 +434,7 @@ class BrowserFrame extends Handler {
      */
     public void destroy() {
         nativeDestroyFrame();
+        mBlockMessages = true;
         removeCallbacksAndMessages(null);
     }
 
@@ -348,6 +444,9 @@ class BrowserFrame extends Handler {
      */
     @Override
     public void handleMessage(Message msg) {
+        if (mBlockMessages) {
+            return;
+        }
         switch (msg.what) {
             case FRAME_COMPLETED: {
                 if (mSettings.getSavePassword() && hasPasswordField()) {
@@ -363,12 +462,18 @@ class BrowserFrame extends Handler {
                         }
                     }
                 }
-                CacheManager.trimCacheIfNeeded();
+                WebViewWorker.getHandler().sendEmptyMessage(
+                        WebViewWorker.MSG_TRIM_CACHE);
                 break;
             }
 
             case POLICY_FUNCTION: {
                 nativeCallPolicyFunction(msg.arg1, msg.arg2);
+                break;
+            }
+
+            case ORIENTATION_CHANGED: {
+                nativeOrientationChanged(msg.arg1);
                 break;
             }
 
@@ -463,6 +568,55 @@ class BrowserFrame extends Handler {
     }
 
     /**
+     * Called by JNI.  Given a URI, find the associated file and return its size
+     * @param uri A String representing the URI of the desired file.
+     * @return int The size of the given file.
+     */
+    private int getFileSize(String uri) {
+        int size = 0;
+        try {
+            InputStream stream = mContext.getContentResolver()
+                            .openInputStream(Uri.parse(uri));
+            size = stream.available();
+            stream.close();
+        } catch (Exception e) {}
+        return size;
+    }
+
+    /**
+     * Called by JNI.  Given a URI, a buffer, and an offset into the buffer,
+     * copy the resource into buffer.
+     * @param uri A String representing the URI of the desired file.
+     * @param buffer The byte array to copy the data into.
+     * @param offset The offet into buffer to place the data.
+     * @param expectedSize The size that the buffer has allocated for this file.
+     * @return int The size of the given file, or zero if it fails.
+     */
+    private int getFile(String uri, byte[] buffer, int offset,
+            int expectedSize) {
+        int size = 0;
+        try {
+            InputStream stream = mContext.getContentResolver()
+                            .openInputStream(Uri.parse(uri));
+            size = stream.available();
+            if (size <= expectedSize && buffer != null
+                    && buffer.length - offset >= size) {
+                stream.read(buffer, offset, size);
+            } else {
+                size = 0;
+            }
+            stream.close();
+        } catch (java.io.FileNotFoundException e) {
+            Log.e(LOGTAG, "FileNotFoundException:" + e);
+            size = 0;
+        } catch (java.io.IOException e2) {
+            Log.e(LOGTAG, "IOException: " + e2);
+            size = 0;
+        }
+        return size;
+    }
+
+    /**
      * Start loading a resource.
      * @param loaderHandle The native ResourceLoader that is the target of the
      *                     data.
@@ -471,7 +625,10 @@ class BrowserFrame extends Handler {
      * @param headers The http headers.
      * @param postData If the method is "POST" postData is sent as the request
      *                 body. Is null when empty.
-     * @param cacheMode The cache mode to use when loading this resource.
+     * @param postDataIdentifier If the post data contained form this is the form identifier, otherwise it is 0.
+     * @param cacheMode The cache mode to use when loading this resource. See WebSettings.setCacheMode
+     * @param mainResource True if the this resource is the main request, not a supporting resource
+     * @param userGesture
      * @param synchronous True if the load is synchronous.
      * @return A newly created LoadListener object.
      */
@@ -480,8 +637,13 @@ class BrowserFrame extends Handler {
                                               String method,
                                               HashMap headers,
                                               byte[] postData,
+                                              long postDataIdentifier,
                                               int cacheMode,
-                                              boolean synchronous) {
+                                              boolean mainResource,
+                                              boolean userGesture,
+                                              boolean synchronous,
+                                              String username,
+                                              String password) {
         PerfChecker checker = new PerfChecker();
 
         if (mSettings.getCacheMode() != WebSettings.LOAD_DEFAULT) {
@@ -547,12 +709,14 @@ class BrowserFrame extends Handler {
         if (DebugFlags.BROWSER_FRAME) {
             Log.v(LOGTAG, "startLoadingResource: url=" + url + ", method="
                     + method + ", postData=" + postData + ", isMainFramePage="
-                    + isMainFramePage);
+                    + isMainFramePage + ", mainResource=" + mainResource
+                    + ", userGesture=" + userGesture);
         }
 
         // Create a LoadListener
-        LoadListener loadListener = LoadListener.getLoadListener(mContext, this, url,
-                loaderHandle, synchronous, isMainFramePage);
+        LoadListener loadListener = LoadListener.getLoadListener(mContext,
+                this, url, loaderHandle, synchronous, isMainFramePage,
+                mainResource, userGesture, postDataIdentifier, username, password);
 
         mCallbackProxy.onLoadResource(url);
 
@@ -675,10 +839,13 @@ class BrowserFrame extends Handler {
         return mSettings.getUserAgentString();
     }
 
-    // these ids need to be in sync with enum RAW_RES_ID in WebFrame
+    // These ids need to be in sync with enum rawResId in PlatformBridge.h
     private static final int NODOMAIN = 1;
     private static final int LOADERROR = 2;
     private static final int DRAWABLEDIR = 3;
+    private static final int FILE_UPLOAD_LABEL = 4;
+    private static final int RESET_LABEL = 5;
+    private static final int SUBMIT_LABEL = 6;
 
     String getRawResFilename(int id) {
         int resid;
@@ -695,6 +862,18 @@ class BrowserFrame extends Handler {
                 // use one known resource to find the drawable directory
                 resid = com.android.internal.R.drawable.btn_check_off;
                 break;
+
+            case FILE_UPLOAD_LABEL:
+                return mContext.getResources().getString(
+                        com.android.internal.R.string.upload_file);
+
+            case RESET_LABEL:
+                return mContext.getResources().getString(
+                        com.android.internal.R.string.reset);
+
+            case SUBMIT_LABEL:
+                return mContext.getResources().getString(
+                        com.android.internal.R.string.submit);
 
             default:
                 Log.e(LOGTAG, "getRawResFilename got incompatible resource ID");
@@ -781,12 +960,12 @@ class BrowserFrame extends Handler {
     /**
      * Returns false if the url is bad.
      */
-    private native void nativeLoadUrl(String url);
+    private native void nativeLoadUrl(String url, Map<String, String> headers);
 
     private native void nativePostUrl(String url, byte[] postData);
 
     private native void nativeLoadData(String baseUrl, String data,
-            String mimeType, String encoding, String failUrl);
+            String mimeType, String encoding, String historyUrl);
 
     /**
      * Stop loading the current page.
@@ -830,4 +1009,6 @@ class BrowserFrame extends Handler {
      *         returns null.
      */
     private native HashMap getFormTextData();
+
+    private native void nativeOrientationChanged(int orientation);
 }

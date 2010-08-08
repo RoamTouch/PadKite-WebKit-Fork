@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -52,11 +52,9 @@ public:
     virtual void hideHighlight() {}
 
     virtual void inspectedURLChanged(const String& newURL) {}
-    
-    // new as of 38068
-    virtual void populateSetting(const String&, InspectorController::Setting&) {}
- 	virtual void storeSetting(const String&, const InspectorController::Setting&) {}
- 	virtual void removeSetting(const String&) {}
+
+    virtual void populateSetting(const String& key, String* value) {}
+    virtual void storeSetting(const String& key, const String& value) {}
     virtual String hiddenPanels() { return String(); }
     virtual void inspectorWindowObjectCleared() {}
 };

@@ -39,6 +39,7 @@ using namespace WMLNames;
 
 WMLSelectElement::WMLSelectElement(const QualifiedName& tagName, Document* document)
     : WMLFormControlElement(tagName, document)
+    , m_initialized(false)
 {
 }
 
@@ -82,7 +83,6 @@ void WMLSelectElement::selectAll()
 
 void WMLSelectElement::recalcStyle(StyleChange change)
 {
-    SelectElement::recalcStyle(m_data, this);
     WMLFormControlElement::recalcStyle(change);
 }
 
@@ -242,14 +242,17 @@ void WMLSelectElement::selectInitialOptions()
     // Spec: Step 1 - the default option index is determined using iname and ivalue
     calculateDefaultOptionIndices();
 
-    if (m_defaultOptionIndices.isEmpty())
+    if (m_defaultOptionIndices.isEmpty()) {
+        m_initialized = true;
         return;
+    }
 
     // Spec: Step 2 – initialise variables
     initializeVariables();
 
     // Spec: Step 3 – pre-select option(s) specified by the default option index 
     selectDefaultOptions();
+    m_initialized = true;
 }
 
 void WMLSelectElement::insertedIntoTree(bool deep)

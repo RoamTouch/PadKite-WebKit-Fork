@@ -103,7 +103,7 @@ PassRefPtr<DocumentFragment> Pasteboard::documentFragment(Frame* frame, PassRefP
     if (mimeData->hasHtml()) {
         QString html = mimeData->html();
         if (!html.isEmpty()) {
-            RefPtr<DocumentFragment> fragment = createFragmentFromMarkup(frame->document(), html, "");
+            RefPtr<DocumentFragment> fragment = createFragmentFromMarkup(frame->document(), html, "", FragmentScriptingNotAllowed);
             if (fragment)
                 return fragment.release();
         }
@@ -117,6 +117,18 @@ PassRefPtr<DocumentFragment> Pasteboard::documentFragment(Frame* frame, PassRefP
     }
 #endif
     return 0;
+}
+
+void Pasteboard::writePlainText(const String& text)
+{
+#ifndef QT_NO_CLIPBOARD
+    QMimeData* md = new QMimeData;
+    QString qtext = text;
+    qtext.replace(QChar(0xa0), QLatin1Char(' '));
+    md->setText(qtext);
+    QApplication::clipboard()->setMimeData(md, m_selectionMode ?
+            QClipboard::Selection : QClipboard::Clipboard);
+#endif
 }
 
 void Pasteboard::writeURL(const KURL& _url, const String&, Frame*)

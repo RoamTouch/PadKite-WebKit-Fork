@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -25,26 +25,25 @@
 
 #define LOG_TAG "favicons"
 
-#include <config.h>
-#include <wtf/Platform.h>
-
+#include "config.h"
 #include "WebIconDatabase.h"
 
+#include "GraphicsJNI.h"
 #include "IconDatabase.h"
 #include "Image.h"
 #include "IntRect.h"
 #include "JavaSharedClient.h"
-#include "jni_utility.h"
 #include "KURL.h"
 #include "WebCoreJni.h"
 
-#include <pthread.h>
-#include "GraphicsJNI.h"
+#include <JNIHelp.h>
+#include <JNIUtility.h>
 #include <SkBitmap.h>
 #include <SkImageDecoder.h>
 #include <SkTemplates.h>
+#include <pthread.h>
 #include <utils/misc.h>
-#include <JNIHelp.h>
+#include <wtf/Platform.h>
 
 namespace android {
 
@@ -67,10 +66,6 @@ static WebIconDatabase* gIconDatabaseClient = new WebIconDatabase();
 // XXX: Called by the IconDatabase thread
 void WebIconDatabase::dispatchDidAddIconForPageURL(const WebCore::String& pageURL)
 {
-    // If there are no clients currently, drop this message.
-    if (mClients.size() == 0)
-        return;
-
     mNotificationsMutex.lock();
     mNotifications.append(pageURL);
     if (!mDeliveryRequested) {
@@ -83,23 +78,25 @@ void WebIconDatabase::dispatchDidAddIconForPageURL(const WebCore::String& pageUR
 // Called in the WebCore thread
 void WebIconDatabase::RegisterForIconNotification(WebIconDatabaseClient* client)
 {
-    gIconDatabaseClient->mClientsMutex.lock();
+    WebIconDatabase* db = gIconDatabaseClient;
+    for (unsigned i = 0; i < db->mClients.size(); ++i) {
+        // Do not add the same client twice.
+        if (db->mClients[i] == client)
+            return;
+    }
     gIconDatabaseClient->mClients.append(client);
-    gIconDatabaseClient->mClientsMutex.unlock();
 }
 
 // Called in the WebCore thread
 void WebIconDatabase::UnregisterForIconNotification(WebIconDatabaseClient* client)
 {
     WebIconDatabase* db = gIconDatabaseClient;
-    db->mClientsMutex.lock();
     for (unsigned i = 0; i < db->mClients.size(); ++i) {
         if (db->mClients[i] == client) {
             db->mClients.remove(i);
             break;
         }
     }
-    db->mClientsMutex.unlock();
 }
 
 // Called in the WebCore thread
@@ -123,9 +120,7 @@ void WebIconDatabase::deliverNotifications()
 
     // Swap the clients queue
     Vector<WebIconDatabaseClient*> clients;
-    mClientsMutex.lock();
     clients.swap(mClients);
-    mClientsMutex.unlock();
 
     for (unsigned i = 0; i < queue.size(); ++i) {
         for (unsigned j = 0; j < clients.size(); ++j) {

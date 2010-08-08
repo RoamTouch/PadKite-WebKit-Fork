@@ -37,10 +37,10 @@
 #import "WebUIDelegate.h"
 
 #import <CoreFoundation/CoreFoundation.h>
+#import <WebCore/Bridge.h>
 #import <WebCore/Frame.h>
 #import <WebCore/FrameLoaderTypes.h>
 #import <WebCore/HTMLPlugInElement.h>
-#import <WebCore/runtime.h>
 #import <WebCore/runtime_root.h>
 #import <WebCore/WebCoreObjCExtras.h>
 #import <runtime/InitializeThreading.h>
@@ -90,7 +90,8 @@ extern "C" {
 
 - (void)setAttributeKeys:(NSArray *)keys andValues:(NSArray *)values
 {
-    ASSERT(!_attributeKeys && !_attributeValues);
+    ASSERT(!_attributeKeys);
+    ASSERT(!_attributeValues);
     
     _attributeKeys.adoptNS([keys copy]);
     _attributeValues.adoptNS([values copy]);
@@ -101,8 +102,13 @@ extern "C" {
     ASSERT(!_proxy);
 
     NSString *userAgent = [[self webView] userAgentForURL:_baseURL.get()];
-
-    _proxy = NetscapePluginHostManager::shared().instantiatePlugin(_pluginPackage.get(), self, _MIMEType.get(), _attributeKeys.get(), _attributeValues.get(), userAgent, _sourceURL.get(), _mode == NP_FULL);
+    BOOL accleratedCompositingEnabled = false;
+#if USE(ACCELERATED_COMPOSITING)
+    accleratedCompositingEnabled = [[[self webView] preferences] acceleratedCompositingEnabled];
+#endif
+    
+    _proxy = NetscapePluginHostManager::shared().instantiatePlugin(_pluginPackage.get(), self, _MIMEType.get(), _attributeKeys.get(), _attributeValues.get(), userAgent, _sourceURL.get(), 
+                                                                   _mode == NP_FULL, _isPrivateBrowsingEnabled, accleratedCompositingEnabled);
     if (!_proxy) 
         return NO;
 
@@ -110,13 +116,23 @@ extern "C" {
         _softwareRenderer = WKSoftwareCARendererCreate(_proxy->renderContextID());
     else {
         _pluginLayer = WKMakeRenderLayer(_proxy->renderContextID());
-        self.wantsLayer = YES;
+
+        if (accleratedCompositingEnabled)
+            [self element]->setNeedsStyleRecalc(SyntheticStyleChange);
+        else
+            self.wantsLayer = YES;
     }
     
     // Update the window frame.
     _proxy->windowFrameChanged([[self window] frame]);
     
     return YES;
+}
+
+// FIXME: This method is an ideal candidate to move up to the base class
+- (CALayer *)pluginLayer
+{
+    return _pluginLayer.get();
 }
 
 - (void)setLayer:(CALayer *)newLayer
@@ -126,6 +142,12 @@ extern "C" {
     
     if (_pluginLayer)
         [newLayer addSublayer:_pluginLayer.get()];
+}
+
+- (void)privateBrowsingModeDidChange
+{
+    if (_proxy)
+        _proxy->privateBrowsingModeDidChange(_isPrivateBrowsingEnabled);
 }
 
 - (void)loadStream
@@ -139,12 +161,24 @@ extern "C" {
     
     // Use AppKit to convert view coordinates to NSWindow coordinates.
     NSRect boundsInWindow = [self convertRect:[self bounds] toView:nil];
-    NSRect visibleRectInWindow = [self convertRect:[self visibleRect] toView:nil];
+    NSRect visibleRectInWindow;
+    
+    // Core Animation plug-ins need to be updated (with a 0,0,0,0 clipRect) when
+    // moved to a background tab. We don't do this for Core Graphics plug-ins as
+    // older versions of Flash have historical WebKit-specific code that isn't
+    // compatible with this behavior.    
+    BOOL shouldClipOutPlugin = _pluginLayer && [self shouldClipOutPlugin];
+    if (!shouldClipOutPlugin)
+        visibleRectInWindow = [self convertRect:[self visibleRect] toView:nil];
+    else
+        visibleRectInWindow = NSZeroRect;
     
     // Flip Y to convert NSWindow coordinates to top-left-based window coordinates.
     float borderViewHeight = [[self currentWindow] frame].size.height;
     boundsInWindow.origin.y = borderViewHeight - NSMaxY(boundsInWindow);
-    visibleRectInWindow.origin.y = borderViewHeight - NSMaxY(visibleRectInWindow);
+        
+    if (!shouldClipOutPlugin)
+        visibleRectInWindow.origin.y = borderViewHeight - NSMaxY(visibleRectInWindow);
 
     BOOL sizeChanged = !NSEqualSizes(_previousSize, boundsInWindow.size);
     _previousSize = boundsInWindow.size;
@@ -330,9 +364,10 @@ extern "C" {
 {
     if (_proxy) {
         if (_softwareRenderer) {
-            if ([NSGraphicsContext currentContextDrawingToScreen])
+            if ([NSGraphicsContext currentContextDrawingToScreen]) {
                 WKSoftwareCARendererRender(_softwareRenderer, (CGContextRef)[[NSGraphicsContext currentContext] graphicsPort], NSRectToCGRect(rect));
-            else
+                _proxy->didDraw();
+            } else
                 _proxy->print(reinterpret_cast<CGContextRef>([[NSGraphicsContext currentContext] graphicsPort]), [self bounds].size.width, [self bounds].size.height);
         }
             
@@ -413,7 +448,7 @@ extern "C" {
     ASSERT([webPluginContainerCheck isKindOfClass:[WebPluginContainerCheck class]]);
     
     id contextInfo = [webPluginContainerCheck contextInfo];
-    ASSERT(contextInfo && [contextInfo isKindOfClass:[NSNumber class]]);
+    ASSERT([contextInfo isKindOfClass:[NSNumber class]]);
 
     if (!_proxy)
         return;
@@ -430,6 +465,20 @@ extern "C" {
 
     uint32_t checkID = [(NSNumber *)contextInfo unsignedIntValue];
     _proxy->checkIfAllowedToLoadURLResult(checkID, (policy == PolicyUse));
+}
+
+- (void)webFrame:(WebFrame *)webFrame didFinishLoadWithReason:(NPReason)reason
+{
+    if (_isStarted && _proxy)
+        _proxy->webFrameDidFinishLoadWithReason(webFrame, reason);
+}
+
+- (void)webFrame:(WebFrame *)webFrame didFinishLoadWithError:(NSError *)error
+{
+    NPReason reason = NPRES_DONE;
+    if (error)
+        reason = HostedNetscapePluginStream::reasonForError(error);
+    [self webFrame:webFrame didFinishLoadWithReason:reason];
 }
 
 @end

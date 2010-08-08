@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -91,7 +91,8 @@ void CachedHistory::reset()
 }
 
 void CachedHistory::setWorking(CachedFrame::Direction newMove, 
-    const CachedNode* cursor, const WebCore::IntRect& viewBounds)
+    const CachedFrame* cursorFrame, const CachedNode* cursor,
+    const WebCore::IntRect& viewBounds)
 {
     CachedFrame::Direction lastAxis = (CachedFrame::Direction) (mLastMove & ~CachedFrame::RIGHT_DOWN); // up, left or uninitialized
     CachedFrame::Direction newAxis = (CachedFrame::Direction) (newMove & ~CachedFrame::RIGHT_DOWN); 
@@ -103,8 +104,7 @@ void CachedHistory::setWorking(CachedFrame::Direction newMove,
     }
     const WebCore::IntRect* navBounds = &mNavBounds;
     if (cursor != NULL) {
-        WebCore::IntRect cursorBounds;
-        cursor->getBounds(&cursorBounds);
+        WebCore::IntRect cursorBounds = cursor->bounds(cursorFrame);
         if (cursorBounds.isEmpty() == false)
             mNavBounds = cursorBounds;
     }

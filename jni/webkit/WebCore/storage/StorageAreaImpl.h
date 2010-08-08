@@ -20,7 +20,7 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef StorageAreaImpl_h
@@ -30,6 +30,7 @@
 
 #include "StorageArea.h"
 
+#include <wtf/PassRefPtr.h>
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
@@ -40,31 +41,29 @@ namespace WebCore {
 
     class StorageAreaImpl : public StorageArea {
     public:
-        StorageAreaImpl(StorageType, PassRefPtr<SecurityOrigin>, PassRefPtr<StorageSyncManager>);
+        static PassRefPtr<StorageAreaImpl> create(StorageType, PassRefPtr<SecurityOrigin>, PassRefPtr<StorageSyncManager>, unsigned quota);
         virtual ~StorageAreaImpl();
 
         // The HTML5 DOM Storage API (and contains)
         virtual unsigned length() const;
         virtual String key(unsigned index) const;
         virtual String getItem(const String& key) const;
-        virtual void setItem(const String& key, const String& value, ExceptionCode& ec, Frame* sourceFrame);
-        virtual void removeItem(const String& key, Frame* sourceFrame);
-        virtual void clear(Frame* sourceFrame);
+        virtual String setItem(const String& key, const String& value, ExceptionCode& ec, Frame* sourceFrame);
+        virtual String removeItem(const String& key, Frame* sourceFrame);
+        virtual bool clear(Frame* sourceFrame);
         virtual bool contains(const String& key) const;
 
         PassRefPtr<StorageAreaImpl> copy();
         void close();
 
-        // Could be called from a background thread.
+        // Only called from a background thread.
         void importItem(const String& key, const String& value);
-        SecurityOrigin* securityOrigin();
 
     private:
+        StorageAreaImpl(StorageType, PassRefPtr<SecurityOrigin>, PassRefPtr<StorageSyncManager>, unsigned quota);
         StorageAreaImpl(StorageAreaImpl*);
 
         void blockUntilImportComplete() const;
-
-        void dispatchStorageEvent(const String& key, const String& oldValue, const String& newValue, Frame* sourceFrame);
 
         StorageType m_storageType;
         RefPtr<SecurityOrigin> m_securityOrigin;

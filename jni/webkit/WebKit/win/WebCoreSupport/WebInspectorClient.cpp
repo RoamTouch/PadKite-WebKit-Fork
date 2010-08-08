@@ -99,12 +99,10 @@ void WebInspectorClient::inspectorDestroyed()
 
 Page* WebInspectorClient::createPage()
 {
-    if (m_webView)
-        return core(m_webView.get());
-
-    ASSERT(!m_hwnd);
-
     registerWindowClass();
+
+    if (m_hwnd)
+        ::DestroyWindow(m_hwnd);
 
     m_hwnd = ::CreateWindowEx(0, kWebInspectorWindowClassName, 0, WS_OVERLAPPEDWINDOW,
         defaultWindowRect().x(), defaultWindowRect().y(), defaultWindowRect().width(), defaultWindowRect().height(),
@@ -235,7 +233,7 @@ void WebInspectorClient::attachWindow()
     if (m_attached)
         return;
 
-    m_inspectedWebView->page()->inspectorController()->setSetting(inspectorStartsAttachedName, InspectorController::Setting(true));
+    m_inspectedWebView->page()->inspectorController()->setSetting(inspectorStartsAttachedName, "true");
 
     closeWindowWithoutNotifications();
     showWindowWithoutNotifications();
@@ -246,7 +244,7 @@ void WebInspectorClient::detachWindow()
     if (!m_attached)
         return;
 
-    m_inspectedWebView->page()->inspectorController()->setSetting(inspectorStartsAttachedName, InspectorController::Setting(false));
+    m_inspectedWebView->page()->inspectorController()->setSetting(inspectorStartsAttachedName, "false");
 
     closeWindowWithoutNotifications();
     showWindowWithoutNotifications();
@@ -351,8 +349,9 @@ void WebInspectorClient::showWindowWithoutNotifications()
     ASSERT(m_webView);
     ASSERT(m_inspectedWebViewHwnd);
 
-    InspectorController::Setting shouldAttach = m_inspectedWebView->page()->inspectorController()->setting(inspectorStartsAttachedName);
-    m_shouldAttachWhenShown = shouldAttach.type() == InspectorController::Setting::BooleanType ? shouldAttach.booleanValue() : false;
+    // If no preference is set - default to an attached window. This is important for inspector LayoutTests.
+    String shouldAttach = m_inspectedWebView->page()->inspectorController()->setting(inspectorStartsAttachedName);
+    m_shouldAttachWhenShown = shouldAttach != "false";
 
     if (!m_shouldAttachWhenShown) {
         // Put the Inspector's WebView inside our window and show it.

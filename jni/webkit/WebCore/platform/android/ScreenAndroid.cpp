@@ -29,15 +29,17 @@
 #include "config.h"
 #include "Screen.h"
 
-#include "FloatRect.h"
-#include "Widget.h"
-
+// This include must come first.
 #undef LOG // FIXME: Still have to do this to get the log to show up
 #include "utils/Log.h"
 
-#include "ui/SurfaceComposerClient.h"
-#include "ui/PixelFormat.h"
-#include "ui/DisplayInfo.h"
+#include "FloatRect.h"
+#include "Widget.h"
+#include <ui/DisplayInfo.h>
+#include <ui/PixelFormat.h>
+#include <surfaceflinger/SurfaceComposerClient.h>
+#include "ScrollView.h"
+#include "WebCoreViewBridge.h"
 
 namespace WebCore {
 
@@ -60,50 +62,22 @@ bool screenIsMonochrome(Widget* page)
     return false;
 }
 
-#ifdef ANDROID_ORIENTATION_SUPPORT
-int Screen::orientation() const
-{
-    android::DisplayInfo info;
-    android::SurfaceComposerClient::getDisplayInfo(
-            android::DisplayID(0), &info);
-    // getDisplayInfo returns an enum describing the orientation. Map the enum
-    // to the values described here
-    // (http://developer.apple.com/documentation/AppleApplications/Reference/SafariWebContent/HandlingEvents/chapter_8_section_6.html)
-    switch (info.orientation) {
-        case android::ISurfaceComposer::eOrientationDefault:
-            return 0;
-        case android::ISurfaceComposer::eOrientation90:
-            return 90;
-        case android::ISurfaceComposer::eOrientation180:
-            return 180;
-        case android::ISurfaceComposer::eOrientation270:
-            return -90;
-        default:
-            LOGE("Bad orientation returned from getDisplayIndo %d",
-                    info.orientation);
-            return 0;
-    }
-}
-#endif
-
 // The only place I have seen these values used is
 // positioning popup windows. If we support multiple windows
 // they will be most likely full screen. Therefore,
 // the accuracy of these number are not too important.
 FloatRect screenRect(Widget* page)
 {
-    android::DisplayInfo info;
-    android::SurfaceComposerClient::getDisplayInfo(android::DisplayID(0), &info);
-    return FloatRect(0.0, 0.0, info.w, info.h);
+    IntRect rect = page->root()->platformWidget()->getBounds();
+    return FloatRect(0.0, 0.0, rect.width(), rect.height());
 }
 
 // Similar screenRect, this function is commonly used by javascripts
 // to position and resize windows (usually to full screen). 
-FloatRect screenAvailableRect(Widget*)
+FloatRect screenAvailableRect(Widget* page)
 {
-    android::DisplayInfo info;
-    android::SurfaceComposerClient::getDisplayInfo(android::DisplayID(0), &info);
-    return FloatRect(0.0, 0.0, info.w, info.h);
+    IntRect rect = page->root()->platformWidget()->getBounds();
+    return FloatRect(0.0, 0.0, rect.width(), rect.height());
 }
 
 } // namespace WebCore

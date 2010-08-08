@@ -31,17 +31,39 @@
 #ifndef DOMObjectsInclude_h
 #define DOMObjectsInclude_h
 
-#include "AbstractWorker.h"
+#include "Attr.h"
 #include "BarInfo.h"
+#include "BeforeLoadEvent.h"
+#include "Blob.h"
+#include "WebGLActiveInfo.h"
+#include "WebGLArray.h"
+#include "WebGLArrayBuffer.h"
+#include "WebGLBuffer.h"
+#include "WebGLByteArray.h"
+#include "WebGLFloatArray.h"
+#include "WebGLFramebuffer.h"
 #include "CanvasGradient.h"
+#include "WebGLIntArray.h"
+#include "CanvasObject.h"
 #include "CanvasPattern.h"
 #include "CanvasPixelArray.h"
+#include "WebGLProgram.h"
+#include "WebGLRenderbuffer.h"
+#include "CanvasRenderingContext.h"
 #include "CanvasRenderingContext2D.h"
+#include "WebGLRenderingContext.h"
+#include "WebGLShader.h"
+#include "WebGLShortArray.h"
+#include "WebGLUnsignedByteArray.h"
+#include "WebGLUnsignedIntArray.h"
+#include "WebGLUnsignedShortArray.h"
 #include "CanvasStyle.h"
+#include "WebGLTexture.h"
 #include "CharacterData.h"
 #include "ClientRect.h"
 #include "ClientRectList.h"
 #include "Clipboard.h"
+#include "CompositionEvent.h"
 #include "Console.h"
 #include "Counter.h"
 #include "CSSCharsetRule.h"
@@ -57,7 +79,6 @@
 #include "CSSValueList.h"
 #include "CSSVariablesDeclaration.h"
 #include "CSSVariablesRule.h"
-#include "Database.h"
 #include "DocumentType.h"
 #include "DocumentFragment.h"
 #include "DOMCoreException.h"
@@ -86,7 +107,6 @@
 #include "HTMLSelectElement.h"
 #include "HTMLOptionsCollection.h"
 #include "ImageData.h"
-#include "InspectorBackend.h"
 #include "KeyboardEvent.h"
 #include "Location.h"
 #include "Media.h"
@@ -106,8 +126,10 @@
 #include "NodeIterator.h"
 #include "OverflowEvent.h"
 #include "Page.h"
+#include "PageTransitionEvent.h"
 #include "Plugin.h"
 #include "PluginArray.h"
+#include "PopStateEvent.h"
 #include "ProcessingInstruction.h"
 #include "ProgressEvent.h"
 #include "Range.h"
@@ -118,11 +140,6 @@
 #include "ScriptExecutionContext.h"
 #include "SecurityOrigin.h"
 #include "Settings.h"
-#include "SharedWorker.h"
-#include "SharedWorkerContext.h"
-#include "SQLTransaction.h"
-#include "SQLResultSet.h"
-#include "SQLResultSetRowList.h"
 #include "StyleSheet.h"
 #include "StyleSheetList.h"
 #include "TextEvent.h"
@@ -135,9 +152,7 @@
 #include "V8HTMLElement.h"
 #include "V8LazyEventListener.h"
 #include "V8NodeFilterCondition.h"
-#include "V8ObjectEventListener.h"
 #include "ValidityState.h"
-#include "VoidCallback.h"
 #include "WebKitAnimationEvent.h"
 #include "WebKitCSSKeyframeRule.h"
 #include "WebKitCSSKeyframesRule.h"
@@ -151,15 +166,17 @@
 #include "XMLHttpRequestProgressEvent.h"
 #include "XMLHttpRequestUpload.h"
 #include "XMLSerializer.h"
-#include "XPathException.h"
-#include "XPathExpression.h"
-#include "XPathNSResolver.h"
-#include "XPathResult.h"
-#include "XSLTProcessor.h"
 
 #if ENABLE(OFFLINE_WEB_APPLICATIONS)
 #include "DOMApplicationCache.h"
 #endif
+
+#if ENABLE(DATABASE)
+#include "Database.h"
+#include "SQLTransaction.h"
+#include "SQLResultSet.h"
+#include "SQLResultSetRowList.h"
+#endif // DATABASE
 
 #if ENABLE(DATAGRID)
 #include "DataGridColumn.h"
@@ -171,13 +188,22 @@
 #include "StorageEvent.h"
 #endif // DOM_STORAGE
 
-#if ENABLE(GEOLOCATION)
+#if ENABLE(EVENTSOURCE)
+#include "EventSource.h"
+#endif // EVENTSOURCE
+
+// GEOLOCATION
 #include "Coordinates.h"
 #include "Geolocation.h"
 #include "Geoposition.h"
 #include "PositionError.h"
-#include "PositionErrorCallback.h"
-#endif
+
+#if ENABLE(INDEXED_DATABASE)
+#include "IDBDatabaseError.h"
+#include "IDBDatabaseException.h"
+#include "IDBRequest.h"
+#include "IndexedDatabaseRequest.h"
+#endif // DATABASE
 
 #if ENABLE(SVG)
 #include "SVGAngle.h"
@@ -215,13 +241,16 @@
 #include "V8SVGPODTypeWrapper.h"
 #endif // SVG
 
-#if ENABLE(TOUCH_EVENTS)
-#include "Touch.h"
-#include "TouchList.h"
-#include "TouchEvent.h"
+#if PLATFORM(ANDROID)
+#include "Connection.h"
+#endif
+
+#if ENABLE(WEB_SOCKETS)
+#include "WebSocket.h"
 #endif
 
 #if ENABLE(WORKERS)
+#include "AbstractWorker.h"
 #include "DedicatedWorkerContext.h"
 #include "Worker.h"
 #include "WorkerContext.h"
@@ -229,9 +258,39 @@
 #include "WorkerNavigator.h"
 #endif // WORKERS
 
+#if ENABLE(SHARED_WORKERS)
+#include "SharedWorker.h"
+#include "SharedWorkerContext.h"
+#endif  // SHARED_WORKERS
+
+#if ENABLE(NOTIFICATIONS)
+#include "Notification.h"
+#include "NotificationCenter.h"
+#endif // NOTIFICATIONS
+
 #if ENABLE(XPATH)
 #include "XPathEvaluator.h"
+#include "XPathException.h"
+#include "XPathExpression.h"
+#include "XPathNSResolver.h"
+#include "XPathResult.h"
 #endif // XPATH
+
+#if ENABLE(XSLT)
+#include "XSLTProcessor.h"
+#endif // XSLT
+
+#if ENABLE(INSPECTOR)
+#include "InjectedScriptHost.h"
+#include "InspectorBackend.h"
+#include "InspectorFrontendHost.h"
+#endif // INSPECTOR
+
+#if ENABLE(TOUCH_EVENTS)
+#include "Touch.h"
+#include "TouchEvent.h"
+#include "TouchList.h"
+#endif
 
 namespace WebCore {
 

@@ -22,6 +22,7 @@
 #define Identifier_h
 
 #include "JSGlobalData.h"
+#include "ThreadSpecific.h"
 #include "UString.h"
 
 namespace JSC {
@@ -54,6 +55,8 @@ namespace JSC {
         const char* ascii() const { return _ustring.ascii(); }
         
         static Identifier from(ExecState* exec, unsigned y) { return Identifier(exec, UString::from(y)); }
+        static Identifier from(ExecState* exec, int y) { return Identifier(exec, UString::from(y)); }
+        static Identifier from(ExecState* exec, double y) { return Identifier(exec, UString::from(y)); }
         
         bool isNull() const { return _ustring.isNull(); }
         bool isEmpty() const { return _ustring.isEmpty(); }
@@ -90,7 +93,7 @@ namespace JSC {
 
         static PassRefPtr<UString::Rep> add(ExecState* exec, UString::Rep* r)
         {
-            if (r->identifierTable()) {
+            if (r->isIdentifier()) {
 #ifndef NDEBUG
                 checkSameIdentifierTable(exec, r);
 #endif
@@ -100,7 +103,7 @@ namespace JSC {
         }
         static PassRefPtr<UString::Rep> add(JSGlobalData* globalData, UString::Rep* r)
         {
-            if (r->identifierTable()) {
+            if (r->isIdentifier()) {
 #ifndef NDEBUG
                 checkSameIdentifierTable(globalData, r);
 #endif
@@ -138,6 +141,67 @@ namespace JSC {
 
     IdentifierTable* createIdentifierTable();
     void deleteIdentifierTable(IdentifierTable*);
+
+    struct ThreadIdentifierTableData {
+        ThreadIdentifierTableData()
+            : defaultIdentifierTable(0)
+            , currentIdentifierTable(0)
+        {
+        }
+
+        IdentifierTable* defaultIdentifierTable;
+        IdentifierTable* currentIdentifierTable;
+    };
+
+    extern WTF::ThreadSpecific<ThreadIdentifierTableData>* g_identifierTableSpecific;
+    void createIdentifierTableSpecific();
+
+    inline IdentifierTable* defaultIdentifierTable()
+    {
+        if (!g_identifierTableSpecific)
+            createIdentifierTableSpecific();
+        ThreadIdentifierTableData& data = **g_identifierTableSpecific;
+
+        return data.defaultIdentifierTable;
+    }
+
+    inline void setDefaultIdentifierTable(IdentifierTable* identifierTable)
+    {
+        if (!g_identifierTableSpecific)
+            createIdentifierTableSpecific();
+        ThreadIdentifierTableData& data = **g_identifierTableSpecific;
+
+        data.defaultIdentifierTable = identifierTable;
+    }
+
+    inline IdentifierTable* currentIdentifierTable()
+    {
+        if (!g_identifierTableSpecific)
+            createIdentifierTableSpecific();
+        ThreadIdentifierTableData& data = **g_identifierTableSpecific;
+
+        return data.currentIdentifierTable;
+    }
+
+    inline IdentifierTable* setCurrentIdentifierTable(IdentifierTable* identifierTable)
+    {
+        if (!g_identifierTableSpecific)
+            createIdentifierTableSpecific();
+        ThreadIdentifierTableData& data = **g_identifierTableSpecific;
+
+        IdentifierTable* oldIdentifierTable = data.currentIdentifierTable;
+        data.currentIdentifierTable = identifierTable;
+        return oldIdentifierTable;
+    }
+
+    inline void resetCurrentIdentifierTable()
+    {
+        if (!g_identifierTableSpecific)
+            createIdentifierTableSpecific();
+        ThreadIdentifierTableData& data = **g_identifierTableSpecific;
+
+        data.currentIdentifierTable = data.defaultIdentifierTable;
+    }
 
 } // namespace JSC
 

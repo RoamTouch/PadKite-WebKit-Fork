@@ -16,27 +16,33 @@
 ##
 
 LOCAL_SRC_FILES := \
+	android/WebCoreSupport/CachedFramePlatformDataAndroid.cpp \
 	android/WebCoreSupport/ChromeClientAndroid.cpp \
 	android/WebCoreSupport/ContextMenuClientAndroid.cpp \
 	android/WebCoreSupport/DragClientAndroid.cpp \
 	android/WebCoreSupport/EditorClientAndroid.cpp \
 	android/WebCoreSupport/FrameLoaderClientAndroid.cpp \
+	android/WebCoreSupport/GeolocationPermissions.cpp \
 	android/WebCoreSupport/MediaPlayerPrivateAndroid.cpp \
 	android/WebCoreSupport/PlatformBridge.cpp \
-	android/WebCoreSupport/GeolocationPermissions.cpp \
+	android/WebCoreSupport/ResourceLoaderAndroid.cpp \
+	android/WebCoreSupport/V8Counters.cpp \
 	\
 	android/RenderSkinAndroid.cpp \
 	android/RenderSkinButton.cpp \
 	android/RenderSkinCombo.cpp \
 	android/RenderSkinRadio.cpp \
 	android/TimeCounter.cpp \
-	android/sort.cpp \
+	\
+	android/benchmark/Intercept.cpp \
+	android/benchmark/MyJavaVM.cpp \
 	\
 	android/icu/unicode/ucnv.cpp \
 	\
 	android/jni/GeolocationPermissionsBridge.cpp \
 	android/jni/JavaBridge.cpp \
 	android/jni/JavaSharedClient.cpp \
+	android/jni/MIMETypeRegistry.cpp \
 	android/jni/MockGeolocation.cpp \
 	android/jni/PictureSet.cpp \
 	android/jni/WebCoreFrameBridge.cpp \
@@ -52,6 +58,8 @@ LOCAL_SRC_FILES := \
 	android/nav/CacheBuilder.cpp \
 	android/nav/CachedFrame.cpp \
 	android/nav/CachedHistory.cpp \
+	android/nav/CachedInput.cpp \
+	android/nav/CachedLayer.cpp \
 	android/nav/CachedNode.cpp \
 	android/nav/CachedRoot.cpp \
 	android/nav/FindCanvas.cpp \
@@ -60,6 +68,7 @@ LOCAL_SRC_FILES := \
 	\
 	android/plugins/ANPBitmapInterface.cpp \
 	android/plugins/ANPCanvasInterface.cpp \
+	android/plugins/ANPEventInterface.cpp \
 	android/plugins/ANPLogInterface.cpp \
 	android/plugins/ANPMatrixInterface.cpp \
 	android/plugins/ANPPaintInterface.cpp \
@@ -69,6 +78,7 @@ LOCAL_SRC_FILES := \
 	android/plugins/ANPSystemInterface.cpp \
 	android/plugins/ANPTypefaceInterface.cpp \
 	android/plugins/ANPWindowInterface.cpp \
+	android/plugins/PluginDebugAndroid.cpp \
 	android/plugins/PluginTimer.cpp \
 	android/plugins/PluginViewBridgeAndroid.cpp \
 	android/plugins/PluginWidgetAndroid.cpp \

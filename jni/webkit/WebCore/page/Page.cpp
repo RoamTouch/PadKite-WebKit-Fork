@@ -21,6 +21,8 @@
 #include "config.h"
 #include "Page.h"
 
+#include "BackForwardList.h"
+#include "Base64.h"
 #include "CSSStyleSelector.h"
 #include "Chrome.h"
 #include "ChromeClient.h"
@@ -28,8 +30,10 @@
 #include "ContextMenuController.h"
 #include "DOMWindow.h"
 #include "DragController.h"
+#include "ExceptionCode.h"
 #include "EditorClient.h"
 #include "EventNames.h"
+#include "Event.h"
 #include "FileSystem.h"
 #include "FocusController.h"
 #include "Frame.h"
@@ -40,11 +44,13 @@
 #include "HTMLElement.h"
 #include "HistoryItem.h"
 #include "InspectorController.h"
+#include "InspectorTimelineAgent.h"
 #include "Logging.h"
 #include "Navigator.h"
 #include "NetworkStateNotifier.h"
 #include "PageGroup.h"
 #include "PluginData.h"
+#include "PluginHalter.h"
 #include "ProgressTracker.h"
 #include "RenderWidget.h"
 #include "RenderTheme.h"
@@ -63,12 +69,20 @@
 #include "StorageNamespace.h"
 #endif
 
-#if ENABLE(JAVASCRIPT_DEBUGGER)
+#if ENABLE(JAVASCRIPT_DEBUGGER) && USE(JSC)
 #include "JavaScriptDebugServer.h"
 #endif
 
 #if ENABLE(WML)
 #include "WMLPageState.h"
+#endif
+
+#if ENABLE(CLIENT_BASED_GEOLOCATION)
+#include "GeolocationController.h"
+#endif
+
+#if PLATFORM(ANDROID) && ENABLE(APPLICATION_INSTALLED)
+#include "PackageNotifier.h"
 #endif
 
 namespace WebCore {
@@ -92,22 +106,43 @@ static void networkStateChanged()
 
     AtomicString eventName = networkStateNotifier().onLine() ? eventNames().onlineEvent : eventNames().offlineEvent;
     for (unsigned i = 0; i < frames.size(); i++)
-        frames[i]->document()->dispatchWindowEvent(eventName, false, false);
+        frames[i]->document()->dispatchWindowEvent(Event::create(eventName, false, false));
 }
 
-Page::Page(ChromeClient* chromeClient, ContextMenuClient* contextMenuClient, EditorClient* editorClient, DragClient* dragClient, InspectorClient* inspectorClient)
+#if PLATFORM(ANDROID) && ENABLE(APPLICATION_INSTALLED)
+static void onPackageResultAvailable()
+{
+    HashSet<Page*>::iterator end = allPages->end();
+    for (HashSet<Page*>::iterator it = allPages->begin(); it != end; ++it) {
+        for (Frame* frame = (*it)->mainFrame(); frame; frame = frame->tree()->traverseNext())
+            frame->domWindow()->navigator()->onPackageResult();
+    }
+}
+#endif
+
+Page::Page(ChromeClient* chromeClient, ContextMenuClient* contextMenuClient, EditorClient* editorClient, DragClient* dragClient, InspectorClient* inspectorClient, PluginHalterClient* pluginHalterClient, GeolocationControllerClient* geolocationControllerClient)
     : m_chrome(new Chrome(this, chromeClient))
     , m_dragCaretController(new SelectionController(0, true))
+#if ENABLE(DRAG_SUPPORT)
     , m_dragController(new DragController(this, dragClient))
+#endif
     , m_focusController(new FocusController(this))
+#if ENABLE(CONTEXT_MENUS)
     , m_contextMenuController(new ContextMenuController(this, contextMenuClient))
+#endif
+#if ENABLE(INSPECTOR)
     , m_inspectorController(new InspectorController(this, inspectorClient))
+#endif
+#if ENABLE(CLIENT_BASED_GEOLOCATION)
+    , m_geolocationController(new GeolocationController(this, geolocationControllerClient))
+#endif
     , m_settings(new Settings(this))
     , m_progress(new ProgressTracker)
     , m_backForwardList(BackForwardList::create(this))
     , m_theme(RenderTheme::themeForPage(this))
     , m_editorClient(editorClient)
     , m_frameCount(0)
+    , m_openedByDOM(false)
     , m_tabKeyCyclesThroughElements(true)
     , m_defersLoading(false)
     , m_inLowQualityInterpolationMode(false)
@@ -115,7 +150,9 @@ Page::Page(ChromeClient* chromeClient, ContextMenuClient* contextMenuClient, Edi
     , m_areMemoryCacheClientCallsEnabled(true)
     , m_mediaVolume(1)
     , m_javaScriptURLsAreAllowed(true)
+#if ENABLE(INSPECTOR)
     , m_parentInspectorController(0)
+#endif
     , m_didLoadUserStyleSheet(false)
     , m_userStyleSheetModificationTime(0)
     , m_group(0)
@@ -124,16 +161,37 @@ Page::Page(ChromeClient* chromeClient, ContextMenuClient* contextMenuClient, Edi
     , m_customHTMLTokenizerChunkSize(-1)
     , m_canStartPlugins(true)
 {
+#if !ENABLE(CONTEXT_MENUS)
+    UNUSED_PARAM(contextMenuClient);
+#endif
+#if !ENABLE(DRAG_SUPPORT)
+    UNUSED_PARAM(dragClient);
+#endif
+#if !ENABLE(INSPECTOR)
+    UNUSED_PARAM(inspectorClient);
+#endif
+#if !ENABLE(CLIENT_BASED_GEOLOCATION)
+    UNUSED_PARAM(geolocationControllerClient);
+#endif
+
     if (!allPages) {
         allPages = new HashSet<Page*>;
         
         networkStateNotifier().setNetworkStateChangedFunction(networkStateChanged);
+#if PLATFORM(ANDROID) && ENABLE(APPLICATION_INSTALLED)
+        packageNotifier().setOnResultAvailable(onPackageResultAvailable);
+#endif
     }
 
     ASSERT(!allPages->contains(this));
     allPages->add(this);
 
-#if ENABLE(JAVASCRIPT_DEBUGGER)
+    if (pluginHalterClient) {
+        m_pluginHalter.set(new PluginHalter(pluginHalterClient));
+        m_pluginHalter->setPluginAllowedRunTime(m_settings->pluginAllowedRunTime());
+    }
+
+#if ENABLE(JAVASCRIPT_DEBUGGER) && USE(JSC)
     JavaScriptDebugServer::shared().pageCreated(this);
 #endif
 
@@ -152,9 +210,11 @@ Page::~Page()
         frame->pageDestroyed();
 
     m_editorClient->pageDestroyed();
+#if ENABLE(INSPECTOR)
     if (m_parentInspectorController)
         m_parentInspectorController->pageDestroyed();
     m_inspectorController->inspectedPageDestroyed();
+#endif
 
     m_backForwardList->close();
 
@@ -172,6 +232,16 @@ void Page::setMainFrame(PassRefPtr<Frame> mainFrame)
 {
     ASSERT(!m_mainFrame); // Should only be called during initialization
     m_mainFrame = mainFrame;
+}
+
+bool Page::openedByDOM() const
+{
+    return m_openedByDOM;
+}
+
+void Page::setOpenedByDOM()
+{
+    m_openedByDOM = true;
 }
 
 BackForwardList* Page::backForwardList()
@@ -201,23 +271,66 @@ bool Page::goForward()
     return false;
 }
 
+bool Page::canGoBackOrForward(int distance) const
+{
+    if (distance == 0)
+        return true;
+    if (distance > 0 && distance <= m_backForwardList->forwardListCount())
+        return true;
+    if (distance < 0 && -distance <= m_backForwardList->backListCount())
+        return true;
+    return false;
+}
+
+void Page::goBackOrForward(int distance)
+{
+    if (distance == 0)
+        return;
+
+    HistoryItem* item = m_backForwardList->itemAtIndex(distance);
+    if (!item) {
+        if (distance > 0) {
+            int forwardListCount = m_backForwardList->forwardListCount();
+            if (forwardListCount > 0) 
+                item = m_backForwardList->itemAtIndex(forwardListCount);
+        } else {
+            int backListCount = m_backForwardList->backListCount();
+            if (backListCount > 0)
+                item = m_backForwardList->itemAtIndex(-backListCount);
+        }
+    }
+
+    ASSERT(item); // we should not reach this line with an empty back/forward list
+    if (item)
+        goToItem(item, FrameLoadTypeIndexedBackForward);
+}
+
 void Page::goToItem(HistoryItem* item, FrameLoadType type)
 {
-    // Abort any current load if we're going to a history item
-
-    // Define what to do with any open database connections. By default we stop them and terminate the database thread.
-    DatabasePolicy databasePolicy = DatabasePolicyStop;
+    // Abort any current load unless we're navigating the current document to a new state object
+    HistoryItem* currentItem = m_mainFrame->loader()->history()->currentItem();
+    if (!item->stateObject() || !currentItem || item->documentSequenceNumber() != currentItem->documentSequenceNumber()) {
+        // Define what to do with any open database connections. By default we stop them and terminate the database thread.
+        DatabasePolicy databasePolicy = DatabasePolicyStop;
 
 #if ENABLE(DATABASE)
-    // If we're navigating the history via a fragment on the same document, then we do not want to stop databases.
-    const KURL& currentURL = m_mainFrame->loader()->url();
-    const KURL& newURL = item->url();
-
-    if (newURL.hasFragmentIdentifier() && equalIgnoringFragmentIdentifier(currentURL, newURL))
-        databasePolicy = DatabasePolicyContinue;
+        // If we're navigating the history via a fragment on the same document, then we do not want to stop databases.
+        const KURL& currentURL = m_mainFrame->loader()->url();
+        const KURL& newURL = item->url();
+    
+        if (newURL.hasFragmentIdentifier() && equalIgnoringFragmentIdentifier(currentURL, newURL))
+            databasePolicy = DatabasePolicyContinue;
 #endif
-    m_mainFrame->loader()->stopAllLoaders(databasePolicy);
-    m_mainFrame->loader()->goToItem(item, type);
+
+        m_mainFrame->loader()->stopAllLoaders(databasePolicy);
+    }
+        
+    m_mainFrame->loader()->history()->goToItem(item, type);
+}
+
+int Page::getHistoryLength()
+{
+    return m_backForwardList->backListCount() + 1 + m_backForwardList->forwardListCount();
 }
 
 void Page::setGlobalHistoryItem(HistoryItem* item)
@@ -384,6 +497,9 @@ const VisibleSelection& Page::selection() const
 
 void Page::setDefersLoading(bool defers)
 {
+    if (!m_settings->loadDeferringEnabled())
+        return;
+
     if (defers == m_defersLoading)
         return;
 
@@ -439,26 +555,43 @@ void Page::willMoveOffscreen()
 
 void Page::userStyleSheetLocationChanged()
 {
-#if !FRAME_LOADS_USER_STYLESHEET
-    // FIXME: We should provide a way to load other types of URLs than just
-    // file: (e.g., http:, data:).
-    if (m_settings->userStyleSheetLocation().isLocalFile())
-        m_userStyleSheetPath = m_settings->userStyleSheetLocation().fileSystemPath();
+    // FIXME: Eventually we will move to a model of just being handed the sheet
+    // text instead of loading the URL ourselves.
+    KURL url = m_settings->userStyleSheetLocation();
+    if (url.isLocalFile())
+        m_userStyleSheetPath = url.fileSystemPath();
     else
         m_userStyleSheetPath = String();
 
     m_didLoadUserStyleSheet = false;
     m_userStyleSheet = String();
     m_userStyleSheetModificationTime = 0;
-#endif
+    
+    // Data URLs with base64-encoded UTF-8 style sheets are common. We can process them
+    // synchronously and avoid using a loader. 
+    if (url.protocolIs("data") && url.string().startsWith("data:text/css;charset=utf-8;base64,")) {
+        m_didLoadUserStyleSheet = true;
+        
+        const unsigned prefixLength = 35;
+        Vector<char> encodedData(url.string().length() - prefixLength);
+        for (unsigned i = prefixLength; i < url.string().length(); ++i)
+            encodedData[i - prefixLength] = static_cast<char>(url.string()[i]);
+
+        Vector<char> styleSheetAsUTF8;
+        if (base64Decode(encodedData, styleSheetAsUTF8))
+            m_userStyleSheet = String::fromUTF8(styleSheetAsUTF8.data(), styleSheetAsUTF8.size());
+    }
+    
+    for (Frame* frame = mainFrame(); frame; frame = frame->tree()->traverseNext()) {
+        if (frame->document())
+            frame->document()->clearPageUserSheet();
+    }
 }
 
 const String& Page::userStyleSheet() const
 {
-    if (m_userStyleSheetPath.isEmpty()) {
-        ASSERT(m_userStyleSheet.isEmpty());
+    if (m_userStyleSheetPath.isEmpty())
         return m_userStyleSheet;
-    }
 
     time_t modTime;
     if (!getFileModificationTime(m_userStyleSheetPath, modTime)) {
@@ -571,7 +704,7 @@ void Page::setDebugger(JSC::Debugger* debugger)
 StorageNamespace* Page::sessionStorage(bool optionalCreate)
 {
     if (!m_sessionStorage && optionalCreate)
-        m_sessionStorage = StorageNamespace::sessionStorageNamespace();
+        m_sessionStorage = StorageNamespace::sessionStorageNamespace(this);
 
     return m_sessionStorage.get();
 }
@@ -632,4 +765,41 @@ bool Page::javaScriptURLsAreAllowed() const
     return m_javaScriptURLsAreAllowed;
 }
 
+#if ENABLE(INSPECTOR)
+InspectorTimelineAgent* Page::inspectorTimelineAgent() const
+{
+    return m_inspectorController->timelineAgent();
+}
+#endif
+
+void Page::pluginAllowedRunTimeChanged()
+{
+    if (m_pluginHalter)
+        m_pluginHalter->setPluginAllowedRunTime(m_settings->pluginAllowedRunTime());
+}
+
+void Page::didStartPlugin(HaltablePlugin* obj)
+{
+    if (m_pluginHalter)
+        m_pluginHalter->didStartPlugin(obj);
+}
+
+void Page::didStopPlugin(HaltablePlugin* obj)
+{
+    if (m_pluginHalter)
+        m_pluginHalter->didStopPlugin(obj);
+}
+
+#if !ASSERT_DISABLED
+void Page::checkFrameCountConsistency() const
+{
+    ASSERT(m_frameCount >= 0);
+
+    int frameCount = 0;
+    for (Frame* frame = mainFrame(); frame; frame = frame->tree()->traverseNext())
+        ++frameCount;
+
+    ASSERT(m_frameCount + 1 == frameCount);
+}
+#endif
 } // namespace WebCore

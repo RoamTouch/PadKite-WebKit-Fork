@@ -18,6 +18,8 @@ package android.webkit;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager.NameNotFoundException;
+import android.database.Cursor;
 import android.graphics.Canvas;
 import android.graphics.DrawFilter;
 import android.graphics.Paint;
@@ -26,11 +28,13 @@ import android.graphics.Picture;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.Region;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.os.Process;
 import android.provider.Browser;
+import android.provider.OpenableColumns;
 import android.util.Log;
 import android.util.SparseBooleanArray;
 import android.view.KeyEvent;
@@ -119,10 +123,6 @@ final class WebViewCore {
 
     private int mWebkitScrollX = 0;
     private int mWebkitScrollY = 0;
-
-    // If the site doesn't use viewport meta tag to specify the viewport, use
-    // DEFAULT_VIEWPORT_WIDTH as default viewport width
-    static final int DEFAULT_VIEWPORT_WIDTH = 800;
 
     // The thread name used to identify the WebCore thread and for use in
     // debugging other classes that require operation within the WebCore thread.
@@ -260,9 +260,12 @@ final class WebViewCore {
      * @param message The message to add
      * @param lineNumber the line on which the error occurred
      * @param sourceID the filename of the source that caused the error.
+     * @param msgLevel the log level of this message. This is a value casted to int
+     *     from WebCore::MessageLevel in WebCore/page/Console.h.
      */
-    protected void addMessageToConsole(String message, int lineNumber, String sourceID) {
-        mCallbackProxy.addMessageToConsole(message, lineNumber, sourceID);
+    protected void addMessageToConsole(String message, int lineNumber, String sourceID,
+            int msgLevel) {
+        mCallbackProxy.addMessageToConsole(message, lineNumber, sourceID, msgLevel);
     }
 
     /**
@@ -271,6 +274,39 @@ final class WebViewCore {
      */
     protected void jsAlert(String url, String message) {
         mCallbackProxy.onJsAlert(url, message);
+    }
+
+
+    /**
+     * Called by JNI.  Open a file chooser to upload a file.
+     * @return String version of the URI plus the name of the file.
+     * FIXME: Just return the URI here, and in FileSystem::pathGetFileName, call
+     * into Java to get the filename.
+     */
+    private String openFileChooser() {
+        Uri uri = mCallbackProxy.openFileChooser();
+        if (uri == null) return "";
+        // Find out the name, and append it to the URI.
+        // Webkit will treat the name as the filename, and
+        // the URI as the path.  The URI will be used
+        // in BrowserFrame to get the actual data.
+        Cursor cursor = mContext.getContentResolver().query(
+                uri,
+                new String[] { OpenableColumns.DISPLAY_NAME },
+                null,
+                null,
+                null);
+        String name = "";
+        if (cursor != null) {
+            try {
+                if (cursor.moveToNext()) {
+                    name = cursor.getString(0);
+                }
+            } finally {
+                cursor.close();
+            }
+        }
+        return uri.toString() + "/" + name;
     }
 
     /**
@@ -422,6 +458,8 @@ final class WebViewCore {
      */
     private native boolean nativeRecordContent(Region invalRegion, Point wh);
 
+    private native boolean nativeFocusBoundsChanged();
+
     /**
      * Splits slow parts of the picture set. Called from the webkit
      * thread after nativeDrawContent returns true.
@@ -465,17 +503,20 @@ final class WebViewCore {
 
     private native void nativeSaveDocumentState(int frame);
 
+    private native void nativeMoveFocus(int framePtr, int nodePointer);
     private native void nativeMoveMouse(int framePtr, int x, int y);
 
     private native void nativeMoveMouseIfLatest(int moveGeneration,
             int framePtr, int x, int y);
 
     private native String nativeRetrieveHref(int framePtr, int nodePtr);
+    private native String nativeRetrieveAnchorText(int framePtr, int nodePtr);
 
     private native void nativeTouchUp(int touchGeneration,
             int framePtr, int nodePtr, int x, int y);
 
-    private native boolean nativeHandleTouchEvent(int action, int x, int y);
+    private native boolean nativeHandleTouchEvent(int action, int x, int y,
+            int metaState);
 
     private native void nativeUpdateFrameCache();
 
@@ -486,6 +527,8 @@ final class WebViewCore {
     private native void nativeDumpRenderTree(boolean useFile);
 
     private native void nativeDumpNavTree();
+
+    private native void nativeDumpV8Counters();
 
     private native void nativeSetJsFlags(String flags);
 
@@ -508,8 +551,6 @@ final class WebViewCore {
      */
     private native void nativeSetSelection(int start, int end);
 
-    private native String nativeGetSelection(Region sel);
-
     // Register a scheme to be treated as local scheme so that it can access
     // local asset files for resources
     private native void nativeRegisterURLSchemeAsLocal(String scheme);
@@ -521,8 +562,6 @@ final class WebViewCore {
      * @param limit Is the new quota for an origin or new app cache max size.
      */
     private native void nativeSetNewStorageLimit(long limit);
-
-    private native void nativeUpdatePluginState(int framePtr, int nodePtr, int state);
 
     /**
      * Provide WebCore with a Geolocation permission state for the specified
@@ -549,13 +588,6 @@ final class WebViewCore {
         private static final int INITIALIZE = 0;
         private static final int REDUCE_PRIORITY = 1;
         private static final int RESUME_PRIORITY = 2;
-        private static final int CACHE_TICKER = 3;
-        private static final int BLOCK_CACHE_TICKER = 4;
-        private static final int RESUME_CACHE_TICKER = 5;
-
-        private static final int CACHE_TICKER_INTERVAL = 60 * 1000; // 1 minute
-
-        private static boolean mCacheTickersBlocked = true;
 
         public void run() {
             Looper.prepare();
@@ -581,28 +613,6 @@ final class WebViewCore {
                                 Process.setThreadPriority(
                                         Process.THREAD_PRIORITY_DEFAULT);
                                 break;
-
-                            case CACHE_TICKER:
-                                if (!mCacheTickersBlocked) {
-                                    CacheManager.endCacheTransaction();
-                                    CacheManager.startCacheTransaction();
-                                    sendMessageDelayed(
-                                            obtainMessage(CACHE_TICKER),
-                                            CACHE_TICKER_INTERVAL);
-                                }
-                                break;
-
-                            case BLOCK_CACHE_TICKER:
-                                if (CacheManager.endCacheTransaction()) {
-                                    mCacheTickersBlocked = true;
-                                }
-                                break;
-
-                            case RESUME_CACHE_TICKER:
-                                if (CacheManager.startCacheTransaction()) {
-                                    mCacheTickersBlocked = false;
-                                }
-                                break;
                         }
                     }
                 };
@@ -617,18 +627,20 @@ final class WebViewCore {
         String mData;
         String mMimeType;
         String mEncoding;
-        String mFailUrl;
+        String mHistoryUrl;
     }
 
     static class CursorData {
         CursorData() {}
         CursorData(int frame, int node, int x, int y) {
             mFrame = frame;
+            mNode = node;
             mX = x;
             mY = y;
         }
         int mMoveGeneration;
         int mFrame;
+        int mNode;
         int mX;
         int mY;
     }
@@ -641,6 +653,19 @@ final class WebViewCore {
     static class JSKeyData {
         String mCurrentText;
         KeyEvent mEvent;
+    }
+
+    static class MotionUpData {
+        int mFrame;
+        int mNode;
+        Rect mBounds;
+        int mX;
+        int mY;
+    }
+
+    static class GetUrlData {
+        String mUrl;
+        Map<String, String> mExtraHeaders;
     }
 
     static class PostUrlData {
@@ -672,16 +697,19 @@ final class WebViewCore {
         int mY;
     }
 
+    // mAction of TouchEventData can be MotionEvent.getAction() which uses the
+    // last two bytes or one of the following values
+    static final int ACTION_LONGPRESS = 0x100;
+    static final int ACTION_DOUBLETAP = 0x200;
+
     static class TouchEventData {
-        int mAction;    // MotionEvent.getAction()
+        int mAction;
         int mX;
         int mY;
-    }
-
-    static class PluginStateData {
-        int mFrame;
-        int mNode;
-        int mState;
+        int mMetaState;
+        boolean mReprocess;
+        float mViewX;
+        float mViewY;
     }
 
     static class GeolocationPermissionsData {
@@ -690,7 +718,10 @@ final class WebViewCore {
         boolean mRemember;
     }
 
+
+
         static final String[] HandlerDebugString = {
+            "REQUEST_LABEL", // 97
             "UPDATE_FRAME_CACHE_IF_LOADING", // = 98
             "SCROLL_TEXT_INPUT", // = 99
             "LOAD_URL", // = 100;
@@ -720,9 +751,9 @@ final class WebViewCore {
             "SINGLE_LISTBOX_CHOICE", // = 124;
             "MESSAGE_RELAY", // = 125;
             "SET_BACKGROUND_COLOR", // = 126;
-            "PLUGIN_STATE", // = 127;
+            "SET_MOVE_FOCUS", // = 127
             "SAVE_DOCUMENT_STATE", // = 128;
-            "GET_SELECTION", // = 129;
+            "129", // = 129;
             "WEBKIT_DRAW", // = 130;
             "SYNC_SCROLL", // = 131;
             "POST_URL", // = 132;
@@ -739,10 +770,12 @@ final class WebViewCore {
             "ON_PAUSE",     // = 143
             "ON_RESUME",    // = 144
             "FREE_MEMORY",  // = 145
+            "VALID_NODE_BOUNDS", // = 146
         };
 
     class EventHub {
         // Message Ids
+        static final int REQUEST_LABEL = 97;
         static final int UPDATE_FRAME_CACHE_IF_LOADING = 98;
         static final int SCROLL_TEXT_INPUT = 99;
         static final int LOAD_URL = 100;
@@ -771,9 +804,9 @@ final class WebViewCore {
         static final int SINGLE_LISTBOX_CHOICE = 124;
         static final int MESSAGE_RELAY = 125;
         static final int SET_BACKGROUND_COLOR = 126;
-        static final int PLUGIN_STATE = 127; // plugin notifications
+        static final int SET_MOVE_FOCUS = 127;
         static final int SAVE_DOCUMENT_STATE = 128;
-        static final int GET_SELECTION = 129;
+
         static final int WEBKIT_DRAW = 130;
         static final int SYNC_SCROLL = 131;
         static final int POST_URL = 132;
@@ -802,6 +835,7 @@ final class WebViewCore {
         static final int ON_PAUSE = 143;
         static final int ON_RESUME = 144;
         static final int FREE_MEMORY = 145;
+        static final int VALID_NODE_BOUNDS = 146;
 
         // Network-based messaging
         static final int CLEAR_SSL_PREF_TABLE = 150;
@@ -814,12 +848,22 @@ final class WebViewCore {
         static final int DUMP_DOMTREE = 170;
         static final int DUMP_RENDERTREE = 171;
         static final int DUMP_NAVTREE = 172;
+        static final int DUMP_V8COUNTERS = 173;
 
-        static final int SET_JS_FLAGS = 173;
+        static final int SET_JS_FLAGS = 174;
         // Geolocation
         static final int GEOLOCATION_PERMISSIONS_PROVIDE = 180;
 
         static final int POPULATE_VISITED_LINKS = 181;
+
+        static final int HIDE_FULLSCREEN = 182;
+
+        static final int SET_NETWORK_TYPE = 183;
+
+        // navigator.isApplicationInstalled()
+        static final int ADD_PACKAGE_NAMES = 184;
+        static final int ADD_PACKAGE_NAME = 185;
+        static final int REMOVE_PACKAGE_NAME = 186;
 
         // private message ids
         private static final int DESTROY =     200;
@@ -852,11 +896,11 @@ final class WebViewCore {
                 @Override
                 public void handleMessage(Message msg) {
                     if (DebugFlags.WEB_VIEW_CORE) {
-                        Log.v(LOGTAG, (msg.what < UPDATE_FRAME_CACHE_IF_LOADING
+                        Log.v(LOGTAG, (msg.what < REQUEST_LABEL
                                 || msg.what
-                                > FREE_MEMORY ? Integer.toString(msg.what)
+                                > VALID_NODE_BOUNDS ? Integer.toString(msg.what)
                                 : HandlerDebugString[msg.what
-                                        - UPDATE_FRAME_CACHE_IF_LOADING])
+                                        - REQUEST_LABEL])
                                 + " arg1=" + msg.arg1 + " arg2=" + msg.arg2
                                 + " obj=" + msg.obj);
                     }
@@ -877,6 +921,19 @@ final class WebViewCore {
                             }
                             break;
 
+                        case REQUEST_LABEL:
+                            if (mWebView != null) {
+                                int nodePointer = msg.arg2;
+                                String label = nativeRequestLabel(msg.arg1,
+                                        nodePointer);
+                                if (label != null && label.length() > 0) {
+                                    Message.obtain(mWebView.mPrivateHandler,
+                                            WebView.RETURN_LABEL, nodePointer,
+                                            0, label).sendToTarget();
+                                }
+                            }
+                            break;
+
                         case UPDATE_FRAME_CACHE_IF_LOADING:
                             nativeUpdateFrameCacheIfLoading();
                             break;
@@ -886,9 +943,11 @@ final class WebViewCore {
                                     ((Float) msg.obj).floatValue(), msg.arg1);
                             break;
 
-                        case LOAD_URL:
-                            loadUrl((String) msg.obj);
+                        case LOAD_URL: {
+                            GetUrlData param = (GetUrlData) msg.obj;
+                            loadUrl(param.mUrl, param.mExtraHeaders);
                             break;
+                        }
 
                         case POST_URL: {
                             PostUrlData param = (PostUrlData) msg.obj;
@@ -924,7 +983,7 @@ final class WebViewCore {
                                     loadParams.mData,
                                     loadParams.mMimeType,
                                     loadParams.mEncoding,
-                                    loadParams.mFailUrl);
+                                    loadParams.mHistoryUrl);
                             break;
 
                         case STOP_LOADING:
@@ -1000,23 +1059,15 @@ final class WebViewCore {
                             Process.setThreadPriority(mTid,
                                     Process.THREAD_PRIORITY_BACKGROUND);
                             pauseTimers();
-                            if (CacheManager.disableTransaction()) {
-                                WebCoreThread.mCacheTickersBlocked = true;
-                                sWebCoreHandler.removeMessages(
-                                        WebCoreThread.CACHE_TICKER);
-                            }
+                            WebViewWorker.getHandler().sendEmptyMessage(
+                                    WebViewWorker.MSG_PAUSE_CACHE_TRANSACTION);
                             break;
 
                         case RESUME_TIMERS:
                             Process.setThreadPriority(mTid, mSavedPriority);
                             resumeTimers();
-                            if (CacheManager.enableTransaction()) {
-                                WebCoreThread.mCacheTickersBlocked = false;
-                                sWebCoreHandler.sendMessageDelayed(
-                                        sWebCoreHandler.obtainMessage(
-                                        WebCoreThread.CACHE_TICKER),
-                                        WebCoreThread.CACHE_TICKER_INTERVAL);
-                            }
+                            WebViewWorker.getHandler().sendEmptyMessage(
+                                    WebViewWorker.MSG_RESUME_CACHE_TRANSACTION);
                             break;
 
                         case ON_PAUSE:
@@ -1032,11 +1083,6 @@ final class WebViewCore {
                             nativeFreeMemory();
                             break;
 
-                        case PLUGIN_STATE:
-                            PluginStateData psd = (PluginStateData) msg.obj;
-                            nativeUpdatePluginState(psd.mFrame, psd.mNode, psd.mState);
-                            break;
-
                         case SET_NETWORK_STATE:
                             if (BrowserFrame.sJavaBridge == null) {
                                 throw new IllegalStateException("No WebView " +
@@ -1044,6 +1090,16 @@ final class WebViewCore {
                             }
                             BrowserFrame.sJavaBridge
                                     .setNetworkOnLine(msg.arg1 == 1);
+                            break;
+
+                        case SET_NETWORK_TYPE:
+                            if (BrowserFrame.sJavaBridge == null) {
+                                throw new IllegalStateException("No WebView " +
+                                        "has been created in this process!");
+                            }
+                            Map<String, String> map = (Map<String, String>) msg.obj;
+                            BrowserFrame.sJavaBridge
+                                    .setNetworkType(map.get("type"), map.get("subtype"));
                             break;
 
                         case CLEAR_CACHE:
@@ -1100,9 +1156,11 @@ final class WebViewCore {
                             TouchEventData ted = (TouchEventData) msg.obj;
                             Message.obtain(
                                     mWebView.mPrivateHandler,
-                                    WebView.PREVENT_TOUCH_ID, ted.mAction,
+                                    WebView.PREVENT_TOUCH_ID,
+                                    ted.mAction,
                                     nativeHandleTouchEvent(ted.mAction, ted.mX,
-                                            ted.mY) ? 1 : 0).sendToTarget();
+                                            ted.mY, ted.mMetaState) ? 1 : 0,
+                                    ted.mReprocess ? ted : null).sendToTarget();
                             break;
                         }
 
@@ -1125,6 +1183,11 @@ final class WebViewCore {
                             mBrowserFrame.documentAsText((Message) msg.obj);
                             break;
 
+                        case SET_MOVE_FOCUS:
+                            CursorData focusData = (CursorData) msg.obj;
+                            nativeMoveFocus(focusData.mFrame, focusData.mNode);
+                            break;
+
                         case SET_MOVE_MOUSE:
                             CursorData cursorData = (CursorData) msg.obj;
                             nativeMoveMouse(cursorData.mFrame,
@@ -1140,8 +1203,10 @@ final class WebViewCore {
 
                         case REQUEST_CURSOR_HREF: {
                             Message hrefMsg = (Message) msg.obj;
-                            String res = nativeRetrieveHref(msg.arg1, msg.arg2);
-                            hrefMsg.getData().putString("url", res);
+                            hrefMsg.getData().putString("url",
+                                    nativeRetrieveHref(msg.arg1, msg.arg2));
+                            hrefMsg.getData().putString("title",
+                                    nativeRetrieveAnchorText(msg.arg1, msg.arg2));
                             hrefMsg.sendToTarget();
                             break;
                         }
@@ -1193,13 +1258,6 @@ final class WebViewCore {
                             nativeSetBackgroundColor(msg.arg1);
                             break;
 
-                        case GET_SELECTION:
-                            String str = nativeGetSelection((Region) msg.obj);
-                            Message.obtain(mWebView.mPrivateHandler
-                                    , WebView.UPDATE_CLIPBOARD, str)
-                                    .sendToTarget();
-                            break;
-
                         case DUMP_DOMTREE:
                             nativeDumpDomTree(msg.arg1 == 1);
                             break;
@@ -1210,6 +1268,10 @@ final class WebViewCore {
 
                         case DUMP_NAVTREE:
                             nativeDumpNavTree();
+                            break;
+
+                        case DUMP_V8COUNTERS:
+                            nativeDumpV8Counters();
                             break;
 
                         case SET_JS_FLAGS:
@@ -1248,6 +1310,52 @@ final class WebViewCore {
 
                         case POPULATE_VISITED_LINKS:
                             nativeProvideVisitedHistory((String[])msg.obj);
+                            break;
+
+                        case VALID_NODE_BOUNDS: {
+                            MotionUpData motionUpData = (MotionUpData) msg.obj;
+                            if (!nativeValidNodeAndBounds(
+                                    motionUpData.mFrame, motionUpData.mNode,
+                                    motionUpData.mBounds)) {
+                                nativeUpdateFrameCache();
+                            }
+                            Message message = mWebView.mPrivateHandler
+                                    .obtainMessage(WebView.DO_MOTION_UP,
+                                    motionUpData.mX, motionUpData.mY);
+                            mWebView.mPrivateHandler.sendMessageAtFrontOfQueue(
+                                    message);
+                            break;
+                        }
+
+                        case HIDE_FULLSCREEN:
+                            nativeFullScreenPluginHidden(msg.arg1);
+                            break;
+
+                        case ADD_PACKAGE_NAMES:
+                            if (BrowserFrame.sJavaBridge == null) {
+                                throw new IllegalStateException("No WebView " +
+                                        "has been created in this process!");
+                            }
+                            BrowserFrame.sJavaBridge.addPackageNames(
+                                    (Set<String>) msg.obj);
+                            break;
+
+                        case ADD_PACKAGE_NAME:
+                            if (BrowserFrame.sJavaBridge == null) {
+                                throw new IllegalStateException("No WebView " +
+                                        "has been created in this process!");
+                            }
+                            BrowserFrame.sJavaBridge.addPackageName(
+                                    (String) msg.obj);
+                            break;
+
+                        case REMOVE_PACKAGE_NAME:
+                            if (BrowserFrame.sJavaBridge == null) {
+                                throw new IllegalStateException("No WebView " +
+                                        "has been created in this process!");
+                            }
+                            BrowserFrame.sJavaBridge.removePackageName(
+                                    (String) msg.obj);
                             break;
                     }
                 }
@@ -1392,6 +1500,11 @@ final class WebViewCore {
         mEventHub.sendMessage(Message.obtain(null, what, arg1, arg2, obj));
     }
 
+    void sendMessageAtFrontOfQueue(int what, Object obj) {
+        mEventHub.sendMessageAtFrontOfQueue(Message.obtain(
+                null, what, obj));
+    }
+
     void sendMessageDelayed(int what, Object obj, long delay) {
         mEventHub.sendMessageDelayed(Message.obtain(null, what, obj), delay);
     }
@@ -1444,9 +1557,9 @@ final class WebViewCore {
         }
     }
 
-    private void loadUrl(String url) {
+    private void loadUrl(String url, Map<String, String> extraHeaders) {
         if (DebugFlags.WEB_VIEW_CORE) Log.v(LOGTAG, " CORE loadUrl " + url);
-        mBrowserFrame.loadUrl(url);
+        mBrowserFrame.loadUrl(url, extraHeaders);
     }
 
     private void key(KeyEvent evt, boolean isDown) {
@@ -1498,7 +1611,7 @@ final class WebViewCore {
             if (mViewportWidth == -1) {
                 if (mSettings.getLayoutAlgorithm() ==
                         WebSettings.LayoutAlgorithm.NORMAL) {
-                    width = DEFAULT_VIEWPORT_WIDTH;
+                    width = WebView.DEFAULT_VIEWPORT_WIDTH;
                 } else {
                     /*
                      * if a page's minimum preferred width is wider than the
@@ -1512,8 +1625,9 @@ final class WebViewCore {
                      * In the worse case, the native width will be adjusted when
                      * next zoom or screen orientation change happens.
                      */
-                    width = Math.max(w, Math.max(DEFAULT_VIEWPORT_WIDTH,
-                            nativeGetContentMinPrefWidth()));
+                    width = Math.min(WebView.sMaxViewportWidth, Math.max(w,
+                            Math.max(WebView.DEFAULT_VIEWPORT_WIDTH,
+                                    nativeGetContentMinPrefWidth())));
                 }
             } else if (mViewportWidth > 0) {
                 width = Math.max(w, mViewportWidth);
@@ -1596,6 +1710,7 @@ final class WebViewCore {
         int mMinPrefWidth;
         RestoreState mRestoreState; // only non-null if it is for the first
                                     // picture set after the first layout
+        boolean mFocusSizeChanged;
     }
 
     private void webkitDraw() {
@@ -1610,10 +1725,11 @@ final class WebViewCore {
         if (mWebView != null) {
             // Send the native view size that was used during the most recent
             // layout.
+            draw.mFocusSizeChanged = nativeFocusBoundsChanged();
             draw.mViewPoint = new Point(mCurrentViewWidth, mCurrentViewHeight);
             if (mSettings.getUseWideViewPort()) {
                 draw.mMinPrefWidth = Math.max(
-                        mViewportWidth == -1 ? DEFAULT_VIEWPORT_WIDTH
+                        mViewportWidth == -1 ? WebView.DEFAULT_VIEWPORT_WIDTH
                                 : (mViewportWidth == 0 ? mCurrentViewWidth
                                         : mViewportWidth),
                         nativeGetContentMinPrefWidth());
@@ -1646,6 +1762,7 @@ final class WebViewCore {
 
     final DrawFilter mZoomFilter =
                     new PaintFlagsDrawFilter(ZOOM_BITS, Paint.LINEAR_TEXT_FLAG);
+    // If we need to trade better quality for speed, set mScrollFilter to null
     final DrawFilter mScrollFilter =
                 new PaintFlagsDrawFilter(SCROLL_BITS, 0);
 
@@ -1679,49 +1796,47 @@ final class WebViewCore {
         return result;
     }
 
-    static void pauseUpdate(WebViewCore core) {
+    static void reducePriority() {
         // remove the pending REDUCE_PRIORITY and RESUME_PRIORITY messages
         sWebCoreHandler.removeMessages(WebCoreThread.REDUCE_PRIORITY);
         sWebCoreHandler.removeMessages(WebCoreThread.RESUME_PRIORITY);
         sWebCoreHandler.sendMessageAtFrontOfQueue(sWebCoreHandler
                 .obtainMessage(WebCoreThread.REDUCE_PRIORITY));
-        // Note: there is one possible failure mode. If pauseUpdate() is called
-        // from UI thread while in webcore thread WEBKIT_DRAW is just pulled out
-        // of the queue and about to be executed. mDrawIsScheduled may be set to
-        // false in webkitDraw(). So update won't be blocked. But at least the
-        // webcore thread priority is still lowered.
-        if (core != null) {
-            synchronized (core) {
-                core.mDrawIsPaused = true;
-                core.mEventHub.removeMessages(EventHub.WEBKIT_DRAW);
-            }
-        }
     }
 
-    static void resumeUpdate(WebViewCore core) {
+    static void resumePriority() {
         // remove the pending REDUCE_PRIORITY and RESUME_PRIORITY messages
         sWebCoreHandler.removeMessages(WebCoreThread.REDUCE_PRIORITY);
         sWebCoreHandler.removeMessages(WebCoreThread.RESUME_PRIORITY);
         sWebCoreHandler.sendMessageAtFrontOfQueue(sWebCoreHandler
                 .obtainMessage(WebCoreThread.RESUME_PRIORITY));
+    }
+
+    static void pauseUpdatePicture(WebViewCore core) {
+        // Note: there is one possible failure mode. If pauseUpdatePicture() is
+        // called from UI thread while WEBKIT_DRAW is just pulled out of the
+        // queue in WebCore thread to be executed. Then update won't be blocked.
         if (core != null) {
             synchronized (core) {
-                core.mDrawIsScheduled = false;
-                core.mDrawIsPaused = false;
-                if (DebugFlags.WEB_VIEW_CORE) Log.v(LOGTAG, "resumeUpdate");
-                core.contentDraw();
+                core.mDrawIsPaused = true;
+                if (core.mDrawIsScheduled) {
+                    core.mEventHub.removeMessages(EventHub.WEBKIT_DRAW);
+                }
             }
         }
+
     }
 
-    static void startCacheTransaction() {
-        sWebCoreHandler.sendMessage(sWebCoreHandler
-                .obtainMessage(WebCoreThread.RESUME_CACHE_TICKER));
-    }
-
-    static void endCacheTransaction() {
-        sWebCoreHandler.sendMessage(sWebCoreHandler
-                .obtainMessage(WebCoreThread.BLOCK_CACHE_TICKER));
+    static void resumeUpdatePicture(WebViewCore core) {
+        if (core != null) {
+            synchronized (core) {
+                core.mDrawIsPaused = false;
+                if (core.mDrawIsScheduled) {
+                    core.mDrawIsScheduled = false;
+                    core.contentDraw();
+                }
+            }
+        }
     }
 
     //////////////////////////////////////////////////////////////////////////
@@ -1750,10 +1865,9 @@ final class WebViewCore {
         }
         // only fire an event if this is our first request
         synchronized (this) {
-            if (mDrawIsPaused || mDrawIsScheduled) {
-                return;
-            }
+            if (mDrawIsScheduled) return;
             mDrawIsScheduled = true;
+            if (mDrawIsPaused) return;
             mEventHub.sendMessage(Message.obtain(null, EventHub.WEBKIT_DRAW));
         }
     }
@@ -1829,9 +1943,10 @@ final class WebViewCore {
         sendUpdateTextEntry();
         // as CacheManager can behave based on database transaction, we need to
         // call tick() to trigger endTransaction
-        sWebCoreHandler.removeMessages(WebCoreThread.CACHE_TICKER);
-        sWebCoreHandler.sendMessage(sWebCoreHandler
-                .obtainMessage(WebCoreThread.CACHE_TICKER));
+        WebViewWorker.getHandler().removeMessages(
+                WebViewWorker.MSG_CACHE_TRANSACTION_TICKER);
+        WebViewWorker.getHandler().sendEmptyMessage(
+                WebViewWorker.MSG_CACHE_TRANSACTION_TICKER);
         contentDraw();
     }
 
@@ -1844,6 +1959,33 @@ final class WebViewCore {
             Message.obtain(mWebView.mPrivateHandler,
                            WebView.INVAL_RECT_MSG_ID,
                            new Rect(left, top, right, bottom)).sendToTarget();
+        }
+    }
+
+    private static boolean mRepaintScheduled = false;
+
+    /*
+     * Called by the WebView thread
+     */
+    /* package */ void signalRepaintDone() {
+        mRepaintScheduled = false;
+    }
+
+    // called by JNI
+    private void sendImmediateRepaint() {
+        if (mWebView != null && !mRepaintScheduled) {
+            mRepaintScheduled = true;
+            Message.obtain(mWebView.mPrivateHandler,
+                           WebView.IMMEDIATE_REPAINT_MSG_ID).sendToTarget();
+        }
+    }
+
+    // called by JNI
+    private void setRootLayer(int layer) {
+        if (mWebView != null) {
+            Message.obtain(mWebView.mPrivateHandler,
+                           WebView.SET_ROOT_LAYER_MSG_ID,
+                           layer, 0).sendToTarget();
         }
     }
 
@@ -1863,7 +2005,14 @@ final class WebViewCore {
 
         if (mWebView == null) return;
 
-        setupViewport(standardLoad || mRestoredScale > 0);
+        boolean updateRestoreState = standardLoad || mRestoredScale > 0;
+        setupViewport(updateRestoreState);
+        // if updateRestoreState is true, ViewManager.postReadyToDrawAll() will
+        // be called after the WebView restore the state. If updateRestoreState
+        // is false, start to draw now as it is ready.
+        if (!updateRestoreState) {
+            mWebView.mViewManager.postReadyToDrawAll();
+        }
 
         // reset the scroll position, the restored offset and scales
         mWebkitScrollX = mWebkitScrollY = mRestoredX = mRestoredY
@@ -2029,11 +2178,25 @@ final class WebViewCore {
                 // know the exact scale. If mRestoredScale is non-zero, use it;
                 // otherwise just use mTextWrapScale as the initial scale.
                 data.mScale = mRestoreState.mViewScale == 0
-                        ? (mRestoredScale > 0 ? mRestoredScale
+                        ? (mRestoredScale > 0 ? mRestoredScale / 100.0f
                                 : mRestoreState.mTextWrapScale)
                         : mRestoreState.mViewScale;
+                if (DebugFlags.WEB_VIEW_CORE) {
+                    Log.v(LOGTAG, "setupViewport"
+                             + " mRestoredScale=" + mRestoredScale
+                             + " mViewScale=" + mRestoreState.mViewScale
+                             + " mTextWrapScale=" + mRestoreState.mTextWrapScale
+                             );
+                }
                 data.mWidth = Math.round(webViewWidth / data.mScale);
-                data.mHeight = mCurrentViewHeight * data.mWidth / viewportWidth;
+                // We may get a call here when mCurrentViewHeight == 0 if webcore completes the
+                // first layout before we sync our webview dimensions to it. In that case, we
+                // request the real height of the webview. This is not a perfect solution as we
+                // are calling a WebView method from the WebCore thread. But this is preferable
+                // to syncing an incorrect height.
+                data.mHeight = mCurrentViewHeight == 0 ?
+                        Math.round(mWebView.getViewHeight() / data.mScale)
+                        : mCurrentViewHeight * data.mWidth / viewportWidth;
                 data.mTextWrapWidth = Math.round(webViewWidth
                         / mRestoreState.mTextWrapScale);
                 data.mIgnoreHeight = false;
@@ -2103,8 +2266,15 @@ final class WebViewCore {
                 WebView.CLEAR_TEXT_ENTRY).sendToTarget();
     }
 
-    private native void nativeUpdateFrameCacheIfLoading();
+    // called by JNI
+    private void sendFindAgain() {
+        if (mWebView == null) return;
+        Message.obtain(mWebView.mPrivateHandler,
+                WebView.FIND_AGAIN).sendToTarget();
+    }
 
+    private native void nativeUpdateFrameCacheIfLoading();
+    private native String nativeRequestLabel(int framePtr, int nodePtr);
     /**
      * Scroll the focused textfield to (xPercent, y) in document space
      */
@@ -2116,7 +2286,7 @@ final class WebViewCore {
     private native void nativeSetGlobalBounds(int x, int y, int w, int h);
 
     // called by JNI
-    private void requestListBox(String[] array, boolean[] enabledArray,
+    private void requestListBox(String[] array, int[] enabledArray,
             int[] selectedArray) {
         if (mWebView != null) {
             mWebView.requestListBox(array, enabledArray, selectedArray);
@@ -2124,12 +2294,23 @@ final class WebViewCore {
     }
 
     // called by JNI
-    private void requestListBox(String[] array, boolean[] enabledArray,
+    private void requestListBox(String[] array, int[] enabledArray,
             int selection) {
         if (mWebView != null) {
             mWebView.requestListBox(array, enabledArray, selection);
         }
 
+    }
+
+    // called by JNI
+    private void requestKeyboardWithSelection(int pointer, int selStart,
+            int selEnd, int textGeneration) {
+        if (mWebView != null) {
+            Message.obtain(mWebView.mPrivateHandler,
+                    WebView.REQUEST_KEYBOARD_WITH_SELECTION_MSG_ID, pointer,
+                    textGeneration, new TextSelectionData(selStart, selEnd))
+                    .sendToTarget();
+        }
     }
 
     // called by JNI
@@ -2141,55 +2322,90 @@ final class WebViewCore {
         }
     }
 
-    // called by JNI. PluginWidget function to launch an activity and overlays
-    // the activity with the View provided by the plugin class.
-    private void startFullScreenPluginActivity(String libName, String clsName, int npp) {
+    // called by JNI
+    private Context getContext() {
+        return mContext;
+    }
+
+    // called by JNI
+    private Class<?> getPluginClass(String libName, String clsName) {
+        
+        if (mWebView == null) {
+            return null;
+        }
+        
+        PluginManager pluginManager = PluginManager.getInstance(null);
+
+        String pkgName = pluginManager.getPluginsAPKName(libName);
+        if (pkgName == null) {
+            Log.w(LOGTAG, "Unable to resolve " + libName + " to a plugin APK");
+            return null;
+        }
+        
+        try {
+            return pluginManager.getPluginClass(pkgName, clsName);
+        } catch (NameNotFoundException e) {
+            Log.e(LOGTAG, "Unable to find plugin classloader for the apk (" + pkgName + ")");
+        } catch (ClassNotFoundException e) {
+            Log.e(LOGTAG, "Unable to find plugin class (" + clsName +
+                    ") in the apk (" + pkgName + ")");
+        }
+
+        return null;
+    }
+
+    // called by JNI. PluginWidget function to launch a full-screen view using a
+    // View object provided by the plugin class.
+    private void showFullScreenPlugin(ViewManager.ChildView childView, int npp) {
         if (mWebView == null) {
             return;
         }
 
-        String pkgName = PluginManager.getInstance(null).getPluginsAPKName(libName);
-        if (pkgName == null) {
-            Log.w(LOGTAG, "Unable to resolve " + libName + " to a plugin APK");
+        Message message = mWebView.mPrivateHandler.obtainMessage(WebView.SHOW_FULLSCREEN);
+        message.obj = childView.mView;
+        message.arg1 = npp;
+        message.sendToTarget();
+    }
+
+    // called by JNI
+    private void hideFullScreenPlugin() {
+        if (mWebView == null) {
             return;
         }
-
-        Intent intent = new Intent("android.intent.webkit.PLUGIN");
-        intent.putExtra(PluginActivity.INTENT_EXTRA_PACKAGE_NAME, pkgName);
-        intent.putExtra(PluginActivity.INTENT_EXTRA_CLASS_NAME, clsName);
-        intent.putExtra(PluginActivity.INTENT_EXTRA_NPP_INSTANCE, npp);
-        mWebView.getContext().startActivity(intent);
+        mWebView.mPrivateHandler.obtainMessage(WebView.HIDE_FULLSCREEN)
+                .sendToTarget();
     }
 
     // called by JNI.  PluginWidget functions for creating an embedded View for
     // the surface drawing model.
-    private ViewManager.ChildView createSurface(String libName, String clsName,
-            int npp, int x, int y, int width, int height) {
+    private ViewManager.ChildView addSurface(View pluginView, int x, int y,
+                                             int width, int height) {
         if (mWebView == null) {
             return null;
         }
 
-        String pkgName = PluginManager.getInstance(null).getPluginsAPKName(libName);
-        if (pkgName == null) {
-            Log.w(LOGTAG, "Unable to resolve " + libName + " to a plugin APK");
+        if (pluginView == null) {
+            Log.e(LOGTAG, "Attempted to add an empty plugin view to the view hierarchy");
             return null;
         }
 
-        PluginStub stub =PluginUtil.getPluginStub(mWebView.getContext(),pkgName, clsName);
-        if (stub == null) {
-            Log.e(LOGTAG, "Unable to find plugin class (" + clsName +
-                    ") in the apk (" + pkgName + ")");
-            return null;
-        }
+        // ensures the view system knows the view can redraw itself
+        pluginView.setWillNotDraw(false);
 
-        View pluginView = stub.getEmbeddedView(npp, mWebView.getContext());
+        if(pluginView instanceof SurfaceView)
+            ((SurfaceView)pluginView).setZOrderOnTop(true);
 
         ViewManager.ChildView view = mWebView.mViewManager.createView();
         view.mView = pluginView;
         view.attachView(x, y, width, height);
         return view;
     }
-    
+
+    private void updateSurface(ViewManager.ChildView childView, int x, int y,
+            int width, int height) {
+        childView.attachView(x, y, width, height);
+    }
+
     private void destroySurface(ViewManager.ChildView childView) {
         childView.removeView();
     }
@@ -2228,7 +2444,29 @@ final class WebViewCore {
         }
     }
 
+    // called by JNI
+    private void centerFitRect(int x, int y, int width, int height) {
+        if (mWebView == null) {
+            return;
+        }
+        mWebView.mPrivateHandler.obtainMessage(WebView.CENTER_FIT_RECT,
+                new Rect(x, y, x + width, y + height)).sendToTarget();
+    }
+
+    // called by JNI
+    private void setScrollbarModes(int hMode, int vMode) {
+        if (mWebView == null) {
+            return;
+        }
+        mWebView.mPrivateHandler.obtainMessage(WebView.SET_SCROLLBAR_MODES,
+                hMode, vMode).sendToTarget();
+    }
+
     private native void nativePause();
     private native void nativeResume();
     private native void nativeFreeMemory();
+    private native void nativeFullScreenPluginHidden(int npp);
+    private native boolean nativeValidNodeAndBounds(int frame, int node,
+            Rect bounds);
+
 }

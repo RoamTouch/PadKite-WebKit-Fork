@@ -44,8 +44,9 @@
 
 namespace WebCore {
 
-ScheduledAction::ScheduledAction(v8::Handle<v8::Function> func, int argc, v8::Handle<v8::Value> argv[])
-    : m_code(String(), KURL(), 0)
+ScheduledAction::ScheduledAction(v8::Handle<v8::Context> context, v8::Handle<v8::Function> func, int argc, v8::Handle<v8::Value> argv[])
+    : m_context(context)
+    , m_code(String(), KURL(), 0)
 {
     m_function = v8::Persistent<v8::Function>::New(func);
 
@@ -94,20 +95,19 @@ void ScheduledAction::execute(ScriptExecutionContext* context)
     if (proxy)
         execute(proxy);
 #if ENABLE(WORKERS)
-    else {
-        ASSERT(context->isWorkerContext());
+    else if (context->isWorkerContext())
         execute(static_cast<WorkerContext*>(context));
-    }
 #endif
+    // It's possible that Javascript is disabled and that we have neither a V8Proxy
+    // nor a WorkerContext.  Do nothing in that case.
 }
 
 void ScheduledAction::execute(V8Proxy* proxy)
 {
     ASSERT(proxy);
 
-    LOCK_V8;
     v8::HandleScope handleScope;
-    v8::Local<v8::Context> v8Context = proxy->context();
+    v8::Handle<v8::Context> v8Context = v8::Local<v8::Context>::New(m_context.get());
     if (v8Context.IsEmpty())
         return; // JS may not be enabled.
 
@@ -134,9 +134,8 @@ void ScheduledAction::execute(WorkerContext* workerContext)
     WorkerScriptController* scriptController = workerContext->script();
 
     if (!m_function.IsEmpty() && m_function->IsFunction()) {
-        LOCK_V8;
         v8::HandleScope handleScope;
-        v8::Local<v8::Context> v8Context = scriptController->proxy()->context();
+        v8::Handle<v8::Context> v8Context = v8::Local<v8::Context>::New(m_context.get());
         ASSERT(!v8Context.IsEmpty());
         v8::Context::Scope scope(v8Context);
         m_function->Call(v8Context->Global(), m_argc, m_argv);

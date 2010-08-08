@@ -92,10 +92,17 @@ static inline Color blendFunc(const AnimationBase* anim, const Color& from, cons
     if (progress == 1 && !to.isValid())
         return Color();
 
-    return Color(blendFunc(anim, from.red(), to.red(), progress),
-                 blendFunc(anim, from.green(), to.green(), progress),
-                 blendFunc(anim, from.blue(), to.blue(), progress),
-                 blendFunc(anim, from.alpha(), to.alpha(), progress));
+    // Contrary to the name, RGBA32 actually stores ARGB, so we can initialize Color directly from premultipliedARGBFromColor().
+    // Also, premultipliedARGBFromColor() bails on zero alpha, so special-case that.
+    Color premultFrom = from.alpha() ? premultipliedARGBFromColor(from) : 0;
+    Color premultTo = to.alpha() ? premultipliedARGBFromColor(to) : 0;
+
+    Color premultBlended(blendFunc(anim, premultFrom.red(), premultTo.red(), progress),
+                 blendFunc(anim, premultFrom.green(), premultTo.green(), progress),
+                 blendFunc(anim, premultFrom.blue(), premultTo.blue(), progress),
+                 blendFunc(anim, premultFrom.alpha(), premultTo.alpha(), progress));
+
+    return Color(colorFromPremultipliedARGB(premultBlended.rgb()));
 }
 
 static inline Length blendFunc(const AnimationBase*, const Length& from, const Length& to, double progress)
@@ -190,7 +197,7 @@ class PropertyWrapperBase;
 static void addShorthandProperties();
 static PropertyWrapperBase* wrapperForProperty(int propertyID);
 
-class PropertyWrapperBase {
+class PropertyWrapperBase : public Noncopyable {
 public:
     PropertyWrapperBase(int prop)
         : m_prop(prop)
@@ -302,11 +309,21 @@ public:
     {
         ShadowData* shadowA = (a->*m_getter)();
         ShadowData* shadowB = (b->*m_getter)();
+        
+        while (true) {
+            if (!shadowA && !shadowB)   // end of both lists
+                return true;
 
-        if ((!shadowA && shadowB) || (shadowA && !shadowB))
-            return false;
-        if (shadowA && shadowB && (*shadowA != *shadowB))
-            return false;
+            if (!shadowA || !shadowB)   // end of just one of the lists
+                return false;
+
+            if (*shadowA != *shadowB)
+                return false;
+        
+            shadowA = shadowA->next;
+            shadowB = shadowB->next;
+        }
+
         return true;
     }
 
@@ -316,12 +333,22 @@ public:
         ShadowData* shadowB = (b->*m_getter)();
         ShadowData defaultShadowData(0, 0, 0, 0, Normal, Color::transparent);
 
-        if (!shadowA)
-            shadowA = &defaultShadowData;
-        if (!shadowB)
-            shadowB = &defaultShadowData;
+        ShadowData* newShadowData = 0;
+        
+        while (shadowA || shadowB) {
+            ShadowData* srcShadow = shadowA ? shadowA : &defaultShadowData;
+            ShadowData* dstShadow = shadowB ? shadowB : &defaultShadowData;
+            
+            if (!newShadowData)
+                newShadowData = blendFunc(anim, srcShadow, dstShadow, progress);
+            else
+                newShadowData->next = blendFunc(anim, srcShadow, dstShadow, progress);
 
-        (dst->*m_setter)(blendFunc(anim, shadowA, shadowB, progress), false);
+            shadowA = shadowA ? shadowA->next : 0;
+            shadowB = shadowB ? shadowB->next : 0;
+        }
+        
+        (dst->*m_setter)(newShadowData, false);
     }
 
 private:
@@ -341,6 +368,10 @@ public:
     {
         Color fromColor = (a->*m_getter)();
         Color toColor = (b->*m_getter)();
+
+        if (!fromColor.isValid() && !toColor.isValid())
+            return true;
+
         if (!fromColor.isValid())
             fromColor = a->color();
         if (!toColor.isValid())
@@ -353,6 +384,10 @@ public:
     {
         Color fromColor = (a->*m_getter)();
         Color toColor = (b->*m_getter)();
+
+        if (!fromColor.isValid() && !toColor.isValid())
+            return;
+
         if (!fromColor.isValid())
             fromColor = a->color();
         if (!toColor.isValid())
@@ -363,6 +398,125 @@ public:
 private:
     const Color& (RenderStyle::*m_getter)() const;
     void (RenderStyle::*m_setter)(const Color&);
+};
+
+// Wrapper base class for an animatable property in a FillLayer
+class FillLayerPropertyWrapperBase {
+public:
+    FillLayerPropertyWrapperBase()
+    {
+    }
+
+    virtual ~FillLayerPropertyWrapperBase() { }
+    
+    virtual bool equals(const FillLayer* a, const FillLayer* b) const = 0;
+    virtual void blend(const AnimationBase* anim, FillLayer* dst, const FillLayer* a, const FillLayer* b, double progress) const = 0;
+};
+
+template <typename T>
+class FillLayerPropertyWrapperGetter : public FillLayerPropertyWrapperBase, public Noncopyable {
+public:
+    FillLayerPropertyWrapperGetter(T (FillLayer::*getter)() const)
+        : m_getter(getter)
+    {
+    }
+
+    virtual bool equals(const FillLayer* a, const FillLayer* b) const
+    {
+       // If the style pointers are the same, don't bother doing the test.
+       // If either is null, return false. If both are null, return true.
+       if ((!a && !b) || a == b)
+           return true;
+       if (!a || !b)
+            return false;
+        return (a->*m_getter)() == (b->*m_getter)();
+    }
+
+protected:
+    T (FillLayer::*m_getter)() const;
+};
+
+template <typename T>
+class FillLayerPropertyWrapper : public FillLayerPropertyWrapperGetter<T> {
+public:
+    FillLayerPropertyWrapper(T (FillLayer::*getter)() const, void (FillLayer::*setter)(T))
+        : FillLayerPropertyWrapperGetter<T>(getter)
+        , m_setter(setter)
+    {
+    }
+    
+    virtual void blend(const AnimationBase* anim, FillLayer* dst, const FillLayer* a, const FillLayer* b, double progress) const
+    {
+        (dst->*m_setter)(blendFunc(anim, (a->*FillLayerPropertyWrapperGetter<T>::m_getter)(), (b->*FillLayerPropertyWrapperGetter<T>::m_getter)(), progress));
+    }
+
+protected:
+    void (FillLayer::*m_setter)(T);
+};
+
+
+class FillLayersPropertyWrapper : public PropertyWrapperBase {
+public:
+    typedef const FillLayer* (RenderStyle::*LayersGetter)() const;
+    typedef FillLayer* (RenderStyle::*LayersAccessor)();
+    
+    FillLayersPropertyWrapper(int prop, LayersGetter getter, LayersAccessor accessor)
+        : PropertyWrapperBase(prop)
+        , m_layersGetter(getter)
+        , m_layersAccessor(accessor)
+    {
+        switch (prop) {
+            case CSSPropertyBackgroundPositionX:
+            case CSSPropertyWebkitMaskPositionX:
+                m_fillLayerPropertyWrapper = new FillLayerPropertyWrapper<Length>(&FillLayer::xPosition, &FillLayer::setXPosition);
+                break;
+            case CSSPropertyBackgroundPositionY:
+            case CSSPropertyWebkitMaskPositionY:
+                m_fillLayerPropertyWrapper = new FillLayerPropertyWrapper<Length>(&FillLayer::yPosition, &FillLayer::setYPosition);
+                break;
+            case CSSPropertyBackgroundSize:
+            case CSSPropertyWebkitBackgroundSize:
+            case CSSPropertyWebkitMaskSize:
+                m_fillLayerPropertyWrapper = new FillLayerPropertyWrapper<LengthSize>(&FillLayer::sizeLength, &FillLayer::setSizeLength);
+                break;
+        }
+    }
+
+    virtual bool equals(const RenderStyle* a, const RenderStyle* b) const
+    {
+        const FillLayer* fromLayer = (a->*m_layersGetter)();
+        const FillLayer* toLayer = (b->*m_layersGetter)();
+
+        while (fromLayer && toLayer) {
+            if (!m_fillLayerPropertyWrapper->equals(fromLayer, toLayer))
+                return false;
+            
+            fromLayer = fromLayer->next();
+            toLayer = toLayer->next();
+        }
+
+        return true;
+    }
+
+    virtual void blend(const AnimationBase* anim, RenderStyle* dst, const RenderStyle* a, const RenderStyle* b, double progress) const
+    {
+        const FillLayer* aLayer = (a->*m_layersGetter)();
+        const FillLayer* bLayer = (b->*m_layersGetter)();
+        FillLayer* dstLayer = (dst->*m_layersAccessor)();
+
+        while (aLayer && bLayer && dstLayer) {
+            m_fillLayerPropertyWrapper->blend(anim, dstLayer, aLayer, bLayer, progress);
+            aLayer = aLayer->next();
+            bLayer = bLayer->next();
+            dstLayer = dstLayer->next();
+        }
+    }
+
+private:
+    FillLayerPropertyWrapperBase* m_fillLayerPropertyWrapper;
+    
+    LayersGetter m_layersGetter;
+    LayersAccessor m_layersAccessor;
 };
 
 class ShorthandPropertyWrapper : public PropertyWrapperBase {
@@ -442,13 +596,15 @@ static void ensurePropertyMap()
         gPropertyWrappers->append(new PropertyWrapper<const Color&>(CSSPropertyColor, &RenderStyle::color, &RenderStyle::setColor));
 
         gPropertyWrappers->append(new PropertyWrapper<const Color&>(CSSPropertyBackgroundColor, &RenderStyle::backgroundColor, &RenderStyle::setBackgroundColor));
-        gPropertyWrappers->append(new PropertyWrapper<Length>(CSSPropertyBackgroundPositionX, &RenderStyle::backgroundXPosition, &RenderStyle::setBackgroundXPosition));
-        gPropertyWrappers->append(new PropertyWrapper<Length>(CSSPropertyBackgroundPositionY, &RenderStyle::backgroundYPosition, &RenderStyle::setBackgroundYPosition));
-        gPropertyWrappers->append(new PropertyWrapper<LengthSize>(CSSPropertyWebkitBackgroundSize, &RenderStyle::backgroundSize, &RenderStyle::setBackgroundSize));
 
-        gPropertyWrappers->append(new PropertyWrapper<Length>(CSSPropertyWebkitMaskPositionX, &RenderStyle::maskXPosition, &RenderStyle::setMaskXPosition));
-        gPropertyWrappers->append(new PropertyWrapper<Length>(CSSPropertyWebkitMaskPositionY, &RenderStyle::maskYPosition, &RenderStyle::setMaskYPosition));
-        gPropertyWrappers->append(new PropertyWrapper<LengthSize>(CSSPropertyWebkitMaskSize, &RenderStyle::maskSize, &RenderStyle::setMaskSize));
+        gPropertyWrappers->append(new FillLayersPropertyWrapper(CSSPropertyBackgroundPositionX, &RenderStyle::backgroundLayers, &RenderStyle::accessBackgroundLayers));
+        gPropertyWrappers->append(new FillLayersPropertyWrapper(CSSPropertyBackgroundPositionY, &RenderStyle::backgroundLayers, &RenderStyle::accessBackgroundLayers));
+        gPropertyWrappers->append(new FillLayersPropertyWrapper(CSSPropertyBackgroundSize, &RenderStyle::backgroundLayers, &RenderStyle::accessBackgroundLayers));
+        gPropertyWrappers->append(new FillLayersPropertyWrapper(CSSPropertyWebkitBackgroundSize, &RenderStyle::backgroundLayers, &RenderStyle::accessBackgroundLayers));
+
+        gPropertyWrappers->append(new FillLayersPropertyWrapper(CSSPropertyWebkitMaskPositionX, &RenderStyle::maskLayers, &RenderStyle::accessMaskLayers));
+        gPropertyWrappers->append(new FillLayersPropertyWrapper(CSSPropertyWebkitMaskPositionY, &RenderStyle::maskLayers, &RenderStyle::accessMaskLayers));
+        gPropertyWrappers->append(new FillLayersPropertyWrapper(CSSPropertyWebkitMaskSize, &RenderStyle::maskLayers, &RenderStyle::accessMaskLayers));
 
         gPropertyWrappers->append(new PropertyWrapper<int>(CSSPropertyFontSize, &RenderStyle::fontSize, &RenderStyle::setBlendedFontSize));
         gPropertyWrappers->append(new PropertyWrapper<unsigned short>(CSSPropertyWebkitColumnRuleWidth, &RenderStyle::columnRuleWidth, &RenderStyle::setColumnRuleWidth));
@@ -496,7 +652,7 @@ static void ensurePropertyMap()
         gPropertyWrappers->append(new PropertyWrapperMaybeInvalidColor(CSSPropertyOutlineColor, &RenderStyle::outlineColor, &RenderStyle::setOutlineColor));
 
         // These are for shadows
-        gPropertyWrappers->append(new PropertyWrapperShadow(CSSPropertyBoxShadow, &RenderStyle::boxShadow, &RenderStyle::setBoxShadow));
+        gPropertyWrappers->append(new PropertyWrapperShadow(CSSPropertyWebkitBoxShadow, &RenderStyle::boxShadow, &RenderStyle::setBoxShadow));
         gPropertyWrappers->append(new PropertyWrapperShadow(CSSPropertyTextShadow, &RenderStyle::textShadow, &RenderStyle::setTextShadow));
 
 #if ENABLE(SVG)
@@ -685,7 +841,7 @@ void AnimationBase::setNeedsStyleRecalc(Node* node)
 {
     ASSERT(!node || (node->document() && !node->document()->inPageCache()));
     if (node)
-        node->setNeedsStyleRecalc(AnimationStyleChange);
+        node->setNeedsStyleRecalc(SyntheticStyleChange);
 }
 
 double AnimationBase::duration() const
@@ -714,7 +870,7 @@ void AnimationBase::updateStateMachine(AnimStateInput input, double param)
         m_pauseTime = -1;
         m_requestedStartTime = 0;
         m_nextIterationDuration = -1;
-        endAnimation(false);
+        endAnimation();
         return;
     }
 
@@ -726,7 +882,7 @@ void AnimationBase::updateStateMachine(AnimStateInput input, double param)
         m_pauseTime = -1;
         m_requestedStartTime = 0;
         m_nextIterationDuration = -1;
-        endAnimation(false);
+        endAnimation();
 
         if (!paused())
             updateStateMachine(AnimationStateInputStartAnimation, -1);
@@ -737,7 +893,7 @@ void AnimationBase::updateStateMachine(AnimStateInput input, double param)
         if (m_animState == AnimationStateStartWaitStyleAvailable)
             m_compAnim->animationController()->removeFromStyleAvailableWaitList(this);
         m_animState = AnimationStateDone;
-        endAnimation(true);
+        endAnimation();
         return;
     }
 
@@ -745,7 +901,7 @@ void AnimationBase::updateStateMachine(AnimStateInput input, double param)
         if (m_animState == AnimationStateStartWaitResponse) {
             // If we are in AnimationStateStartWaitResponse, the animation will get canceled before 
             // we get a response, so move to the next state.
-            endAnimation(false);
+            endAnimation();
             updateStateMachine(AnimationStateInputStartTimeSet, beginAnimationUpdateTime());
         }
         return;
@@ -754,7 +910,7 @@ void AnimationBase::updateStateMachine(AnimStateInput input, double param)
     if (input == AnimationStateInputResumeOverride) {
         if (m_animState == AnimationStateLooping || m_animState == AnimationStateEnding) {
             // Start the animation
-            startAnimation(m_startTime);
+            startAnimation(beginAnimationUpdateTime() - m_startTime);
         }
         return;
     }
@@ -807,7 +963,12 @@ void AnimationBase::updateStateMachine(AnimStateInput input, double param)
                 updateStateMachine(AnimationStateInputStartTimeSet, beginAnimationUpdateTime());
             }
             else {
-                bool started = startAnimation(0);
+                double timeOffset = 0;
+                // If the value for 'animation-delay' is negative then the animation appears to have started in the past.
+                if (m_animation->delay() < 0)
+                    timeOffset = -m_animation->delay();
+                bool started = startAnimation(timeOffset);
+
                 m_compAnim->animationController()->addToStartTimeResponseWaitList(this, started);
                 m_fallbackAnimating = !started;
             }
@@ -818,8 +979,12 @@ void AnimationBase::updateStateMachine(AnimStateInput input, double param)
             if (input == AnimationStateInputStartTimeSet) {
                 ASSERT(param >= 0);
                 // We have a start time, set it, unless the startTime is already set
-                if (m_startTime <= 0)
+                if (m_startTime <= 0) {
                     m_startTime = param;
+                    // If the value for 'animation-delay' is negative then the animation appears to have started in the past.
+                    if (m_animation->delay() < 0)
+                        m_startTime += m_animation->delay();
+                }
 
                 // Decide whether to go into looping or ending state
                 goIntoEndingOrLoopingState();
@@ -831,7 +996,7 @@ void AnimationBase::updateStateMachine(AnimStateInput input, double param)
                 // We are pausing while waiting for a start response. Cancel the animation and wait. When 
                 // we unpause, we will act as though the start timer just fired
                 m_pauseTime = -1;
-                endAnimation(false);
+                pauseAnimation(beginAnimationUpdateTime() - m_startTime);
                 m_animState = AnimationStatePausedWaitResponse;
             }
             break;
@@ -848,7 +1013,7 @@ void AnimationBase::updateStateMachine(AnimStateInput input, double param)
             } else {
                 // We are pausing while running. Cancel the animation and wait
                 m_pauseTime = beginAnimationUpdateTime();
-                endAnimation(false);
+                pauseAnimation(beginAnimationUpdateTime() - m_startTime);
                 m_animState = AnimationStatePausedRun;
             }
             break;
@@ -871,7 +1036,7 @@ void AnimationBase::updateStateMachine(AnimStateInput input, double param)
             } else {
                 // We are pausing while running. Cancel the animation and wait
                 m_pauseTime = beginAnimationUpdateTime();
-                endAnimation(false);
+                pauseAnimation(beginAnimationUpdateTime() - m_startTime);
                 m_animState = AnimationStatePausedRun;
             }
             // |this| may be deleted here
@@ -923,7 +1088,7 @@ void AnimationBase::updateStateMachine(AnimStateInput input, double param)
                 updateStateMachine(AnimationStateInputStartTimeSet, beginAnimationUpdateTime());
                 m_fallbackAnimating = true;
             } else {
-                bool started = startAnimation(m_startTime);
+                bool started = startAnimation(beginAnimationUpdateTime() - m_startTime);
                 m_compAnim->animationController()->addToStartTimeResponseWaitList(this, started);
                 m_fallbackAnimating = !started;
             }

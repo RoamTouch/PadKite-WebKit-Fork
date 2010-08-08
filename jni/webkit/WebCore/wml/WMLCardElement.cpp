@@ -136,7 +136,7 @@ void WMLCardElement::handleIntrinsicEventIfNeeded()
     // Calculate the entry method of current card 
     WMLIntrinsicEventType eventType = WMLIntrinsicEventUnknown;
 
-    switch (loader->loadType()) {
+    switch (loader->policyChecker()->loadType()) {
     case FrameLoadTypeReload:
         break;
     case FrameLoadTypeBack:
@@ -339,8 +339,6 @@ WMLCardElement* WMLCardElement::determineActiveCard(Document* doc)
     // Update the document title
     doc->setTitle(activeCard->title());
 
-    // Set the active activeCard in the WMLPageState object
-    pageState->setActiveCard(activeCard);
     return activeCard;
 }
 

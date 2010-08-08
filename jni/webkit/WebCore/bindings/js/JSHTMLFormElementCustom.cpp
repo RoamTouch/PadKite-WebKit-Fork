@@ -30,7 +30,8 @@
 #include "HTMLCollection.h"
 #include "HTMLFormElement.h"
 #include "JSDOMWindowCustom.h"
-#include "JSNamedNodesCollection.h"
+#include "JSNodeList.h"
+#include "StaticNodeList.h"
 
 using namespace JSC;
 
@@ -47,15 +48,17 @@ JSValue JSHTMLFormElement::nameGetter(ExecState* exec, const Identifier& propert
 {
     JSHTMLElement* jsForm = static_cast<JSHTMLFormElement*>(asObject(slot.slotBase()));
     HTMLFormElement* form = static_cast<HTMLFormElement*>(jsForm->impl());
-    
+
     Vector<RefPtr<Node> > namedItems;
     form->getNamedElements(propertyName, namedItems);
     
+    if (namedItems.isEmpty())
+        return jsUndefined();
     if (namedItems.size() == 1)
         return toJS(exec, namedItems[0].get());
-    if (namedItems.size() > 1) 
-        return new (exec) JSNamedNodesCollection(exec, jsForm->globalObject(), namedItems);
-    return jsUndefined();
+
+    // FIXME: HTML5 specifies that this should be a RadioNodeList.
+    return toJS(exec, jsForm->globalObject(), StaticNodeList::adopt(namedItems).get());
 }
 
 JSValue JSHTMLFormElement::submit(ExecState* exec, const ArgList&)
@@ -63,7 +66,7 @@ JSValue JSHTMLFormElement::submit(ExecState* exec, const ArgList&)
     Frame* activeFrame = asJSDOMWindow(exec->dynamicGlobalObject())->impl()->frame();
     if (!activeFrame)
         return jsUndefined();
-    static_cast<HTMLFormElement*>(impl())->submit(0, false, !activeFrame->script()->anyPageIsProcessingUserGesture());
+    static_cast<HTMLFormElement*>(impl())->submit(activeFrame);
     return jsUndefined();
 }
 

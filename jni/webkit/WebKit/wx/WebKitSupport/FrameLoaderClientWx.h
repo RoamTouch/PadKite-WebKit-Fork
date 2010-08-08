@@ -31,8 +31,11 @@
 #include "FrameLoaderClient.h"
 #include "FrameLoader.h"
 #include "KURL.h"
+#include "PluginView.h"
 #include "ResourceResponse.h"
+#include "HTMLPlugInElement.h"
 
+class wxWebFrame;
 class wxWebView;
 
 namespace WebCore {
@@ -51,9 +54,8 @@ namespace WebCore {
     public:
         FrameLoaderClientWx();
         ~FrameLoaderClientWx();
-        void setFrame(Frame *frame);
+        void setFrame(wxWebFrame *frame);
         void setWebView(wxWebView *webview);
-        virtual void detachFrameLoader();
 
         virtual bool hasWebView() const; // mainly for assertions
 
@@ -94,6 +96,9 @@ namespace WebCore {
         virtual void dispatchDidCancelClientRedirect();
         virtual void dispatchWillPerformClientRedirect(const KURL&, double interval, double fireDate);
         virtual void dispatchDidChangeLocationWithinPage();
+        virtual void dispatchDidPushStateWithinPage();
+        virtual void dispatchDidReplaceStateWithinPage();
+        virtual void dispatchDidPopStateWithinPage();
         virtual void dispatchWillClose();
         virtual void dispatchDidReceiveIcon();
         virtual void dispatchDidStartProvisionalLoad();
@@ -147,9 +152,15 @@ namespace WebCore {
         virtual void updateGlobalHistory();
         virtual void updateGlobalHistoryRedirectLinks();
         virtual bool shouldGoToHistoryItem(HistoryItem*) const;
+        virtual void dispatchDidAddBackForwardItem(HistoryItem*) const;
+        virtual void dispatchDidRemoveBackForwardItem(HistoryItem*) const;
+        virtual void dispatchDidChangeBackForwardIndex() const;
         virtual void saveScrollPositionAndViewStateToItem(HistoryItem*);
         virtual bool canCachePage() const;
         
+        virtual void didDisplayInsecureContent();
+        virtual void didRunInsecureContent(SecurityOrigin*);
+
         virtual void setMainDocumentError(DocumentLoader*, const ResourceError&);
         virtual void committedLoad(DocumentLoader*, const char*, int);
         virtual ResourceError cancelledError(const ResourceRequest&);
@@ -199,16 +210,21 @@ namespace WebCore {
         virtual ObjectContentType objectContentType(const KURL& url, const String& mimeType);
         virtual String overrideMediaType() const;
 
-        virtual void windowObjectCleared();
+        virtual void dispatchDidClearWindowObjectInWorld(DOMWrapperWorld*);
         virtual void documentElementAvailable();
         
         virtual void didPerformFirstNavigation() const;
         
         virtual void registerForIconNotification(bool listen = true);
+        
+        virtual bool shouldUsePluginDocument(const String &mimeType) const;
 
     private:
-        Frame *m_frame;
+        wxWebFrame *m_webFrame;
+        Frame* m_frame;
         wxWebView *m_webView;
+        PluginView* m_pluginView;
+        bool m_hasSentResponseToPlugin;
         ResourceResponse m_response;
         bool m_firstData;
     };

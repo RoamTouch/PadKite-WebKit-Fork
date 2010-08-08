@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -28,14 +28,14 @@
 
 #include "config.h"
 
-#include <JNIHelp.h>
 #include "Coordinates.h"
 #include "GeolocationServiceMock.h"
 #include "Geoposition.h"
 #include "JavaSharedClient.h"
-#include "jni_utility.h"
 #include "PositionError.h"
 #include "WebCoreJni.h"
+#include <JNIHelp.h>
+#include <JNIUtility.h>
 #include <wtf/CurrentTime.h>
 
 using namespace WebCore;

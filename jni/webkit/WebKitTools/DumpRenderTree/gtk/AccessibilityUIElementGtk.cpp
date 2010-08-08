@@ -67,9 +67,9 @@ void AccessibilityUIElement::getChildren(Vector<AccessibilityUIElement>& childre
     }
 }
 
-void AccessibilityUIElement::getChildrenWithRange(Vector<AccessibilityUIElement>& elementVector, unsigned location, unsigned length)
+void AccessibilityUIElement::getChildrenWithRange(Vector<AccessibilityUIElement>& elementVector, unsigned start, unsigned end)
 {
-    for (unsigned i = location; i < length; i++) {
+    for (unsigned i = start; i < end; i++) {
         AtkObject* child = atk_object_ref_accessible_child(ATK_OBJECT(m_element), i);
         elementVector.append(AccessibilityUIElement(child));
     }
@@ -94,11 +94,17 @@ AccessibilityUIElement AccessibilityUIElement::elementAtPoint(int x, int y)
 AccessibilityUIElement AccessibilityUIElement::getChildAtIndex(unsigned index)
 {
     Vector<AccessibilityUIElement> children;
-    getChildrenWithRange(children, index, 1);
+    getChildrenWithRange(children, index, index + 1);
 
     if (children.size() == 1)
         return children.at(0);
 
+    return 0;
+}
+
+unsigned AccessibilityUIElement::indexOfChild(AccessibilityUIElement* element)
+{ 
+    // FIXME: implement
     return 0;
 }
 
@@ -156,6 +162,16 @@ JSStringRef AccessibilityUIElement::role()
     return JSStringCreateWithUTF8CString(atk_role_get_name(role));
 }
 
+JSStringRef AccessibilityUIElement::subrole()
+{
+    return 0;
+}
+
+JSStringRef AccessibilityUIElement::roleDescription()
+{
+    return 0;
+}
+
 JSStringRef AccessibilityUIElement::title()
 {
     const gchar* name = atk_object_get_name(ATK_OBJECT(m_element));
@@ -174,6 +190,12 @@ JSStringRef AccessibilityUIElement::description()
         return JSStringCreateWithCharacters(0, 0);
 
     return JSStringCreateWithUTF8CString(description);
+}
+
+JSStringRef AccessibilityUIElement::stringValue()
+{
+    // FIXME: implement
+    return JSStringCreateWithCharacters(0, 0);
 }
 
 JSStringRef AccessibilityUIElement::language()
@@ -228,8 +250,12 @@ double AccessibilityUIElement::clickPointY()
     return 0.f;
 }
 
+JSStringRef AccessibilityUIElement::orientation() const
+{
+    return 0;
+}
 
-double AccessibilityUIElement::intValue()
+double AccessibilityUIElement::intValue() const
 {
     GValue value = { 0, { { 0 } } };
 
@@ -311,6 +337,39 @@ bool AccessibilityUIElement::isRequired() const
     return false;
 }
 
+bool AccessibilityUIElement::isSelected() const
+{
+    // FIXME: implement
+    return false;
+}
+
+int AccessibilityUIElement::hierarchicalLevel() const
+{
+    // FIXME: implement
+    return 0;
+}
+
+bool AccessibilityUIElement::ariaIsGrabbed() const
+{
+    return false;
+}
+ 
+JSStringRef AccessibilityUIElement::ariaDropEffects() const
+{   
+    return 0; 
+}
+
+bool AccessibilityUIElement::isExpanded() const
+{
+    // FIXME: implement
+    return false;
+}
+
+bool AccessibilityUIElement::isChecked() const
+{
+    return intValue();
+}
+
 JSStringRef AccessibilityUIElement::attributesOfColumnHeaders()
 {
     // FIXME: implement
@@ -377,6 +436,12 @@ JSStringRef AccessibilityUIElement::boundsForRange(unsigned location, unsigned l
     return JSStringCreateWithCharacters(0, 0);
 }
 
+JSStringRef AccessibilityUIElement::stringForRange(unsigned, unsigned) 
+{
+    // FIXME: implement
+    return JSStringCreateWithCharacters(0, 0);
+} 
+
 AccessibilityUIElement AccessibilityUIElement::cellForColumnAndRow(unsigned column, unsigned row)
 {
     // FIXME: implement
@@ -394,15 +459,26 @@ void AccessibilityUIElement::setSelectedTextRange(unsigned location, unsigned le
     // FIXME: implement
 }
 
-JSStringRef AccessibilityUIElement::attributeValue(JSStringRef attribute)
+JSStringRef AccessibilityUIElement::stringAttributeValue(JSStringRef attribute)
 {
     // FIXME: implement
     return JSStringCreateWithCharacters(0, 0);
 }
 
+bool AccessibilityUIElement::boolAttributeValue(JSStringRef attribute)
+{
+    // FIXME: implement
+    return false;
+}
+
 bool AccessibilityUIElement::isAttributeSettable(JSStringRef attribute)
 {
     // FIXME: implement
+    return false;
+}
+
+bool AccessibilityUIElement::isAttributeSupported(JSStringRef attribute)
+{
     return false;
 }
 
@@ -412,6 +488,128 @@ void AccessibilityUIElement::increment()
 }
 
 void AccessibilityUIElement::decrement()
+{
+    // FIXME: implement
+}
+
+void AccessibilityUIElement::showMenu()
+{
+    // FIXME: implement
+}
+
+AccessibilityUIElement AccessibilityUIElement::disclosedRowAtIndex(unsigned index)
+{
+    return 0;
+}
+
+AccessibilityUIElement AccessibilityUIElement::ariaOwnsElementAtIndex(unsigned index)
+{
+    return 0;
+}
+
+AccessibilityUIElement AccessibilityUIElement::ariaFlowToElementAtIndex(unsigned index)
+{
+    return 0;
+}
+
+AccessibilityUIElement AccessibilityUIElement::selectedRowAtIndex(unsigned index)
+{
+    return 0;
+}
+
+AccessibilityUIElement AccessibilityUIElement::disclosedByRow()
+{
+    return 0;
+}
+
+JSStringRef AccessibilityUIElement::accessibilityValue() const
+{
+    // FIXME: implement
+    return JSStringCreateWithCharacters(0, 0);
+}
+
+JSStringRef AccessibilityUIElement::documentEncoding()
+{
+    AtkRole role = atk_object_get_role(ATK_OBJECT(m_element));
+    if (role != ATK_ROLE_DOCUMENT_FRAME)
+        return JSStringCreateWithCharacters(0, 0);
+
+    return JSStringCreateWithUTF8CString(atk_document_get_attribute_value(ATK_DOCUMENT(m_element), "Encoding"));
+}
+
+JSStringRef AccessibilityUIElement::documentURI()
+{
+    AtkRole role = atk_object_get_role(ATK_OBJECT(m_element));
+    if (role != ATK_ROLE_DOCUMENT_FRAME)
+        return JSStringCreateWithCharacters(0, 0);
+
+    return JSStringCreateWithUTF8CString(atk_document_get_attribute_value(ATK_DOCUMENT(m_element), "URI"));
+}
+
+JSStringRef AccessibilityUIElement::url()
+{
+    // FIXME: implement
+    return JSStringCreateWithCharacters(0, 0);
+}
+
+bool AccessibilityUIElement::addNotificationListener(JSObjectRef functionCallback)
+{
+    // FIXME: implement
+    return false;
+}
+
+bool AccessibilityUIElement::isSelectable() const
+{
+    // FIXME: implement
+    return false;
+}
+
+bool AccessibilityUIElement::isMultiSelectable() const
+{
+    // FIXME: implement
+    return false;
+}
+
+bool AccessibilityUIElement::isVisible() const
+{
+    // FIXME: implement
+    return false;
+}
+
+bool AccessibilityUIElement::isOffScreen() const
+{
+    // FIXME: implement
+    return false;
+}
+
+bool AccessibilityUIElement::isCollapsed() const
+{
+    // FIXME: implement
+    return false;
+}
+
+bool AccessibilityUIElement::hasPopup() const
+{
+    // FIXME: implement
+    return false;
+}
+
+void AccessibilityUIElement::takeFocus()
+{
+    // FIXME: implement
+}
+
+void AccessibilityUIElement::takeSelection()
+{
+    // FIXME: implement
+}
+
+void AccessibilityUIElement::addSelection()
+{
+    // FIXME: implement
+}
+
+void AccessibilityUIElement::removeSelection()
 {
     // FIXME: implement
 }

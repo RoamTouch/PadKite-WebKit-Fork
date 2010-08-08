@@ -54,7 +54,7 @@ public:
     RenderLayer* owningLayer() const { return m_owningLayer; }
 
     enum UpdateDepth { CompositingChildren, AllDescendants };
-    void updateAfterLayout(UpdateDepth);
+    void updateAfterLayout(UpdateDepth, bool isUpdateRoot);
     
     // Returns true if layer configuration changed.
     bool updateGraphicsLayerConfiguration();
@@ -63,21 +63,23 @@ public:
     // Update contents and clipping structure.
     void updateInternalHierarchy(); // make private
     
-    GraphicsLayer* graphicsLayer() const { return m_graphicsLayer; }
+    GraphicsLayer* graphicsLayer() const { return m_graphicsLayer.get(); }
 
     // Layer to clip children
     bool hasClippingLayer() const { return m_clippingLayer != 0; }
-    GraphicsLayer* clippingLayer() const { return m_clippingLayer; }
+    GraphicsLayer* clippingLayer() const { return m_clippingLayer.get(); }
 
     // Layer to get clipped by ancestor
     bool hasAncestorClippingLayer() const { return m_ancestorClippingLayer != 0; }
-    GraphicsLayer* ancestorClippingLayer() const { return m_ancestorClippingLayer; }
+    GraphicsLayer* ancestorClippingLayer() const { return m_ancestorClippingLayer.get(); }
 
     bool hasContentsLayer() const { return m_foregroundLayer != 0; }
-    GraphicsLayer* foregroundLayer() const { return m_foregroundLayer; }
+    GraphicsLayer* foregroundLayer() const { return m_foregroundLayer.get(); }
     
-    GraphicsLayer* parentForSublayers() const { return m_clippingLayer ? m_clippingLayer : m_graphicsLayer; }
-    GraphicsLayer* childForSuperlayers() const { return m_ancestorClippingLayer ? m_ancestorClippingLayer : m_graphicsLayer; }
+    bool hasMaskLayer() const { return m_maskLayer != 0; }
+
+    GraphicsLayer* parentForSublayers() const { return m_clippingLayer ? m_clippingLayer.get() : m_graphicsLayer.get(); }
+    GraphicsLayer* childForSuperlayers() const { return m_ancestorClippingLayer ? m_ancestorClippingLayer.get() : m_graphicsLayer.get(); }
 
     // RenderLayers with backing normally short-circuit paintLayer() because
     // their content is rendered via callbacks from GraphicsLayer. However, the document
@@ -95,10 +97,10 @@ public:
     void rendererContentChanged();
 
     // Interface to start, finish, suspend and resume animations and transitions
-    bool startAnimation(double beginTime, const Animation* anim, const KeyframeList& keyframes);
-    bool startTransition(double beginTime, int property, const RenderStyle* fromStyle, const RenderStyle* toStyle);
+    bool startAnimation(double timeOffset, const Animation* anim, const KeyframeList& keyframes);
+    bool startTransition(double timeOffset, int property, const RenderStyle* fromStyle, const RenderStyle* toStyle);
     void animationFinished(const String& name);
-    void animationPaused(const String& name);
+    void animationPaused(double timeOffset, const String& name);
     void transitionFinished(int property);
 
     void suspendAnimations(double time = 0);
@@ -106,6 +108,7 @@ public:
 
     IntRect compositedBounds() const;
     void setCompositedBounds(const IntRect&);
+    void updateCompositedBounds();
 
     FloatPoint graphicsLayerToContentsCoordinates(const GraphicsLayer*, const FloatPoint&);
     FloatPoint contentsToGraphicsLayerCoordinates(const GraphicsLayer*, const FloatPoint&);
@@ -115,6 +118,9 @@ public:
     virtual void notifySyncRequired(const GraphicsLayer*);
 
     virtual void paintContents(const GraphicsLayer*, GraphicsContext&, GraphicsLayerPaintingPhase, const IntRect& clip);
+
+    virtual bool showDebugBorders() const;
+    virtual bool showRepaintCounter() const;
 
     IntRect contentsBox() const;
     
@@ -127,25 +133,28 @@ private:
 
     bool updateClippingLayers(bool needsAncestorClip, bool needsDescendantClip);
     bool updateForegroundLayer(bool needsForegroundLayer);
+    bool updateMaskLayer(bool needsMaskLayer);
 
+    GraphicsLayerPaintingPhase paintingPhaseForPrimaryLayer() const;
+    
     IntSize contentOffsetInCompostingLayer() const;
     // Result is transform origin in pixels.
     FloatPoint3D computeTransformOrigin(const IntRect& borderBox) const;
     // Result is perspective origin in pixels.
     FloatPoint computePerspectiveOrigin(const IntRect& borderBox) const;
 
-    void updateLayerOpacity();
-    void updateLayerTransform();
+    void updateLayerOpacity(const RenderStyle*);
+    void updateLayerTransform(const RenderStyle*);
 
     // Return the opacity value that this layer should use for compositing.
     float compositingOpacity(float rendererOpacity) const;
     
-    // Returns true if this RenderLayer only has content that can be rendered directly
-    // by the compositing layer, without drawing (e.g. solid background color).
+    // Returns true if this compositing layer has no visible content.
     bool isSimpleContainerCompositingLayer() const;
-    // Returns true if we can optimize the RenderLayer to draw the replaced content
-    // directly into a compositing buffer
-    bool canUseDirectCompositing() const;
+    // Returns true if this layer has content that needs to be rendered by painting into the backing store.
+    bool containsPaintedContent() const;
+    // Returns true if the RenderLayer just contains an image that we can composite directly.
+    bool isDirectlyCompositedImage() const;
     void updateImageContents();
 
     bool rendererHasBackground() const;
@@ -154,7 +163,7 @@ private:
     bool hasNonCompositingContent() const;
     
     void paintIntoLayer(RenderLayer* rootLayer, GraphicsContext*, const IntRect& paintDirtyRect,
-                    PaintRestriction paintRestriction, GraphicsLayerPaintingPhase, RenderObject* paintingRoot);
+                    PaintBehavior paintBehavior, GraphicsLayerPaintingPhase, RenderObject* paintingRoot);
 
     static int graphicsLayerToCSSProperty(AnimatedPropertyID);
     static AnimatedPropertyID cssToGraphicsLayerProperty(int);
@@ -162,14 +171,15 @@ private:
 private:
     RenderLayer* m_owningLayer;
 
-    GraphicsLayer* m_ancestorClippingLayer; // only used if we are clipped by an ancestor which is not a stacking context
-    GraphicsLayer* m_graphicsLayer;
-    GraphicsLayer* m_foregroundLayer;       // only used in cases where we need to draw the foreground separately
-    GraphicsLayer* m_clippingLayer;         // only used if we have clipping on a stacking context, with compositing children
+    OwnPtr<GraphicsLayer> m_ancestorClippingLayer; // only used if we are clipped by an ancestor which is not a stacking context
+    OwnPtr<GraphicsLayer> m_graphicsLayer;
+    OwnPtr<GraphicsLayer> m_foregroundLayer;       // only used in cases where we need to draw the foreground separately
+    OwnPtr<GraphicsLayer> m_clippingLayer;         // only used if we have clipping on a stacking context, with compositing children
+    OwnPtr<GraphicsLayer> m_maskLayer;             // only used if we have a mask
 
     IntRect m_compositedBounds;
 
-    bool m_hasDirectlyCompositedContent;
+    bool m_artificiallyInflatedBounds;      // bounds had to be made non-zero to make transform-origin work
 };
 
 } // namespace WebCore

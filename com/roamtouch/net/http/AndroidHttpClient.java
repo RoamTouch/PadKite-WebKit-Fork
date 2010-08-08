@@ -16,6 +16,7 @@
 
 package android.net.http;
 
+import com.android.internal.http.HttpDateTime;
 import org.apache.http.Header;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpEntityEnclosingRequest;
@@ -36,7 +37,6 @@ import org.apache.http.conn.ClientConnectionManager;
 import org.apache.http.conn.scheme.PlainSocketFactory;
 import org.apache.http.conn.scheme.Scheme;
 import org.apache.http.conn.scheme.SchemeRegistry;
-import org.apache.http.conn.ssl.SSLSocketFactory;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.impl.client.RequestWrapper;
 import org.apache.http.impl.conn.tsccm.ThreadSafeClientConnManager;
@@ -47,8 +47,6 @@ import org.apache.http.params.HttpProtocolParams;
 import org.apache.http.protocol.BasicHttpProcessor;
 import org.apache.http.protocol.HttpContext;
 import org.apache.http.protocol.BasicHttpContext;
-import org.apache.harmony.xnet.provider.jsse.SSLClientSessionCache;
-import org.apache.harmony.xnet.provider.jsse.SSLContextImpl;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -57,13 +55,13 @@ import java.io.OutputStream;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 import java.net.URI;
-import java.security.KeyManagementException;
 
-import android.util.Log;
+import android.content.Context;
 import android.content.ContentResolver;
-import android.provider.Settings;
-import android.text.TextUtils;
-import android.os.SystemProperties;
+import android.net.SSLCertificateSocketFactory;
+import android.net.SSLSessionCache;
+import android.os.Looper;
+import android.util.Log;
 
 /**
  * Subclass of the Apache {@link DefaultHttpClient} that is configured with
@@ -75,26 +73,21 @@ import android.os.SystemProperties;
  * To retain cookies, simply add a cookie store to the HttpContext:</p>
  *
  * <pre>context.setAttribute(ClientContext.COOKIE_STORE, cookieStore);</pre>
- * 
- * {@hide}
  */
 public final class AndroidHttpClient implements HttpClient {
-        
+
     // Gzip of data shorter than this probably won't be worthwhile
     public static long DEFAULT_SYNC_MIN_GZIP_BYTES = 256;
 
     private static final String TAG = "AndroidHttpClient";
 
 
-    /** Set if HTTP requests are blocked from being executed on this thread */
-    private static final ThreadLocal<Boolean> sThreadBlocked =
-            new ThreadLocal<Boolean>();
-
     /** Interceptor throws an exception if the executing thread is blocked */
     private static final HttpRequestInterceptor sThreadCheckInterceptor =
             new HttpRequestInterceptor() {
         public void process(HttpRequest request, HttpContext context) {
-            if (sThreadBlocked.get() != null && sThreadBlocked.get()) {
+            // Prevent the HttpRequest from being sent on the main thread
+            if (Looper.myLooper() != null && Looper.myLooper() == Looper.getMainLooper() ) {
                 throw new RuntimeException("This thread forbids HTTP requests");
             }
         }
@@ -103,12 +96,11 @@ public final class AndroidHttpClient implements HttpClient {
     /**
      * Create a new HttpClient with reasonable defaults (which you can update).
      *
-     * @param userAgent to report in your HTTP requests.
-     * @param sessionCache persistent session cache
+     * @param userAgent to report in your HTTP requests
+     * @param context to use for caching SSL sessions (may be null for no caching)
      * @return AndroidHttpClient for you to use for all your requests.
      */
-    public static AndroidHttpClient newInstance(String userAgent,
-            SSLClientSessionCache sessionCache) {
+    public static AndroidHttpClient newInstance(String userAgent, Context context) {
         HttpParams params = new BasicHttpParams();
 
         // Turn off stale checking.  Our connections break all the time anyway,
@@ -124,13 +116,16 @@ public final class AndroidHttpClient implements HttpClient {
         // often wants to re-POST after a redirect, which we must do ourselves.
         HttpClientParams.setRedirecting(params, false);
 
+        // Use a session cache for SSL sockets
+        SSLSessionCache sessionCache = context == null ? null : new SSLSessionCache(context);
+
         // Set the specified user agent and register standard protocols.
         HttpProtocolParams.setUserAgent(params, userAgent);
         SchemeRegistry schemeRegistry = new SchemeRegistry();
         schemeRegistry.register(new Scheme("http",
                 PlainSocketFactory.getSocketFactory(), 80));
         schemeRegistry.register(new Scheme("https",
-                socketFactoryWithCache(sessionCache), 443));
+                SSLCertificateSocketFactory.getHttpSocketFactory(30 * 1000, sessionCache), 443));
 
         ClientConnectionManager manager =
                 new ThreadSafeClientConnManager(params, schemeRegistry);
@@ -138,32 +133,6 @@ public final class AndroidHttpClient implements HttpClient {
         // We use a factory method to modify superclass initialization
         // parameters without the funny call-a-static-method dance.
         return new AndroidHttpClient(manager, params);
-    }
-
-    /**
-     * Returns a socket factory backed by the given persistent session cache.
-     *
-     * @param sessionCache to retrieve sessions from, null for no cache
-     */
-    private static SSLSocketFactory socketFactoryWithCache(
-            SSLClientSessionCache sessionCache) {
-        if (sessionCache == null) {
-            // Use the default factory which doesn't support persistent
-            // caching.
-            return SSLSocketFactory.getSocketFactory();
-        }
-
-        // Create a new SSL context backed by the cache.
-        // TODO: Keep a weak *identity* hash map of caches to engines. In the
-        // mean time, if we have two engines for the same cache, they'll still
-        // share sessions but will have to do so through the persistent cache.
-        SSLContextImpl sslContext = new SSLContextImpl();
-        try {
-            sslContext.engineInit(null, null, null, sessionCache, null);
-        } catch (KeyManagementException e) {
-            throw new AssertionError(e);
-        }
-        return new SSLSocketFactory(sslContext.engineGetSocketFactory());
     }
 
     /**
@@ -218,15 +187,6 @@ public final class AndroidHttpClient implements HttpClient {
             Log.e(TAG, "Leak found", mLeakedException);
             mLeakedException = null;
         }
-    }
-
-    /**
-     * Block this thread from executing HTTP requests.
-     * Used to guard against HTTP requests blocking the main application thread.
-     * @param blocked if HTTP requests run on this thread should be denied
-     */
-    public static void setThreadBlocked(boolean blocked) {
-        sThreadBlocked.set(blocked);
     }
 
     /**
@@ -350,19 +310,7 @@ public final class AndroidHttpClient implements HttpClient {
      * Shorter data will not be compressed.
      */
     public static long getMinGzipSize(ContentResolver resolver) {
-        String sMinGzipBytes = Settings.Gservices.getString(resolver,
-                Settings.Gservices.SYNC_MIN_GZIP_BYTES);
-
-        if (!TextUtils.isEmpty(sMinGzipBytes)) {
-            try {
-                return Long.parseLong(sMinGzipBytes);
-            } catch (NumberFormatException nfe) {
-                Log.w(TAG, "Unable to parse " +
-                        Settings.Gservices.SYNC_MIN_GZIP_BYTES + " " +
-                        sMinGzipBytes, nfe);
-            }
-        }
-        return DEFAULT_SYNC_MIN_GZIP_BYTES;
+        return DEFAULT_SYNC_MIN_GZIP_BYTES;  // For now, this is just a constant.
     }
 
     /* cURL logging support. */
@@ -385,15 +333,6 @@ public final class AndroidHttpClient implements HttpClient {
          */
         private boolean isLoggable() {
             return Log.isLoggable(tag, level);
-        }
-
-        /**
-         * Returns true if auth logging is turned on for this configuration.  Can only be set on
-         * insecure devices.
-         */
-        private boolean isAuthLoggable() {
-            String secure = SystemProperties.get("ro.secure");
-            return "0".equals(secure) && Log.isLoggable(tag + "-auth", level);
         }
 
         /**
@@ -442,8 +381,9 @@ public final class AndroidHttpClient implements HttpClient {
             if (configuration != null
                     && configuration.isLoggable()
                     && request instanceof HttpUriRequest) {
-                configuration.println(toCurl((HttpUriRequest) request,
-                        configuration.isAuthLoggable()));
+                // Never print auth token -- we used to check ro.secure=0 to
+                // enable that, but can't do that in unbundled code.
+                configuration.println(toCurl((HttpUriRequest) request, false));
             }
         }
     }
@@ -504,5 +444,23 @@ public final class AndroidHttpClient implements HttpClient {
         }
 
         return builder.toString();
+    }
+
+    /**
+     * Returns the date of the given HTTP date string. This method can identify
+     * and parse the date formats emitted by common HTTP servers, such as
+     * <a href="http://www.ietf.org/rfc/rfc0822.txt">RFC 822</a>,
+     * <a href="http://www.ietf.org/rfc/rfc0850.txt">RFC 850</a>,
+     * <a href="http://www.ietf.org/rfc/rfc1036.txt">RFC 1036</a>,
+     * <a href="http://www.ietf.org/rfc/rfc1123.txt">RFC 1123</a> and
+     * <a href="http://www.opengroup.org/onlinepubs/007908799/xsh/asctime.html">ANSI
+     * C's asctime()</a>.
+     *
+     * @return the number of milliseconds since Jan. 1, 1970, midnight GMT.
+     * @throws IllegalArgumentException if {@code dateString} is not a date or
+     *     of an unsupported format.
+     */
+    public static long parseDate(String dateString) {
+        return HttpDateTime.parse(dateString);
     }
 }

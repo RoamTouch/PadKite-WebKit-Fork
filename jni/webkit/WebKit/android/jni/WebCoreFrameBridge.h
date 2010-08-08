@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -29,9 +29,10 @@
 #define WEBFRAME_H
 
 #include "FrameLoaderClient.h"
-#include "PlatformString.h"
+#include "PlatformBridge.h"
 #include "WebCoreRefObject.h"
 #include <jni.h>
+#include <wtf/RefCounted.h>
 
 namespace WebCore {
     class HistoryItem;
@@ -39,31 +40,25 @@ namespace WebCore {
     class Page;
     class RenderPart;
     class ResourceHandle;
+    class ResourceLoaderAndroid;
     class ResourceRequest;
 }
 
 namespace android {
 
-class WebCoreResourceLoader;
 class WebViewCore;
 
 // one instance of WebFrame per Page for calling into Java's BrowserFrame
 class WebFrame : public WebCoreRefObject {
   public:
-    // these ids need to be in sync with the constants in BrowserFrame.java
-    enum RAW_RES_ID {
-        NODOMAIN = 1,
-        LOADERROR,
-        DRAWABLEDIR,
-    };
     WebFrame(JNIEnv* env, jobject obj, jobject historyList, WebCore::Page* page);
     ~WebFrame();
 
     // helper function
     static WebFrame* getWebFrame(const WebCore::Frame* frame);
 
-    virtual WebCoreResourceLoader* startLoadingResource(WebCore::ResourceHandle*,
-            const WebCore::ResourceRequest& request,
+    virtual PassRefPtr<WebCore::ResourceLoaderAndroid> startLoadingResource(WebCore::ResourceHandle*,
+            const WebCore::ResourceRequest& request, bool mainResource,
             bool synchronous);
 
     void reportError(int errorCode, const WebCore::String& description,
@@ -107,7 +102,7 @@ class WebFrame : public WebCoreRefObject {
 
     void setUserAgent(WebCore::String userAgent) { mUserAgent = userAgent; }
 
-    WebCore::String getRawResourceFilename(RAW_RES_ID) const;
+    WebCore::String getRawResourceFilename(WebCore::PlatformBridge::rawResId) const;
 
     float density() const;
 

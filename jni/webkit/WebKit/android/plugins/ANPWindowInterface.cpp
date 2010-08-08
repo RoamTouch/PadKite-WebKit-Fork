@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -29,27 +29,6 @@
 #include "WebViewCore.h"
 #include "PluginView.h"
 #include "PluginWidgetAndroid.h"
-
-static bool anp_lockRect(void* window, const ANPRectI* inval,
-                         ANPBitmap* bitmap) {
-    if (window) {
-        // todo
-        return true;
-    }
-    return false;
-}
-
-static bool anp_lockRegion(void* window, const ANPRegion* inval,
-                           ANPBitmap* bitmap) {
-    if (window) {
-        // todo
-        return true;
-    }
-    return false;
-}
-
-static void anp_unlock(void* window) {
-}
 
 static PluginView* pluginViewForInstance(NPP instance) {
     if (instance && instance->ndata)
@@ -68,14 +47,30 @@ static void anp_clearVisibleRects(NPP instance) {
 }
 
 static void anp_showKeyboard(NPP instance, bool value) {
-    ScrollView* scrollView = pluginViewForInstance(instance)->parent();
-    android::WebViewCore* core = android::WebViewCore::getWebViewCore(scrollView);
-    core->requestKeyboard(value);
+    PluginView* pluginView = pluginViewForInstance(instance);
+    PluginWidgetAndroid* pluginWidget = pluginView->platformPluginWidget();
+    if(pluginWidget->hasFocus())
+        pluginWidget->webViewCore()->requestKeyboard(value);
 }
 
 static void anp_requestFullScreen(NPP instance) {
     PluginView* pluginView = pluginViewForInstance(instance);
-    pluginView->platformPluginWidget()->requestFullScreenMode();
+    // call focusPluginElement() so that the pluginView receives keyboard events
+    pluginView->focusPluginElement();
+    PluginWidgetAndroid* pluginWidget = pluginView->platformPluginWidget();
+    pluginWidget->requestFullScreen();
+}
+
+static void anp_exitFullScreen(NPP instance) {
+    PluginView* pluginView = pluginViewForInstance(instance);
+    PluginWidgetAndroid* pluginWidget = pluginView->platformPluginWidget();
+    pluginWidget->exitFullScreen(true);
+}
+
+static void anp_requestCenterFitZoom(NPP instance) {
+    PluginView* pluginView = pluginViewForInstance(instance);
+    PluginWidgetAndroid* pluginWidget = pluginView->platformPluginWidget();
+    pluginWidget->requestCenterFitZoom();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -85,12 +80,10 @@ static void anp_requestFullScreen(NPP instance) {
 void ANPWindowInterfaceV0_Init(ANPInterface* value) {
     ANPWindowInterfaceV0* i = reinterpret_cast<ANPWindowInterfaceV0*>(value);
 
-    ASSIGN(i, lockRect);
-    ASSIGN(i, lockRegion);
     ASSIGN(i, setVisibleRects);
     ASSIGN(i, clearVisibleRects);
     ASSIGN(i, showKeyboard);
-    ASSIGN(i, unlock);
     ASSIGN(i, requestFullScreen);
+    ASSIGN(i, exitFullScreen);
+    ASSIGN(i, requestCenterFitZoom);
 }
-

@@ -1,5 +1,5 @@
 /*
- * Copyright 2007, The Android Open Source Project
+ * Copyright 2009, The Android Open Source Project
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,17 +28,15 @@
 
 #define ANDROID_COMPILE_HACK
 
-#include <stdio.h>
-#include <stdlib.h>
 #include "AXObjectCache.h"
+#include "CString.h"
 #include "CachedPage.h"
 #include "CachedResource.h"
-#include "CookieJar.h"
+#include "Clipboard.h"
 #include "Console.h"
 #include "ContextMenu.h"
 #include "ContextMenuItem.h"
-#include "Clipboard.h"
-#include "CString.h"
+#include "CookieJar.h"
 #include "Cursor.h"
 #include "Database.h"
 #include "DocumentFragment.h"
@@ -46,11 +44,10 @@
 #include "EditCommand.h"
 #include "Editor.h"
 #include "File.h"
-#include "FileList.h"
 #include "Font.h"
 #include "Frame.h"
-#include "FrameLoader.h"
 #include "FrameLoadRequest.h"
+#include "FrameLoader.h"
 #include "FrameView.h"
 #include "GraphicsContext.h"
 #include "HTMLFrameOwnerElement.h"
@@ -60,27 +57,17 @@
 #include "IconDatabase.h"
 #include "IconLoader.h"
 #include "IntPoint.h"
-
-#if USE(JSC)
-#include "JavaScriptCallFrame.h"
-#include "JavaScriptDebugServer.h"
-#include "API/JSClassRef.h"
-#include "JavaScriptProfile.h"
-#include "jni_utility.h"
-#endif
-
 #include "KURL.h"
 #include "Language.h"
-#include "loader.h"
 #include "LocalizedStrings.h"
 #include "MainResourceLoader.h"
-#include "MIMETypeRegistry.h"
 #include "Node.h"
 #include "NotImplemented.h"
 #include "PageCache.h"
 #include "Pasteboard.h"
 #include "Path.h"
 #include "PluginInfoStore.h"
+#include "PluginWidget.h"
 #include "ResourceError.h"
 #include "ResourceHandle.h"
 #include "ResourceLoader.h"
@@ -89,6 +76,17 @@
 #include "ScrollbarTheme.h"
 #include "SmartReplace.h"
 #include "Widget.h"
+#include "loader.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+#if USE(JSC)
+#include "API/JSClassRef.h"
+#include "JNIUtilityPrivate.h"
+#include "JavaScriptCallFrame.h"
+#include "JavaScriptDebugServer.h"
+#include "JavaScriptProfile.h"
+#endif
 
 using namespace WebCore;
 
@@ -147,6 +145,10 @@ void refreshPlugins(bool)
 
 #endif // !defined(ANDROID_PLUGINS)
 
+// Needed to link with PluginWidget as a parent class of PluginToggleWidget. Mac
+// defines this in plugins/mac/PluginWidgetMac.mm
+void PluginWidget::invalidateRect(const IntRect&) {}
+
 // This function tells the bridge that a resource was loaded from the cache and thus
 // the app may update progress with the amount of data loaded.
 void CheckCacheObjectStatus(DocLoader*, CachedResource*)
@@ -171,6 +173,11 @@ Pasteboard* Pasteboard::generalPasteboard()
 }
 
 void Pasteboard::writeSelection(Range*, bool, Frame*)
+{
+    notImplemented();
+}
+
+void Pasteboard::writePlainText(const String&)
 {
     notImplemented();
 }
@@ -351,12 +358,6 @@ void* WebCore::Frame::dragImageForSelection()
     return 0;
 }
 
-
-WebCore::String WebCore::MIMETypeRegistry::getMIMETypeForExtension(WebCore::String const&)
-{
-    return WebCore::String();
-}
-
 void WebCore::Pasteboard::writeImage(WebCore::Node*, WebCore::KURL const&, WebCore::String const&) {}
 
 namespace WebCore {
@@ -455,7 +456,7 @@ PassRefPtr<SharedBuffer> SharedBuffer::createWithContentsOfFile(const String&)
 
 #if USE(JSC)
 namespace JSC { namespace Bindings {
-bool dispatchJNICall(ExecState*, const void* targetAppletView, jobject obj, bool isStatic, JNIType returnType,
+bool dispatchJNICall(ExecState*, const void* targetAppletView, jobject obj, bool isStatic, JNIType returnType, 
         jmethodID methodID, jvalue* args, jvalue& result, const char* callingURL, JSValue& exceptionDescription)
 {
     notImplemented();
@@ -476,12 +477,6 @@ namespace WebCore {
 void prefetchDNS(const String&)
 {
     notImplemented();
-}
-
-PassRefPtr<Icon> Icon::createIconForFile(const String&)
-{
-    notImplemented();
-    return 0;
 }
 
 PassRefPtr<Icon> Icon::createIconForFiles(const Vector<String>&)
@@ -505,17 +500,6 @@ ScrollbarTheme* ScrollbarTheme::nativeTheme()
 }
 
 }  // namespace WebCore
-
-FileList::FileList()
-{
-    notImplemented();
-}
-
-File* FileList::item(unsigned index) const
-{
-    notImplemented();
-    return 0;
-}
 
 AXObjectCache::~AXObjectCache()
 {

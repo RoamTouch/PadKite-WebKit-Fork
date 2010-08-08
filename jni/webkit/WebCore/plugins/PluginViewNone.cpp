@@ -26,117 +26,102 @@
 #include "config.h"
 #include "PluginView.h"
 
-#include "NotImplemented.h"
-#include "PluginPackage.h"
-
 using namespace WTF;
 
 namespace WebCore {
 
 void PluginView::setFocus()
 {
-    notImplemented();
 }
 
 void PluginView::show()
 {
-    notImplemented();
 }
 
 void PluginView::hide()
 {
-    notImplemented();
 }
 
 void PluginView::paint(GraphicsContext*, const IntRect&)
 {
-    notImplemented();
 }
 
 void PluginView::handleKeyboardEvent(KeyboardEvent*)
 {
-    notImplemented();
 }
 
 void PluginView::handleMouseEvent(MouseEvent*)
 {
-    notImplemented();
 }
 
 void PluginView::setParent(ScrollView*)
 {
-    notImplemented();
 }
 
 void PluginView::setNPWindowRect(const IntRect&)
 {
-    notImplemented();
 }
 
 NPError PluginView::handlePostReadFile(Vector<char>&, uint32, const char*)
 {
-    notImplemented();
-
     return 0;
 }
 
 NPError PluginView::getValue(NPNVariable, void*)
 {
-    notImplemented();
     return 0;
 }
 
 #if ENABLE(NETSCAPE_PLUGIN_API)
-NPError PluginView::getValueStatic(NPNVariable variable, void* value)
+NPError PluginView::getValueStatic(NPNVariable, void*)
 {
-    notImplemented();
     return 0;
 }
 #endif
 
 void PluginView::invalidateRect(NPRect*)
 {
-    notImplemented();
 }
 
 void PluginView::invalidateRect(const IntRect&)
 {
-    notImplemented();
 }
 
 void PluginView::invalidateRegion(NPRegion)
 {
-    notImplemented();
 }
 
 void PluginView::forceRedraw()
 {
-    notImplemented();
 }
 
-PluginView::~PluginView()
+bool PluginView::platformStart()
 {
-    notImplemented();
+    return true;
 }
 
-void PluginView::init()
+void PluginView::platformDestroy()
 {
-    notImplemented();
 }
 
 void PluginView::setParentVisible(bool)
 {
-    notImplemented();
 }
 
 void PluginView::updatePluginWidget()
 {
-    notImplemented();
 }
 
-void PluginView::platformStart()
+void PluginView::halt()
 {
-    notImplemented();
+}
+
+void PluginView::restart()
+{
+}
+
+void PluginView::keepAlive(NPP)
+{
 }
 
 } // namespace WebCore

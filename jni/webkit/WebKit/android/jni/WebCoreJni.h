@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -61,13 +61,9 @@ private:
     friend AutoJObject getRealObject(JNIEnv*, jobject);
 };
 
-// Get the real object stored in the WeakReference returned as an
+// Get the real object stored in the weak reference returned as an
 // AutoJObject.
 AutoJObject getRealObject(JNIEnv*, jobject);
-
-// Convert the given jobject to a WeakReference and create a new global
-// reference to that WeakReference.
-jobject adoptGlobalRef(JNIEnv*, jobject);
 
 // Helper method for check java exceptions. Returns true if an exception
 // occurred and logs the exception.

@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -26,34 +26,35 @@
 #ifndef ANDROID_WEBKIT_RESOURCELOADLISTENER_H
 #define ANDROID_WEBKIT_RESOURCELOADLISTENER_H
 
-#include "KURL.h"
-
-#include "WebCoreRefObject.h"
+#include <KURL.h>
+#include <ResourceLoaderAndroid.h>
 #include <jni.h>
 
 namespace android {
 
-class WebCoreResourceLoader : public WebCoreRefObject
+class WebCoreResourceLoader : public WebCore::ResourceLoaderAndroid
 {
 public:
-    WebCoreResourceLoader(JNIEnv *env, jobject jLoadListener);
+    static PassRefPtr<WebCore::ResourceLoaderAndroid> create(JNIEnv *env, jobject jLoadListener);
     virtual ~WebCoreResourceLoader();
 
     /**
      * Call to java to cancel the current load.
      */
-    void cancel();
+    virtual void cancel();
 
     /**
     * Call to java to download the current load rather than feed it
     * back to WebCore
     */
-    void downloadFile();
+    virtual void downloadFile();
+
+    virtual void pauseLoad(bool);
 
     /**
     * Call to java to find out if this URL is in the cache
     */
-    static bool willLoadFromCache(const WebCore::KURL& url);
+    static bool willLoadFromCache(const WebCore::KURL& url, int64_t identifier);
 
     // Native jni functions
     static void SetResponseHeader(JNIEnv*, jobject, jint, jstring, jstring);
@@ -65,8 +66,11 @@ public:
     static jstring RedirectedToUrl(JNIEnv*, jobject, jstring, jstring, jint);
     static void Error(JNIEnv*, jobject, jint, jstring, jstring);
 
+protected:
+    WebCoreResourceLoader(JNIEnv *env, jobject jLoadListener);
 private:
     jobject     mJLoader;
+    bool        mPausedLoad;
 };
 
 } // end namespace android

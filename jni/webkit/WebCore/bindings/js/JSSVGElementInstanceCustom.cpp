@@ -43,32 +43,26 @@ void JSSVGElementInstance::markChildren(MarkStack& markStack)
     Base::markChildren(markStack);
 
     // Mark the wrapper for our corresponding element, so it can mark its event handlers.
-    JSNode* correspondingWrapper = getCachedDOMNodeWrapper(impl()->correspondingElement()->document(), impl()->correspondingElement());
-    if (correspondingWrapper)
-        markStack.append(correspondingWrapper);
+    markDOMNodeWrapper(markStack, impl()->correspondingElement()->document(), impl()->correspondingElement());
 }
 
 JSValue JSSVGElementInstance::addEventListener(ExecState* exec, const ArgList& args)
 {
-    JSDOMGlobalObject* globalObject = toJSDOMGlobalObject(impl()->scriptExecutionContext());
-    if (!globalObject)
+    JSValue listener = args.at(1);
+    if (!listener.isObject())
         return jsUndefined();
 
-    if (RefPtr<JSEventListener> listener = globalObject->findOrCreateJSEventListener(args.at(1)))
-        impl()->addEventListener(args.at(0).toString(exec), listener.release(), args.at(2).toBoolean(exec));
-
+    impl()->addEventListener(args.at(0).toString(exec), JSEventListener::create(asObject(listener), this, false, currentWorld(exec)), args.at(2).toBoolean(exec));
     return jsUndefined();
 }
 
 JSValue JSSVGElementInstance::removeEventListener(ExecState* exec, const ArgList& args)
 {
-    JSDOMGlobalObject* globalObject = toJSDOMGlobalObject(impl()->scriptExecutionContext());
-    if (!globalObject)
+    JSValue listener = args.at(1);
+    if (!listener.isObject())
         return jsUndefined();
 
-    if (JSEventListener* listener = globalObject->findJSEventListener(args.at(1)))
-        impl()->removeEventListener(args.at(0).toString(exec), listener, args.at(2).toBoolean(exec));
-
+    impl()->removeEventListener(args.at(0).toString(exec), JSEventListener::create(asObject(listener), this, false, currentWorld(exec)).get(), args.at(2).toBoolean(exec));
     return jsUndefined();
 }
 

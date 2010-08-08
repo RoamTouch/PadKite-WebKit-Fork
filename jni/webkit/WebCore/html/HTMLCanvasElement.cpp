@@ -27,9 +27,14 @@
 #include "config.h"
 #include "HTMLCanvasElement.h"
 
+#include "CanvasContextAttributes.h"
 #include "CanvasGradient.h"
 #include "CanvasPattern.h"
 #include "CanvasRenderingContext2D.h"
+#if ENABLE(3D_CANVAS)    
+#include "WebGLContextAttributes.h"
+#include "WebGLRenderingContext.h"
+#endif
 #include "CanvasStyle.h"
 #include "Chrome.h"
 #include "Document.h"
@@ -135,7 +140,7 @@ String HTMLCanvasElement::toDataURL(const String& mimeType, ExceptionCode& ec)
         return String();
     }
 
-    if (m_size.isEmpty())
+    if (m_size.isEmpty() || !buffer())
         return String("data:,");
 
     if (mimeType.isNull() || !MIMETypeRegistry::isSupportedImageMIMETypeForEncoding(mimeType))
@@ -144,19 +149,52 @@ String HTMLCanvasElement::toDataURL(const String& mimeType, ExceptionCode& ec)
     return buffer()->toDataURL(mimeType);
 }
 
-CanvasRenderingContext* HTMLCanvasElement::getContext(const String& type)
+CanvasRenderingContext* HTMLCanvasElement::getContext(const String& type, CanvasContextAttributes* attrs)
 {
+    // A Canvas can either be "2D" or "webgl" but never both. If you request a 2D canvas and the existing
+    // context is already 2D, just return that. If the existing context is WebGL, then destroy it
+    // before creating a new 2D context. Vice versa when requesting a WebGL canvas. Requesting a
+    // context with any other type string will destroy any existing context.
+    
+    // FIXME - The code depends on the context not going away once created, to prevent JS from
+    // seeing a dangling pointer. So for now we will disallow the context from being changed
+    // once it is created.
     if (type == "2d") {
-        if (!m_2DContext)
-            m_2DContext.set(new CanvasRenderingContext2D(this));
-        return m_2DContext.get();
+        if (m_context && !m_context->is2d())
+            return 0;
+        if (!m_context)
+            m_context = new CanvasRenderingContext2D(this);
+        return m_context.get();
     }
+#if ENABLE(3D_CANVAS)    
+    Settings* settings = document()->settings();
+    if (settings && settings->webGLEnabled()) {
+        // Accept the legacy "webkit-3d" name as well as the provisional "experimental-webgl" name.
+        // Once ratified, we will also accept "webgl" as the context name.
+        if ((type == "webkit-3d") ||
+            (type == "experimental-webgl")) {
+            if (m_context && !m_context->is3d())
+                return 0;
+            if (!m_context) {
+                m_context = WebGLRenderingContext::create(this, static_cast<WebGLContextAttributes*>(attrs));
+                if (m_context) {
+                    // Need to make sure a RenderLayer and compositing layer get created for the Canvas
+                    setNeedsStyleRecalc(SyntheticStyleChange);
+                }
+            }
+            return m_context.get();
+        }
+    }
+#else
+    UNUSED_PARAM(attrs);
+#endif
     return 0;
 }
 
 void HTMLCanvasElement::willDraw(const FloatRect& rect)
 {
-    m_imageBuffer->clearImage();
+    if (m_imageBuffer)
+        m_imageBuffer->clearImage();
     
     if (RenderBox* ro = renderBox()) {
         FloatRect destRect = ro->contentBoxRect();
@@ -189,11 +227,16 @@ void HTMLCanvasElement::reset()
     IntSize oldSize = m_size;
     m_size = IntSize(w, h);
 
+#if ENABLE(3D_CANVAS)
+    if (m_context && m_context->is3d())
+        static_cast<WebGLRenderingContext*>(m_context.get())->reshape(width(), height());
+#endif
+
     bool hadImageBuffer = m_createdImageBuffer;
     m_createdImageBuffer = false;
     m_imageBuffer.clear();
-    if (m_2DContext)
-        m_2DContext->reset();
+    if (m_context && m_context->is2d())
+        static_cast<CanvasRenderingContext2D*>(m_context.get())->reset();
 
     if (RenderObject* renderer = this->renderer()) {
         if (m_rendererIsCanvas) {
@@ -216,11 +259,24 @@ void HTMLCanvasElement::paint(GraphicsContext* context, const IntRect& r)
     if (context->paintingDisabled())
         return;
     
+#if ENABLE(3D_CANVAS)
+    WebGLRenderingContext* context3D = 0;
+    if (m_context && m_context->is3d()) {
+        context3D = static_cast<WebGLRenderingContext*>(m_context.get());
+        context3D->beginPaint();
+    }
+#endif
+
     if (m_imageBuffer) {
         Image* image = m_imageBuffer->image();
         if (image)
-            context->drawImage(image, r);
+            context->drawImage(image, DeviceColorSpace, r);
     }
+
+#if ENABLE(3D_CANVAS)
+    if (context3D)
+        context3D->endPaint();
+#endif
 }
 
 IntRect HTMLCanvasElement::convertLogicalToDevice(const FloatRect& logicalRect) const
@@ -230,7 +286,19 @@ IntRect HTMLCanvasElement::convertLogicalToDevice(const FloatRect& logicalRect) 
 
 IntSize HTMLCanvasElement::convertLogicalToDevice(const FloatSize& logicalSize) const
 {
+#if PLATFORM(ANDROID)
+    /*  In Android we capture the drawing into a displayList, and then
+        replay that list at various scale factors (sometimes zoomed out, other
+        times zoomed in for "normal" reading, yet other times at arbitrary
+        zoom values based on the user's choice). In all of these cases, we do
+        not re-record the displayList, hence it is usually harmful to perform
+        any pre-rounding, since we just don't know the actual drawing resolution
+        at record time.
+     */
+    float pageScaleFactor = 1.0f;
+#else
     float pageScaleFactor = document()->frame() ? document()->frame()->page()->chrome()->scaleFactor() : 1.0f;
+#endif
     float wf = ceilf(logicalSize.width() * pageScaleFactor);
     float hf = ceilf(logicalSize.height() * pageScaleFactor);
     
@@ -242,7 +310,19 @@ IntSize HTMLCanvasElement::convertLogicalToDevice(const FloatSize& logicalSize) 
 
 IntPoint HTMLCanvasElement::convertLogicalToDevice(const FloatPoint& logicalPos) const
 {
+#if PLATFORM(ANDROID)
+    /*  In Android we capture the drawing into a displayList, and then
+        replay that list at various scale factors (sometimes zoomed out, other
+        times zoomed in for "normal" reading, yet other times at arbitrary
+        zoom values based on the user's choice). In all of these cases, we do
+        not re-record the displayList, hence it is usually harmful to perform
+        any pre-rounding, since we just don't know the actual drawing resolution
+        at record time.
+     */
+    float pageScaleFactor = 1.0f;
+#else
     float pageScaleFactor = document()->frame() ? document()->frame()->page()->chrome()->scaleFactor() : 1.0f;
+#endif
     float xf = logicalPos.x() * pageScaleFactor;
     float yf = logicalPos.y() * pageScaleFactor;
     
@@ -281,16 +361,23 @@ ImageBuffer* HTMLCanvasElement::buffer() const
     return m_imageBuffer.get();
 }
     
-TransformationMatrix HTMLCanvasElement::baseTransform() const
+AffineTransform HTMLCanvasElement::baseTransform() const
 {
     ASSERT(m_createdImageBuffer);
     FloatSize unscaledSize(width(), height());
     IntSize size = convertLogicalToDevice(unscaledSize);
-    TransformationMatrix transform;
+    AffineTransform transform;
     if (size.width() && size.height())
         transform.scaleNonUniform(size.width() / unscaledSize.width(), size.height() / unscaledSize.height());
     transform.multiply(m_imageBuffer->baseTransform());
     return transform;
 }
+
+#if ENABLE(3D_CANVAS)    
+bool HTMLCanvasElement::is3D() const
+{
+    return m_context && m_context->is3d();
+}
+#endif
 
 }

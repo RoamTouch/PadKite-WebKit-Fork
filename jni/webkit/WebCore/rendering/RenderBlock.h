@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2007 David Smith (catfish.man@gmail.com)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -34,7 +34,6 @@ namespace WebCore {
 
 class InlineIterator;
 class RenderInline;
-class RootInlineBox;
 
 struct BidiRun;
 
@@ -67,17 +66,6 @@ public:
 
     void deleteLineBoxTree();
 
-    // The height (and width) of a block when you include overflow spillage out of the bottom
-    // of the block (e.g., a <div style="height:25px"> that has a 100px tall image inside
-    // it would have an overflow height of borderTop() + paddingTop() + 100px.
-    virtual int overflowHeight(bool includeInterior = true) const;
-    virtual int overflowWidth(bool includeInterior = true) const;
-    virtual int overflowLeft(bool includeInterior = true) const;
-    virtual int overflowTop(bool includeInterior = true) const;
-    virtual IntRect overflowRect(bool includeInterior = true) const;
-
-    void addVisualOverflow(const IntRect&);
-
     virtual void addChild(RenderObject* newChild, RenderObject* beforeChild = 0);
     virtual void removeChild(RenderObject*);
 
@@ -104,6 +92,7 @@ public:
     IntRect floatRect() const;
 
     int lineWidth(int y, bool firstLine) const;
+    
     virtual int lowestPosition(bool includeOverflowInterior = true, bool includeSelf = true) const;
     virtual int rightmostPosition(bool includeOverflowInterior = true, bool includeSelf = true) const;
     virtual int leftmostPosition(bool includeOverflowInterior = true, bool includeSelf = true) const;
@@ -147,14 +136,16 @@ public:
 
     // This function is a convenience helper for creating an anonymous block that inherits its
     // style from this RenderBlock.
-    RenderBlock* createAnonymousBlock() const;
+    RenderBlock* createAnonymousBlock(bool isFlexibleBox = false) const;
 
-    Vector<IntRect>* columnRects() const;
-    int columnGap() const;
+    static void appendRunsForObject(int start, int end, RenderObject*, InlineBidiResolver&);    
+    static bool requiresLineBox(const InlineIterator&, bool isLineEmpty = true, bool previousLineBrokeCleanly = true);
 
 protected:
-    virtual void setOverflowHeight(int h) { m_overflowHeight = h; }
-    virtual void setOverflowWidth(int w) { m_overflowWidth = w; }
+    void moveChildTo(RenderObject* to, RenderObjectChildList* toChildList, RenderObject* child);
+    void moveChildTo(RenderObject* to, RenderObjectChildList* toChildList, RenderObject* beforeChild, RenderObject* child);
+    void moveAllChildrenTo(RenderObject* to, RenderObjectChildList* toChildList);
+    void moveAllChildrenTo(RenderObject* to, RenderObjectChildList* toChildList, RenderObject* beforeChild);
 
     int maxTopPosMargin() const { return m_maxMargin ? m_maxMargin->m_topPos : MaxMargin::topPosDefault(this); }
     int maxTopNegMargin() const { return m_maxMargin ? m_maxMargin->m_topNeg : MaxMargin::topNegDefault(this); }
@@ -207,7 +198,7 @@ protected:
 
     virtual bool hasLineIfEmpty() const;
     bool layoutOnlyPositionedObjects();
-    
+
 private:
     virtual RenderObjectChildList* virtualChildren() { return children(); }
     virtual const RenderObjectChildList* virtualChildren() const { return children(); }
@@ -275,10 +266,13 @@ private:
     InlineFlowBox* createLineBoxes(RenderObject*, bool firstLine);
     void computeHorizontalPositionsForLine(RootInlineBox*, bool firstLine, BidiRun* firstRun, BidiRun* trailingSpaceRun, bool reachedEnd);
     void computeVerticalPositionsForLine(RootInlineBox*, BidiRun*);
-    void checkLinesForOverflow();
     void deleteEllipsisLineBoxes();
     void checkLinesForTextOverflow();
+    void addOverflowFromInlineChildren();
     // End of functions defined in RenderBlockLineLayout.cpp.
+
+    void addOverflowFromBlockChildren();
+    void addOverflowFromFloats();
 
     void paintFloats(PaintInfo&, int tx, int ty, bool preservePhase = false);
     void paintContents(PaintInfo&, int tx, int ty);
@@ -353,18 +347,32 @@ private:
 
     int desiredColumnWidth() const;
     unsigned desiredColumnCount() const;
+#if PLATFORM(ANDROID)
+public:
+#endif
+    Vector<IntRect>* columnRects() const;
+#if PLATFORM(ANDROID)
+private:
+#endif
     void setDesiredColumnCountAndWidth(int count, int width);
+#if PLATFORM(ANDROID)
+public:
+#endif
+    int columnGap() const;
+#if PLATFORM(ANDROID)
+private:
+#endif
     
     void paintContinuationOutlines(PaintInfo&, int tx, int ty);
 
     virtual IntRect localCaretRect(InlineBox*, int caretOffset, int* extraWidthToEndOfLine = 0);
 
-    virtual void addFocusRingRects(GraphicsContext*, int tx, int ty);
+    virtual void addFocusRingRects(Vector<IntRect>&, int tx, int ty);
 
     void adjustPointToColumnContents(IntPoint&) const;
     void adjustForBorderFit(int x, int& left, int& right) const; // Helper function for borderFitAdjust
 
-    void markLinesDirtyInVerticalRange(int top, int bottom);
+    void markLinesDirtyInVerticalRange(int top, int bottom, RootInlineBox* highest = 0);
 
     void newLine(EClear);
 
@@ -376,13 +384,13 @@ private:
     void offsetForContents(int& tx, int& ty) const;
 
     void calcColumnWidth();
-    int layoutColumns(int endOfContent = -1);
+    int layoutColumns(int endOfContent = -1, int requestedColumnHeight = -1);
 
     bool expandsToEncloseOverhangingFloats() const;
 
     void updateScrollInfoAfterLayout();
 
-    struct FloatingObject {
+    struct FloatingObject : Noncopyable {
         enum Type {
             FloatLeft,
             FloatRight
@@ -432,10 +440,6 @@ private:
         // This flag is set when we know we're examining bottom margins and we know we're at the bottom of the block.
         bool m_atBottomOfBlock : 1;
 
-        // If our last normal flow child was a self-collapsing block that cleared a float,
-        // we track it in this variable.
-        bool m_selfCollapsingBlockClearedFloat : 1;
-
         // These variables are used to detect quirky margins that we need to collapse away (in table cells
         // and in the body element).
         bool m_topQuirk : 1;
@@ -452,7 +456,6 @@ private:
         void setAtTopOfBlock(bool b) { m_atTopOfBlock = b; }
         void setAtBottomOfBlock(bool b) { m_atBottomOfBlock = b; }
         void clearMargin() { m_posMargin = m_negMargin = 0; }
-        void setSelfCollapsingBlockClearedFloat(bool b) { m_selfCollapsingBlockClearedFloat = b; }
         void setTopQuirk(bool b) { m_topQuirk = b; }
         void setBottomQuirk(bool b) { m_bottomQuirk = b; }
         void setDeterminedTopQuirk(bool b) { m_determinedTopQuirk = b; }
@@ -468,7 +471,6 @@ private:
         bool canCollapseWithBottom() const { return m_atBottomOfBlock && m_canCollapseBottomWithChildren; }
         bool canCollapseTopWithChildren() const { return m_canCollapseTopWithChildren; }
         bool canCollapseBottomWithChildren() const { return m_canCollapseBottomWithChildren; }
-        bool selfCollapsingBlockClearedFloat() const { return m_selfCollapsingBlockClearedFloat; }
         bool quirkContainer() const { return m_quirkContainer; }
         bool determinedTopQuirk() const { return m_determinedTopQuirk; }
         bool topQuirk() const { return m_topQuirk; }
@@ -478,6 +480,7 @@ private:
         int margin() const { return m_posMargin - m_negMargin; }
     };
 
+    void layoutBlockChild(RenderBox* child, MarginInfo&, int& previousFloatBottom, int& maxFloatBottom);
     void adjustPositionedBlock(RenderBox* child, const MarginInfo&);
     void adjustFloatingBlock(const MarginInfo&);
     bool handleSpecialChild(RenderBox* child, const MarginInfo&);
@@ -503,7 +506,7 @@ private:
     RenderInline* m_inlineContinuation;
 
     // Allocated only when some of these fields have non-default values
-    struct MaxMargin {
+    struct MaxMargin : Noncopyable {
         MaxMargin(const RenderBlock* o) 
             : m_topPos(topPosDefault(o))
             , m_topNeg(topNegDefault(o))
@@ -528,15 +531,11 @@ private:
     RenderObjectChildList m_children;
     RenderLineBoxList m_lineBoxes;   // All of the root line boxes created for this block flow.  For example, <div>Hello<br>world.</div> will have two total lines for the <div>.
 
-protected:
-    // How much content overflows out of our block vertically or horizontally.
-    int m_overflowHeight;
-    int m_overflowWidth;
-    int m_overflowLeft;
-    int m_overflowTop;
-
-private:
     mutable int m_lineHeight;
+    
+    // RenderRubyBase objects need to be able to split and merge, moving their children around
+    // (calling moveChildTo, moveAllChildrenTo, and makeChildrenNonInline).
+    friend class RenderRubyBase;
 };
 
 inline RenderBlock* toRenderBlock(RenderObject* object)

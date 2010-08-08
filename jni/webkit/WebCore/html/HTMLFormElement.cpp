@@ -26,6 +26,7 @@
 #include "HTMLFormElement.h"
 
 #include "CSSHelper.h"
+#include "Chrome.h"
 #include "ChromeClient.h"
 #include "Document.h"
 #include "Event.h"
@@ -47,6 +48,7 @@
 #include "MappedAttribute.h"
 #include "Page.h"
 #include "RenderTextControl.h"
+#include "ValidityState.h"
 #include <limits>
 #include <wtf/CurrentTime.h>
 #include <wtf/RandomNumber.h>
@@ -149,14 +151,14 @@ void HTMLFormElement::removedFromDocument()
     HTMLElement::removedFromDocument();
 }
 
-void HTMLFormElement::handleLocalEvents(Event* event, bool useCapture)
+void HTMLFormElement::handleLocalEvents(Event* event)
 {
     Node* targetNode = event->target()->toNode();
-    if (!useCapture && targetNode && targetNode != this && (event->type() == eventNames().submitEvent || event->type() == eventNames().resetEvent)) {
+    if (event->eventPhase() != Event::CAPTURING_PHASE && targetNode && targetNode != this && (event->type() == eventNames().submitEvent || event->type() == eventNames().resetEvent)) {
         event->stopPropagation();
         return;
     }
-    HTMLElement::handleLocalEvents(event, useCapture);
+    HTMLElement::handleLocalEvents(event);
 }
 
 unsigned HTMLFormElement::length() const
@@ -295,13 +297,13 @@ bool HTMLFormElement::prepareSubmit(Event* event)
     m_insubmit = true;
     m_doingsubmit = false;
 
-    if (dispatchEvent(eventNames().submitEvent, true, true) && !m_doingsubmit)
+    if (dispatchEvent(Event::create(eventNames().submitEvent, true, true)) && !m_doingsubmit)
         m_doingsubmit = true;
 
     m_insubmit = false;
 
     if (m_doingsubmit)
-        submit(event, true);
+        submit(event, true, false, NotSubmittedByJavaScript);
 
     return m_doingsubmit;
 }
@@ -328,7 +330,15 @@ static void transferMailtoPostFormDataToURL(RefPtr<FormData>& data, KURL& url, c
     url.setQuery(query);
 }
 
-void HTMLFormElement::submit(Event* event, bool activateSubmitButton, bool lockHistory)
+void HTMLFormElement::submit(Frame* javaScriptActiveFrame)
+{
+    if (javaScriptActiveFrame)
+        submit(0, false, !javaScriptActiveFrame->script()->anyPageIsProcessingUserGesture(), SubmittedByJavaScript);
+    else
+        submit(0, false, false, NotSubmittedByJavaScript);
+}
+
+void HTMLFormElement::submit(Event* event, bool activateSubmitButton, bool lockHistory, FormSubmissionTrigger formSubmissionTrigger)
 {
     FrameView* view = document()->view();
     Frame* frame = document()->frame();
@@ -365,7 +375,7 @@ void HTMLFormElement::submit(Event* event, bool activateSubmitButton, bool lockH
         }
     }
 
-    RefPtr<FormState> formState = FormState::create(this, formValues, frame);
+    RefPtr<FormState> formState = FormState::create(this, formValues, frame, formSubmissionTrigger);
 
     if (needButtonActivation && firstSuccessfulSubmitButton)
         firstSuccessfulSubmitButton->setActivatedSubmit(true);
@@ -415,7 +425,7 @@ void HTMLFormElement::reset()
 
     // ### DOM2 labels this event as not cancelable, however
     // common browsers( sick! ) allow it be cancelled.
-    if ( !dispatchEvent(eventNames().resetEvent, true, true) ) {
+    if (!dispatchEvent(Event::create(eventNames().resetEvent, true, true))) {
         m_inreset = false;
         return;
     }
@@ -514,11 +524,13 @@ bool HTMLFormElement::isURLAttribute(Attribute* attr) const
 
 void HTMLFormElement::registerImgElement(HTMLImageElement* e)
 {
+    ASSERT(imgElements.find(e) == notFound);
     imgElements.append(e);
 }
 
 void HTMLFormElement::removeImgElement(HTMLImageElement* e)
 {
+    ASSERT(imgElements.find(e) != notFound);
     removeFromVector(imgElements, e);
 }
 
@@ -535,6 +547,16 @@ String HTMLFormElement::name() const
 void HTMLFormElement::setName(const String &value)
 {
     setAttribute(nameAttr, value);
+}
+
+bool HTMLFormElement::noValidate() const
+{
+    return !getAttribute(novalidateAttr).isNull();
+}
+
+void HTMLFormElement::setNoValidate(bool novalidate)
+{
+    setAttribute(novalidateAttr, novalidate ? "" : 0);
 }
 
 void HTMLFormElement::setAcceptCharset(const String &value)
@@ -575,6 +597,31 @@ String HTMLFormElement::target() const
 void HTMLFormElement::setTarget(const String &value)
 {
     setAttribute(targetAttr, value);
+}
+
+HTMLFormControlElement* HTMLFormElement::defaultButton() const
+{
+    for (unsigned i = 0; i < formElements.size(); ++i) {
+        HTMLFormControlElement* control = formElements[i];
+        if (control->isSuccessfulSubmitButton())
+            return control;
+    }
+
+    return 0;
+}
+
+bool HTMLFormElement::checkValidity()
+{
+    // TODO: Check for unhandled invalid controls, see #27452 for tips.
+
+    bool hasOnlyValidControls = true;
+    for (unsigned i = 0; i < formElements.size(); ++i) {
+        HTMLFormControlElement* control = formElements[i];
+        if (!control->checkValidity())
+            hasOnlyValidControls = false;
+    }
+
+    return hasOnlyValidControls;
 }
 
 PassRefPtr<HTMLFormControlElement> HTMLFormElement::elementForAlias(const AtomicString& alias)

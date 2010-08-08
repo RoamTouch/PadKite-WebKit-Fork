@@ -50,74 +50,12 @@
 #include "PlatformString.h"
 #include "Settings.h"
 #include "SharedBuffer.h"
-#include "StringBuffer.h"
 #include "XMLTokenizer.h"
 
 #include <wtf/Assertions.h>
 #include <wtf/unicode/Unicode.h>
 
 namespace WebCore {
-
-/*
- * Performs four operations:
- *  1. Convert backslashes to currency symbols
- *  2. Convert control characters to spaces
- *  3. Trim leading and trailing spaces
- *  4. Collapse internal whitespace.
- */
-static inline String canonicalizedTitle(const String& title, Frame* frame)
-{
-    ASSERT(!title.isEmpty());
-
-    const UChar* characters = title.characters();
-    unsigned length = title.length();
-    unsigned i;
-
-    StringBuffer buffer(length);
-    unsigned builderIndex = 0;
-
-    // Skip leading spaces and leading characters that would convert to spaces
-    for (i = 0; i < length; ++i) {
-        UChar c = characters[i];
-        if (!(c <= 0x20 || c == 0x7F))
-            break;
-    }
-
-    if (i == length)
-        return "";
-
-    // Replace control characters with spaces, and backslashes with currency symbols, and collapse whitespace.
-    bool previousCharWasWS = false;
-    for (; i < length; ++i) {
-        UChar c = characters[i];
-        if (c <= 0x20 || c == 0x7F || (WTF::Unicode::category(c) & (WTF::Unicode::Separator_Line | WTF::Unicode::Separator_Paragraph))) {
-            if (previousCharWasWS)
-                continue;
-            buffer[builderIndex++] = ' ';
-            previousCharWasWS = true;
-        } else {
-            buffer[builderIndex++] = c;
-            previousCharWasWS = false;
-        }
-    }
-
-    // Strip trailing spaces
-    while (builderIndex > 0) {
-        --builderIndex;
-        if (buffer[builderIndex] != ' ')
-            break;
-    }
-
-    if (!builderIndex && buffer[builderIndex] == ' ')
-        return "";
-
-    buffer.shrink(builderIndex + 1);
-    
-    // Replace the backslashes with currency symbols if the encoding requires it.
-    frame->document()->displayBufferModifiedByEncoding(buffer.characters(), buffer.length());
-
-    return String::adopt(buffer);
-}
 
 static void cancelAll(const ResourceLoaderSet& loaders)
 {
@@ -148,7 +86,6 @@ DocumentLoader::DocumentLoader(const ResourceRequest& req, const SubstituteData&
     , m_gotFirstByte(false)
     , m_primaryLoadComplete(false)
     , m_isClientRedirect(false)
-    , m_loadingFromCachedPage(false)
     , m_stopRecordingResponses(false)
     , m_substituteResourceDeliveryTimer(this, &DocumentLoader::substituteResourceDeliveryTimerFired)
     , m_didCreateGlobalHistoryEntry(false)
@@ -204,7 +141,7 @@ const KURL& DocumentLoader::url() const
     return request().url();
 }
 
-void DocumentLoader::replaceRequestURLForAnchorScroll(const KURL& url)
+void DocumentLoader::replaceRequestURLForSameDocumentNavigation(const KURL& url)
 {
     m_originalRequestCopy.setURL(url);
     m_request.setURL(url);
@@ -278,7 +215,7 @@ void DocumentLoader::stopLoading(DatabasePolicy databasePolicy)
         Document* doc = m_frame->document();
         
         if (loading || doc->parsing())
-            m_frame->loader()->stopLoading(false, databasePolicy);
+            m_frame->loader()->stopLoading(UnloadEventPolicyNone, databasePolicy);
     }
 
     // Always cancel multipart loaders
@@ -568,7 +505,7 @@ void DocumentLoader::getSubresources(Vector<PassRefPtr<ArchiveResource> >& subre
     const DocLoader::DocumentResourceMap& allResources = document->docLoader()->allCachedResources();
     DocLoader::DocumentResourceMap::const_iterator end = allResources.end();
     for (DocLoader::DocumentResourceMap::const_iterator it = allResources.begin(); it != end; ++it) {
-        RefPtr<ArchiveResource> subresource = this->subresource(KURL(it->second->url()));
+        RefPtr<ArchiveResource> subresource = this->subresource(KURL(ParsedURLString, it->second->url()));
         if (subresource)
             subresources.append(subresource.release());
     }
@@ -673,10 +610,9 @@ void DocumentLoader::setTitle(const String& title)
     if (title.isEmpty())
         return;
 
-    String trimmed = canonicalizedTitle(title, m_frame);
-    if (!trimmed.isEmpty() && m_pageTitle != trimmed) {
+    if (m_pageTitle != title) {
         frameLoader()->willChangeTitle(this);
-        m_pageTitle = trimmed;
+        m_pageTitle = title;
         frameLoader()->didChangeTitle(this);
     }
 }
@@ -695,16 +631,6 @@ KURL DocumentLoader::urlForHistory() const
 bool DocumentLoader::urlForHistoryReflectsFailure() const
 {
     return m_substituteData.isValid() || m_response.httpStatusCode() >= 400;
-}
-
-void DocumentLoader::loadFromCachedPage(PassRefPtr<CachedPage> cachedPage)
-{
-    LOG(PageCache, "WebCorePageCache: DocumentLoader %p loading from cached page %p", this, cachedPage.get());
-    
-    prepareForLoadStart();
-    setLoadingFromCachedPage(true);
-    setCommitted(true);
-    frameLoader()->commitProvisionalLoad(cachedPage);
 }
 
 const KURL& DocumentLoader::originalURL() const

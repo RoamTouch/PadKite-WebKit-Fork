@@ -26,9 +26,7 @@
 #include <QtCore/qvariant.h>
 #include <QtGui/qicon.h>
 #include <QtScript/qscriptengine.h>
-#if QT_VERSION >= 0x040400
 #include <QtNetwork/qnetworkaccessmanager.h>
-#endif
 #include "qwebkitglobal.h"
 
 QT_BEGIN_NAMESPACE
@@ -50,6 +48,7 @@ class QWebHitTestResult;
 class QWebHistoryItem;
 class QWebSecurityOrigin;
 class QWebElement;
+class QWebElementCollection;
 
 namespace WebCore {
     class WidgetPrivate;
@@ -112,7 +111,6 @@ class QWEBKIT_EXPORT QWebFrame : public QObject {
     Q_PROPERTY(QIcon icon READ icon)
     Q_PROPERTY(QSize contentsSize READ contentsSize)
     Q_PROPERTY(QPoint scrollPosition READ scrollPosition WRITE setScrollPosition)
-    Q_PROPERTY(bool clipRenderToViewport READ clipRenderToViewport WRITE setClipRenderToViewport)
     Q_PROPERTY(bool focus READ hasFocus)
 private:
     QWebFrame(QWebPage *parent, QWebFrameData *frameData);
@@ -123,13 +121,9 @@ public:
     QWebPage *page() const;
 
     void load(const QUrl &url);
-#if QT_VERSION < 0x040400
-    void load(const QWebNetworkRequest &request);
-#else
     void load(const QNetworkRequest &request,
               QNetworkAccessManager::Operation operation = QNetworkAccessManager::GetOperation,
               const QByteArray &body = QByteArray());
-#endif
     void setHtml(const QString &html, const QUrl &baseUrl = QUrl());
     void setContent(const QByteArray &data, const QString &mimeType = QString(), const QUrl &baseUrl = QUrl());
 
@@ -162,13 +156,21 @@ public:
     QRect scrollBarGeometry(Qt::Orientation orientation) const;
 
     void scroll(int, int);
+    bool scrollRecursively(int, int);
     QPoint scrollPosition() const;
     void setScrollPosition(const QPoint &pos);
 
-    void render(QPainter *painter, const QRegion &clip);
-    void render(QPainter *painter);
-    bool clipRenderToViewport() const;
-    void setClipRenderToViewport(bool clipRenderToViewport);
+    enum RenderLayer {
+        ContentsLayer = 0x10,
+        ScrollBarLayer = 0x20,
+        PanIconLayer = 0x40,
+
+        AllLayers = 0xff
+    };
+
+    void render(QPainter*);
+    void render(QPainter*, const QRegion& clip);
+    void render(QPainter*, RenderLayer layer, const QRegion& clip = QRegion());
 
     void setTextSizeMultiplier(qreal factor);
     qreal textSizeMultiplier() const;
@@ -184,7 +186,7 @@ public:
     QSize contentsSize() const;
 
     QWebElement documentElement() const;
-    QList<QWebElement> findAllElements(const QString &selectorQuery) const;
+    QWebElementCollection findAllElements(const QString &selectorQuery) const;
     QWebElement findFirstElement(const QString &selectorQuery) const;
 
     QWebHitTestResult hitTestContent(const QPoint &pos) const;

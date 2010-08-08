@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -26,13 +26,11 @@
 #ifndef ANDROID_WEBKIT_WEBHISTORY_H
 #define ANDROID_WEBKIT_WEBHISTORY_H
 
+#include "AndroidWebHistoryBridge.h"
+
 #include <jni.h>
 #include <wtf/RefCounted.h>
 #include <wtf/Vector.h>
-
-namespace WebCore {
-    class HistoryItem;
-}
 
 namespace android {
 
@@ -49,33 +47,20 @@ public:
 // there are two scale factors saved with each history item. mScale reflects the
 // viewport scale factor, default to 100 means 100%. mScreenWidthScale records
 // the scale factor for the screen width used to wrap the text paragraph.
-class WebHistoryItem : public WTF::RefCounted<WebHistoryItem> {
+class WebHistoryItem : public WebCore::AndroidWebHistoryBridge {
 public:
     WebHistoryItem(WebHistoryItem* parent)
-        : mParent(parent)
-        , mObject(NULL)
-        , mScale(100)
-        , mScreenWidthScale(100)
-        , mActive(false)
-        , mHistoryItem(NULL) {}
+        : WebCore::AndroidWebHistoryBridge(0)
+        , m_parent(parent)
+        , m_object(NULL) { }
     WebHistoryItem(JNIEnv*, jobject, WebCore::HistoryItem*);
     ~WebHistoryItem();
     void updateHistoryItem(WebCore::HistoryItem* item);
-    void setScale(int s)                   { mScale = s; }
-    void setScreenWidthScale(int s)        { mScreenWidthScale = s; }
-    void setActive()                       { mActive = true; }
-    void setParent(WebHistoryItem* parent) { mParent = parent; }
-    WebHistoryItem* parent() { return mParent.get(); }
-    int scale()              { return mScale; }
-    int screenWidthScale()   { return mScreenWidthScale; }
-    WebCore::HistoryItem* historyItem() { return mHistoryItem; }
+    void setParent(WebHistoryItem* parent) { m_parent = parent; }
+    WebHistoryItem* parent() const { return m_parent.get(); }
 private:
-    RefPtr<WebHistoryItem> mParent;
-    jobject         mObject;
-    int             mScale;
-    int             mScreenWidthScale;
-    bool            mActive;
-    WebCore::HistoryItem* mHistoryItem;
+    RefPtr<WebHistoryItem> m_parent;
+    jweak m_object;
 };
 
 };

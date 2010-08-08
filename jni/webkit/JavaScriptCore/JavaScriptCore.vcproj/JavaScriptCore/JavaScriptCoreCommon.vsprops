@@ -6,14 +6,14 @@
 	>
 	<Tool
 		Name="VCCLCompilerTool"
-		AdditionalIncludeDirectories="&quot;$(WebKitOutputDir)\obj\JavaScriptCore\DerivedSources\&quot;;../../;../../API/;../../pcre/;../../parser/;../../bytecompiler/;../../jit/;../../runtime/;../../bytecode/;../../interpreter/;../../wtf/;../../profiler;../../assembler/;../../debugger/;../../wrec/;&quot;$(WebKitLibrariesDir)\include&quot;;&quot;$(WebKitLibrariesDir)\include\icu&quot;;&quot;$(WebKitLibrariesDir)\include\private&quot;;../../../icu/include;&quot;$(WebKitOutputDir)\include&quot;;&quot;$(WebKitOutputDir)\include\JavaScriptCore&quot;;&quot;$(WebKitLibrariesDir)\include\pthreads&quot;;&quot;$(WebKitLibrariesDir)\Include\CoreFoundation\OSXCompatibilityHeaders&quot;;&quot;$(WebKitLibrariesDir)\Include\CoreFoundation\OSXCompatibilityHeaders\GNUCompatibility&quot;"
+		AdditionalIncludeDirectories="&quot;$(WebKitOutputDir)\obj\JavaScriptCore\DerivedSources\&quot;;../../;../../API/;../../pcre/;../../parser/;../../bytecompiler/;../../jit/;../../runtime/;../../bytecode/;../../interpreter/;../../wtf/;../../profiler;../../assembler/;../../debugger/;../../wrec/;&quot;$(WebKitLibrariesDir)\include&quot;;&quot;$(WebKitLibrariesDir)\include\private&quot;;&quot;$(WebKitOutputDir)\include&quot;;&quot;$(WebKitOutputDir)\include\JavaScriptCore&quot;;&quot;$(WebKitOutputDir)\include\private&quot;;&quot;$(WebKitLibrariesDir)\include\pthreads&quot;"
 		PreprocessorDefinitions="__STD_C"
 	/>
 	<Tool
 		Name="VCLinkerTool"
 		AdditionalDependencies="gdi32.lib oleaut32.lib winmm.lib icuin$(LibraryConfigSuffix).lib icuuc$(LibraryConfigSuffix).lib pthreadVC2$(LibraryConfigSuffix).lib WTF$(WebKitConfigSuffix).lib"
 		OutputFile="$(OutDir)\$(ProjectName)$(WebKitDLLConfigSuffix).dll"
-		ModuleDefinitionFile="JavaScriptCore$(WebKitDLLConfigSuffix).def"
+		ModuleDefinitionFile="JavaScriptCore.def"
 	/>
 	<Tool
 		Name="VCPostBuildEventTool"
@@ -21,7 +21,7 @@
 	/>
 	<Tool
 		Name="VCPreBuildEventTool"
-		CommandLine="set PATH=%SystemDrive%\cygwin\bin;%PATH%&#x0D;&#x0A;if exist &quot;$(WebKitOutputDir)\buildfailed&quot; grep XX$(ProjectName)XX &quot;$(WebKitOutputDir)\buildfailed&quot;&#x0D;&#x0A;if errorlevel 1 exit 1&#x0D;&#x0A;echo XX$(ProjectName)XX &gt; &quot;$(WebKitOutputDir)\buildfailed&quot;&#x0D;&#x0A;&#x0D;&#x0A;bash &quot;$(WebKitLibrariesDir)\tools\scripts\auto-version.sh&quot; &quot;$(IntDir)&quot;&#x0D;&#x0A;"
+		CommandLine="%SystemDrive%\cygwin\bin\which.exe bash&#x0D;&#x0A;if errorlevel 1 set PATH=%SystemDrive%\cygwin\bin;%PATH%&#x0D;&#x0A;cmd /c&#x0D;&#x0A;if exist &quot;$(WebKitOutputDir)\buildfailed&quot; grep XX$(ProjectName)XX &quot;$(WebKitOutputDir)\buildfailed&quot;&#x0D;&#x0A;if errorlevel 1 exit 1&#x0D;&#x0A;echo XX$(ProjectName)XX &gt; &quot;$(WebKitOutputDir)\buildfailed&quot;&#x0D;&#x0A;&#x0D;&#x0A;bash &quot;$(WebKitLibrariesDir)\tools\scripts\auto-version.sh&quot; &quot;$(IntDir)&quot;&#x0D;&#x0A;"
 	/>
 	<Tool
 		Name="VCPreLinkEventTool"

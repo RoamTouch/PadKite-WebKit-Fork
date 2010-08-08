@@ -28,8 +28,8 @@
 
 #if ENABLE(NETSCAPE_PLUGIN_API)
 
+#include "Bridge.h"
 #include "npruntime_internal.h"
-#include "runtime.h"
 
 namespace JSC {
 namespace Bindings {
@@ -59,11 +59,6 @@ public:
 private:
     NPIdentifier _methodIdentifier;
 };
-
-#ifdef ANDROID_NPN_SETEXCEPTION
-void SetGlobalException(const NPUTF8* exception);
-void MoveGlobalExceptionToExecState(ExecState* exec);
-#endif  // ANDROID_NPN_SETEXCEPTION
 
 } // namespace Bindings
 } // namespace JSC

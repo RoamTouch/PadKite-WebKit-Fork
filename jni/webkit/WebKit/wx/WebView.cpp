@@ -24,32 +24,39 @@
  */
 
 #include "config.h"
+#include "Cache.h"
+#include "ContextMenu.h"
+#include "ContextMenuItem.h"
+#include "ContextMenuController.h"
 #include "CString.h"
 #include "Document.h"
 #include "Element.h"
 #include "Editor.h"
+#include "EmptyClients.h"
 #include "EventHandler.h"
+#include "FileChooser.h"
 #include "FocusController.h"
 #include "Frame.h"
 #include "FrameLoader.h"
 #include "FrameView.h"
 #include "GraphicsContext.h"
+#include "HTMLFormElement.h"
 #include "Logging.h"
 #include "markup.h"
 #include "Page.h"
-#include "ContextMenu.h"
-#include "ContextMenuItem.h"
-#include "ContextMenuController.h"
 #include "PlatformKeyboardEvent.h"
 #include "PlatformMouseEvent.h"
 #include "PlatformString.h"
 #include "PlatformWheelEvent.h"
+#include "PluginHalterClient.h"
 #include "RenderObject.h"
 #include "RenderView.h"
+#include "ResourceHandleManager.h"
 #include "Scrollbar.h"
 #include "SelectionController.h"
 #include "Settings.h"
 #include "SubstituteData.h"
+#include "Threading.h"
 
 #include "ChromeClientWx.h"
 #include "ContextMenuClientWx.h"
@@ -62,6 +69,10 @@
 #include "JSDOMBinding.h"
 #include <runtime/JSValue.h>
 #include <runtime/UString.h>
+
+#if ENABLE(DATABASE)
+#include "DatabaseTracker.h"
+#endif
 
 #include "wx/wxprec.h"
 #ifndef WX_PRECOMP
@@ -222,18 +233,36 @@ wxWebViewDOMElementInfo::wxWebViewDOMElementInfo() :
 {
 }
 
+static wxWebViewCachePolicy gs_cachePolicy;
+
+/* static */
+void wxWebView::SetCachePolicy(const wxWebViewCachePolicy& cachePolicy)
+{
+    WebCore::Cache* globalCache = WebCore::cache();
+    globalCache->setCapacities(cachePolicy.GetMinDeadCapacity(),
+                               cachePolicy.GetMaxDeadCapacity(),
+                               cachePolicy.GetCapacity());
+
+    // store a copy since there is no getter for Cache values
+    gs_cachePolicy = cachePolicy;
+}
+
+/* static */
+wxWebViewCachePolicy wxWebView::GetCachePolicy()
+{
+    return gs_cachePolicy;
+}
+
 BEGIN_EVENT_TABLE(wxWebView, wxWindow)
     EVT_PAINT(wxWebView::OnPaint)
     EVT_SIZE(wxWebView::OnSize)
     EVT_MOUSE_EVENTS(wxWebView::OnMouseEvents)
     EVT_CONTEXT_MENU(wxWebView::OnContextMenuEvents)
-    EVT_MENU(wxID_ANY, wxWebView::OnMenuSelectEvents)
     EVT_KEY_DOWN(wxWebView::OnKeyEvents)
     EVT_KEY_UP(wxWebView::OnKeyEvents)
     EVT_CHAR(wxWebView::OnKeyEvents)
     EVT_SET_FOCUS(wxWebView::OnSetFocus)
     EVT_KILL_FOCUS(wxWebView::OnKillFocus)
-    EVT_ACTIVATE(wxWebView::OnActivate)
 END_EVENT_TABLE()
 
 IMPLEMENT_DYNAMIC_CLASS(wxWebView, wxWindow)
@@ -245,6 +274,7 @@ wxWebView::wxWebView() :
     m_isEditable(false),
     m_isInitialized(false),
     m_beingDestroyed(false),
+    m_mouseWheelZooms(false),
     m_title(wxEmptyString)
 {
 }
@@ -255,6 +285,7 @@ wxWebView::wxWebView(wxWindow* parent, int id, const wxPoint& position,
     m_isEditable(false),
     m_isInitialized(false),
     m_beingDestroyed(false),
+    m_mouseWheelZooms(false),
     m_title(wxEmptyString)
 {
     Create(parent, id, position, size, style, name);
@@ -265,10 +296,11 @@ bool wxWebView::Create(wxWindow* parent, int id, const wxPoint& position,
 {
     if ( (style & wxBORDER_MASK) == 0)
         style |= wxBORDER_NONE;
-    style |= wxHSCROLL | wxVSCROLL;
     
     if (!wxWindow::Create(parent, id, position, size, style, name))
         return false;
+
+    WTF::initializeThreading();
 
 // This is necessary because we are using SharedTimerWin.cpp on Windows,
 // due to a problem with exceptions getting eaten when using the callback
@@ -286,7 +318,7 @@ bool wxWebView::Create(wxWindow* parent, int id, const wxPoint& position,
     WebCore::HTMLFrameOwnerElement* parentFrame = 0;
 
     WebCore::EditorClientWx* editorClient = new WebCore::EditorClientWx();
-    m_impl->page = new WebCore::Page(new WebCore::ChromeClientWx(this), new WebCore::ContextMenuClientWx(), editorClient, new WebCore::DragClientWx(), new WebCore::InspectorClientWx());
+    m_impl->page = new WebCore::Page(new WebCore::ChromeClientWx(this), new WebCore::ContextMenuClientWx(), editorClient, new WebCore::DragClientWx(), new WebCore::InspectorClientWx(), 0, 0);
     editorClient->setPage(m_impl->page);
     
     m_mainFrame = new wxWebFrame(this);
@@ -303,6 +335,10 @@ bool wxWebView::Create(wxWindow* parent, int id, const wxPoint& position,
     settings->setStandardFontFamily("Times New Roman");
     settings->setJavaScriptEnabled(true);
 
+#if ENABLE(DATABASE)
+    settings->setDatabasesEnabled(true);
+#endif
+
     m_isInitialized = true;
 
     return true;
@@ -312,7 +348,11 @@ wxWebView::~wxWebView()
 {
     m_beingDestroyed = true;
     
-    delete m_mainFrame;
+    while (HasCapture())
+        ReleaseMouse();
+    
+    if (m_mainFrame && m_mainFrame->GetFrame())
+        m_mainFrame->GetFrame()->loader()->detachFromParent();
     
     delete m_impl->page;
     m_impl->page = 0;   
@@ -484,10 +524,16 @@ void wxWebView::MakeEditable(bool enable)
 
 void wxWebView::OnPaint(wxPaintEvent& event)
 {
-    
     if (m_beingDestroyed || !m_mainFrame)
         return;
-    
+
+    // WebView active state is based on TLW active state.
+    wxTopLevelWindow* tlw = dynamic_cast<wxTopLevelWindow*>(wxGetTopLevelParent(this));
+    if (tlw && tlw->IsActive())
+        m_impl->page->focusController()->setActive(true);
+    else {
+        m_impl->page->focusController()->setActive(false);
+    }
     WebCore::Frame* frame = m_mainFrame->GetFrame();
     if (!frame || !frame->view())
         return;
@@ -502,23 +548,14 @@ void wxWebView::OnPaint(wxPaintEvent& event)
         if (dc.IsOk()) {
             wxRect paintRect = GetUpdateRegion().GetBox();
 
-            WebCore::IntSize offset = frame->view()->scrollOffset();
-#if USE(WXGC)
-            gcdc.SetDeviceOrigin(-offset.width(), -offset.height());
-#endif
-            dc.SetDeviceOrigin(-offset.width(), -offset.height());
-            paintRect.Offset(offset.width(), offset.height());
-
 #if USE(WXGC)
             WebCore::GraphicsContext gc(&gcdc);
 #else
             WebCore::GraphicsContext gc(&dc);
 #endif
             if (frame->contentRenderer()) {
-                if (frame->view()->needsLayout())
-                    frame->view()->layout();
-
-                frame->view()->paintContents(&gc, paintRect);
+                frame->view()->layoutIfNeededRecursive();
+                frame->view()->paint(&gc, paintRect);
             }
         }
     }
@@ -536,9 +573,9 @@ void wxWebView::OnSize(wxSizeEvent& event)
 { 
     if (m_isInitialized && m_mainFrame) {
         WebCore::Frame* frame = m_mainFrame->GetFrame();
-        frame->eventHandler()->sendResizeEvent();
-        frame->view()->layout();
-        frame->view()->adjustScrollbars();
+        frame->view()->setFrameRect(wxRect(wxPoint(0,0), event.GetSize()));
+        frame->view()->forceLayout();
+        frame->view()->adjustViewSize();
     }
       
     event.Skip();
@@ -557,10 +594,7 @@ void wxWebView::OnMouseEvents(wxMouseEvent& event)
 {
     event.Skip();
     
-    if (m_beingDestroyed)
-        return;
-    
-    if (!m_mainFrame)
+    if (!m_impl->page)
         return; 
         
     WebCore::Frame* frame = m_mainFrame->GetFrame();  
@@ -572,8 +606,16 @@ void wxWebView::OnMouseEvents(wxMouseEvent& event)
     wxEventType type = event.GetEventType();
     
     if (type == wxEVT_MOUSEWHEEL) {
-        WebCore::PlatformWheelEvent wkEvent(event, globalPoint);
-        frame->eventHandler()->handleWheelEvent(wkEvent);
+        if (m_mouseWheelZooms && event.ControlDown() && !event.AltDown() && !event.ShiftDown()) {
+            if (event.GetWheelRotation() < 0)
+                DecreaseTextSize();
+            else if (event.GetWheelRotation() > 0)
+                IncreaseTextSize();
+        } else {
+            WebCore::PlatformWheelEvent wkEvent(event, globalPoint);
+            frame->eventHandler()->handleWheelEvent(wkEvent);
+        }
+
         return;
     }
     
@@ -593,25 +635,28 @@ void wxWebView::OnMouseEvents(wxMouseEvent& event)
     WebCore::PlatformMouseEvent wkEvent(event, globalPoint, clickCount);
 
     if (type == wxEVT_LEFT_DOWN || type == wxEVT_MIDDLE_DOWN || type == wxEVT_RIGHT_DOWN || 
-                type == wxEVT_LEFT_DCLICK || type == wxEVT_MIDDLE_DCLICK || type == wxEVT_RIGHT_DCLICK)
+                type == wxEVT_LEFT_DCLICK || type == wxEVT_MIDDLE_DCLICK || type == wxEVT_RIGHT_DCLICK) {
         frame->eventHandler()->handleMousePressEvent(wkEvent);
-    
-    else if (type == wxEVT_LEFT_UP || type == wxEVT_MIDDLE_UP || type == wxEVT_RIGHT_UP)
+        if (!HasCapture())
+            CaptureMouse();
+    } else if (type == wxEVT_LEFT_UP || type == wxEVT_MIDDLE_UP || type == wxEVT_RIGHT_UP) {
         frame->eventHandler()->handleMouseReleaseEvent(wkEvent);
-
-    else if (type == wxEVT_MOTION)
+        while (HasCapture())
+            ReleaseMouse();
+    } else if (type == wxEVT_MOTION || type == wxEVT_ENTER_WINDOW || type == wxEVT_LEAVE_WINDOW)
         frame->eventHandler()->mouseMoved(wkEvent);
 }
 
 void wxWebView::OnContextMenuEvents(wxContextMenuEvent& event)
 {
+    Connect(wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(wxWebView::OnMenuSelectEvents), NULL, this);
     m_impl->page->contextMenuController()->clearContextMenu();
     wxPoint localEventPoint = ScreenToClient(event.GetPosition());
 
-    if (!m_mainFrame)
+    if (!m_impl->page)
         return;
         
-    WebCore::Frame* focusedFrame = m_mainFrame->GetFrame();
+    WebCore::Frame* focusedFrame = m_impl->page->focusController()->focusedOrMainFrame();
     if (!focusedFrame->view())
         return;
 
@@ -634,10 +679,18 @@ void wxWebView::OnContextMenuEvents(wxContextMenuEvent& event)
         return;
 
     PopupMenu(menuWx, localEventPoint);
+    
+    Disconnect(wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(wxWebView::OnMenuSelectEvents), NULL, this);
 }
 
 void wxWebView::OnMenuSelectEvents(wxCommandEvent& event)
 {
+    // we shouldn't hit this unless there's a context menu showing
+    WebCore::ContextMenu* coreMenu = m_impl->page->contextMenuController()->contextMenu();
+    ASSERT(coreMenu);
+    if (!coreMenu)
+        return;
+
     WebCore::ContextMenuItem* item = WebCore::ContextMenu::itemWithId (event.GetId());
     if (!item)
         return;
@@ -691,8 +744,8 @@ void wxWebView::Paste()
 void wxWebView::OnKeyEvents(wxKeyEvent& event)
 {
     WebCore::Frame* frame = 0;
-    if (m_mainFrame)
-        frame = m_mainFrame->GetFrame();
+    if (m_impl->page)
+        frame = m_impl->page->focusController()->focusedOrMainFrame();
 
     if (!(frame && frame->view()))
         return;
@@ -744,19 +797,19 @@ void wxWebView::OnKeyEvents(wxKeyEvent& event)
             break;
         case WXK_LEFT:
         case WXK_NUMPAD_LEFT:
-            frame->view()->scrollBy(WebCore::IntSize(-WebCore::cScrollbarPixelsPerLineStep, 0));
+            frame->view()->scrollBy(WebCore::IntSize(-WebCore::Scrollbar::pixelsPerLineStep(), 0));
             return;
         case WXK_UP:
         case WXK_NUMPAD_UP:
-            frame->view()->scrollBy(WebCore::IntSize(0, -WebCore::cScrollbarPixelsPerLineStep));
+            frame->view()->scrollBy(WebCore::IntSize(0, -WebCore::Scrollbar::pixelsPerLineStep()));
             return;
         case WXK_RIGHT:
         case WXK_NUMPAD_RIGHT:
-            frame->view()->scrollBy(WebCore::IntSize(WebCore::cScrollbarPixelsPerLineStep, 0));
+            frame->view()->scrollBy(WebCore::IntSize(WebCore::Scrollbar::pixelsPerLineStep(), 0));
             return;
         case WXK_DOWN:
         case WXK_NUMPAD_DOWN:
-            frame->view()->scrollBy(WebCore::IntSize(0, WebCore::cScrollbarPixelsPerLineStep));
+            frame->view()->scrollBy(WebCore::IntSize(0, WebCore::Scrollbar::pixelsPerLineStep()));
             return;
         case WXK_END:
         case WXK_NUMPAD_END:
@@ -768,11 +821,11 @@ void wxWebView::OnKeyEvents(wxKeyEvent& event)
             return;
         case WXK_PAGEUP:
         case WXK_NUMPAD_PAGEUP:
-            frame->view()->scrollBy(WebCore::IntSize(0, -frame->view()->visibleHeight() + WebCore::cAmountToKeepWhenPaging));
+            frame->view()->scrollBy(WebCore::IntSize(0, -frame->view()->visibleHeight() * WebCore::Scrollbar::minFractionToStepWhenPaging()));
             return;
         case WXK_PAGEDOWN:
         case WXK_NUMPAD_PAGEDOWN:
-            frame->view()->scrollBy(WebCore::IntSize(0, frame->view()->visibleHeight() - WebCore::cAmountToKeepWhenPaging));
+            frame->view()->scrollBy(WebCore::IntSize(0, frame->view()->visibleHeight() * WebCore::Scrollbar::minFractionToStepWhenPaging()));
             return;
         //These we don't want turning into char events, stuff 'em
         case WXK_ESCAPE:
@@ -833,7 +886,6 @@ void wxWebView::OnSetFocus(wxFocusEvent& event)
         frame = m_mainFrame->GetFrame();
         
     if (frame) {
-        m_impl->page->focusController()->setActive(true);
         frame->selection()->setFocused(true);
     }
 
@@ -847,17 +899,8 @@ void wxWebView::OnKillFocus(wxFocusEvent& event)
         frame = m_mainFrame->GetFrame();
         
     if (frame) {
-        m_impl->page->focusController()->setActive(false);
         frame->selection()->setFocused(false);
     }
-    event.Skip();
-}
-
-void wxWebView::OnActivate(wxActivateEvent& event)
-{
-    if (m_impl->page)
-        m_impl->page->focusController()->setActive(event.GetActive());
-
     event.Skip();
 }
 
@@ -869,3 +912,71 @@ wxWebViewDOMElementInfo wxWebView::HitTest(const wxPoint& pos) const
     return wxWebViewDOMElementInfo();
 }
 
+bool wxWebView::ShouldClose() const
+{
+    if (m_mainFrame)
+        return m_mainFrame->ShouldClose();
+
+    return true;
+}
+
+/* static */
+void wxWebView::SetDatabaseDirectory(const wxString& databaseDirectory)
+{
+#if ENABLE(DATABASE)
+    WebCore::DatabaseTracker::tracker().setDatabaseDirectoryPath(databaseDirectory);
+#endif
+}
+
+/* static */
+wxString wxWebView::GetDatabaseDirectory()
+{
+#if ENABLE(DATABASE)
+    return WebCore::DatabaseTracker::tracker().databaseDirectoryPath();
+#else
+    return wxEmptyString;
+#endif
+}
+
+static WebCore::ResourceHandleManager::ProxyType curlProxyType(wxProxyType type)
+{
+    switch (type) {
+        case HTTP: return WebCore::ResourceHandleManager::HTTP;
+        case Socks4: return WebCore::ResourceHandleManager::Socks4;
+        case Socks4A: return WebCore::ResourceHandleManager::Socks4A;
+        case Socks5: return WebCore::ResourceHandleManager::Socks5;
+        case Socks5Hostname: return WebCore::ResourceHandleManager::Socks5Hostname;
+        default:
+            ASSERT_NOT_REACHED();
+            return WebCore::ResourceHandleManager::HTTP;
+    }
+}
+
+/* static */
+void wxWebView::SetProxyInfo(const wxString& host,
+                             unsigned long port,
+                             wxProxyType type,
+                             const wxString& username,
+                             const wxString& password)
+{
+    using WebCore::ResourceHandleManager;
+    if (ResourceHandleManager* mgr = ResourceHandleManager::sharedInstance())
+        mgr->setProxyInfo(host, port, curlProxyType(type), username, password);
+}
+
+wxWebSettings wxWebView::GetWebSettings()
+{
+    ASSERT(m_impl->page);
+    if (m_impl->page)
+        return wxWebSettings(m_impl->page->settings());
+    
+    return wxWebSettings();
+}
+
+wxWebKitParseMode wxWebView::GetParseMode() const
+{
+    if (m_mainFrame)
+        return m_mainFrame->GetParseMode();
+
+    return NoDocument;
+}

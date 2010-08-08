@@ -111,7 +111,7 @@ unsigned FontPlatformData::computeHash() const {
         // a font whose properties are equal should generate the same hash
         uintptr_t hashCodes[6] = { thisFont->GetPointSize(), thisFont->GetFamily(), thisFont->GetStyle(), 
                                     thisFont->GetWeight(), thisFont->GetUnderlined(), 
-                                    StringImpl::computeHash(thisFont->GetFaceName().mb_str(wxConvUTF8)) };
+                                    StringImpl::computeHash(thisFont->GetFaceName().utf8_str()) };
         
         return StringImpl::computeHash(reinterpret_cast<UChar*>(hashCodes), sizeof(hashCodes) / sizeof(UChar));
 }
@@ -126,6 +126,18 @@ FontPlatformData::~FontPlatformData()
 String FontPlatformData::description() const
 {
     return String();
+}
+#endif
+
+#if OS(WINDOWS)
+bool FontPlatformData::useGDI() const
+{
+    return true;
+}
+
+HFONT FontPlatformData::hfont() const
+{
+    return static_cast<HFONT>(m_font->font()->GetHFONT());
 }
 #endif
 

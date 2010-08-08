@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -25,37 +25,62 @@
 
 // must include config.h first for webkit to fiddle with new/delete
 #include "config.h"
+#include "ANPSurface_npapi.h"
 
 #include "PluginView.h"
 #include "PluginWidgetAndroid.h"
 #include "SkANP.h"
-#include <ui/Surface.h>
+#include "android_graphics.h"
+#include <JNIUtility.h>
+#include <surfaceflinger/Surface.h>
 #include <ui/Rect.h>
 #include <ui/Region.h>
-#include "jni_utility.h"
 #include <utils/RefBase.h>
-#include "android_graphics.h"
-#include "ANPSurface_npapi.h"
 
 using namespace android;
+
+// used to cache JNI method and field IDs for Surface Objects
+static struct ANPSurfaceInterfaceJavaGlue {
+    bool        initialized;
+    jmethodID   getSurfaceHolder;
+    jmethodID   getSurface;
+    jfieldID    surfacePointer;
+} gSurfaceJavaGlue;
 
 static inline sp<Surface> getSurface(JNIEnv* env, jobject view) {
     if (!env || !view) {
         return NULL;
     }
 
-    jclass clazz = env->FindClass("android/view/Surface");
-    jfieldID surfaceField = env->GetFieldID(clazz, "mSurface", "I");
+    if (!gSurfaceJavaGlue.initialized) {
 
-    clazz = env->FindClass("android/view/SurfaceView");
-    jmethodID getHolder = env->GetMethodID(clazz, "getHolder", "()Landroid/view/SurfaceHolder;");
+        jclass surfaceViewClass = env->FindClass("android/view/SurfaceView");
+        gSurfaceJavaGlue.getSurfaceHolder = env->GetMethodID(surfaceViewClass, "getHolder",
+                                                             "()Landroid/view/SurfaceHolder;");
 
-    clazz = env->FindClass("android/view/SurfaceHolder");
-    jmethodID getSurface = env->GetMethodID(clazz, "getSurface", "()Landroid/view/Surface;");
+        jclass surfaceHolderClass = env->FindClass("android/view/SurfaceHolder");
+        gSurfaceJavaGlue.getSurface = env->GetMethodID(surfaceHolderClass, "getSurface",
+                                                       "()Landroid/view/Surface;");
 
-    jobject holder = env->CallObjectMethod(view, getHolder);
-    jobject surface = env->CallObjectMethod(holder, getSurface);
-    return sp<Surface>((Surface*) env->GetIntField(surface, surfaceField));
+        jclass surfaceClass = env->FindClass("android/view/Surface");
+        gSurfaceJavaGlue.surfacePointer = env->GetFieldID(surfaceClass,
+                                                          "mSurface", "I");
+
+        env->DeleteLocalRef(surfaceClass);
+        env->DeleteLocalRef(surfaceViewClass);
+        env->DeleteLocalRef(surfaceHolderClass);
+
+        gSurfaceJavaGlue.initialized = true;
+    }
+
+    jobject holder = env->CallObjectMethod(view, gSurfaceJavaGlue.getSurfaceHolder);
+    jobject surface = env->CallObjectMethod(holder, gSurfaceJavaGlue.getSurface);
+    jint surfacePointer = env->GetIntField(surface, gSurfaceJavaGlue.surfacePointer);
+
+    env->DeleteLocalRef(holder);
+    env->DeleteLocalRef(surface);
+
+    return sp<Surface>((Surface*) surfacePointer);
 }
 
 static inline ANPBitmapFormat convertPixelFormat(PixelFormat format) {
@@ -91,6 +116,16 @@ static bool anp_lock(JNIEnv* env, jobject surfaceView, ANPBitmap* bitmap, ANPRec
     status_t err = surface->lock(&info, &dirtyRegion);
     if (err < 0) {
         return false;
+    }
+
+    // the surface may have expanded the dirty region so we must to pass that
+    // information back to the plugin.
+    if (dirtyRect) {
+        Rect dirtyBounds = dirtyRegion.getBounds();
+        dirtyRect->left = dirtyBounds.left;
+        dirtyRect->right = dirtyBounds.right;
+        dirtyRect->top = dirtyBounds.top;
+        dirtyRect->bottom = dirtyBounds.bottom;
     }
 
     ssize_t bpr = info.s * bytesPerPixel(info.format);
@@ -133,5 +168,7 @@ void ANPSurfaceInterfaceV0_Init(ANPInterface* value) {
 
     ASSIGN(i, lock);
     ASSIGN(i, unlock);
-}
 
+    // setup the java glue struct
+    gSurfaceJavaGlue.initialized = false;
+}

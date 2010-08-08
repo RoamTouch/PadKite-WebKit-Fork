@@ -29,13 +29,6 @@
 #include "ProfileNode.h"
 #include <stdio.h>
 
-#if PLATFORM(ANDROID)
-typedef bool (* Comparator)(const void*, const void*);
-namespace std {
-extern void sort(const void** start, const void** end, Comparator comp);
-}
-#endif
-
 namespace JSC {
 
 PassRefPtr<Profile> Profile::create(const UString& title, unsigned uid)
@@ -49,7 +42,7 @@ Profile::Profile(const UString& title, unsigned uid)
 {
     // FIXME: When multi-threading is supported this will be a vector and calls
     // into the profiler will need to know which thread it is executing on.
-    m_head = ProfileNode::create(CallIdentifier("Thread_1", 0, 0), 0, 0);
+    m_head = ProfileNode::create(CallIdentifier("Thread_1", UString(), 0), 0, 0);
 }
 
 Profile::~Profile()
@@ -115,15 +108,6 @@ void Profile::debugPrintData() const
 
 typedef pair<UString::Rep*, unsigned> NameCountPair;
 
-#if PLATFORM(ANDROID)
-typedef bool (* NameCountPairComparator)(const NameCountPair&, const NameCountPair&);
-
-inline void _sort(NameCountPair* start, NameCountPair* end, NameCountPairComparator comp) 
-{
-    std::sort((const void**) start, (const void**) end, (Comparator) comp);
-}
-#endif
-
 static inline bool functionNameCountPairComparator(const NameCountPair& a, const NameCountPair& b)
 {
     return a.second > b.second;
@@ -141,11 +125,7 @@ void Profile::debugPrintDataSampleStyle() const
     NameCountPairVector sortedFunctions(countedFunctions.size());
     copyToVector(countedFunctions, sortedFunctions);
 
-#if PLATFORM(ANDROID)
-    _sort(sortedFunctions.begin(), sortedFunctions.end(), functionNameCountPairComparator);
-#else
     std::sort(sortedFunctions.begin(), sortedFunctions.end(), functionNameCountPairComparator);
-#endif
     for (NameCountPairVector::iterator it = sortedFunctions.begin(); it != sortedFunctions.end(); ++it)
         printf("        %-12d%s\n", (*it).second, UString((*it).first).UTF8String().c_str());
 

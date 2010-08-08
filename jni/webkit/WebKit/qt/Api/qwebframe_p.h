@@ -25,6 +25,7 @@
 #include "qwebpage_p.h"
 
 #include "EventHandler.h"
+#include "GraphicsContext.h"
 #include "KURL.h"
 #include "PlatformString.h"
 #include "qwebelement.h"
@@ -70,7 +71,6 @@ public:
         , allowsScrolling(true)
         , marginWidth(-1)
         , marginHeight(-1)
-        , clipRenderToViewport(true)
         {}
     void init(QWebFrame* qframe, QWebFrameData* frameData);
 
@@ -79,15 +79,17 @@ public:
     WebCore::Scrollbar* horizontalScrollBar() const;
     WebCore::Scrollbar* verticalScrollBar() const;
 
-    Qt::ScrollBarPolicy horizontalScrollBarPolicy;
-    Qt::ScrollBarPolicy verticalScrollBarPolicy;
-
     static WebCore::Frame* core(QWebFrame*);
     static QWebFrame* kit(WebCore::Frame*);
 
-    void renderPrivate(QPainter *painter, const QRegion &clip);
+    void renderRelativeCoords(WebCore::GraphicsContext*, QWebFrame::RenderLayer, const QRegion& clip);
+    void renderContentsLayerAbsoluteCoords(WebCore::GraphicsContext*, const QRegion& clip);
+
+    bool scrollOverflow(int dx, int dy);
 
     QWebFrame *q;
+    Qt::ScrollBarPolicy horizontalScrollBarPolicy;
+    Qt::ScrollBarPolicy verticalScrollBarPolicy;
     WebCore::FrameLoaderClientQt *frameLoaderClient;
     WebCore::Frame *frame;
     QWebPage *page;
@@ -95,7 +97,6 @@ public:
     bool allowsScrolling;
     int marginWidth;
     int marginHeight;
-    bool clipRenderToViewport;
 };
 
 class QWebHitTestResultPrivate {

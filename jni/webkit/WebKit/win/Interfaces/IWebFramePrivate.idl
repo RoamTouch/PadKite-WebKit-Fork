@@ -32,6 +32,7 @@ import "IWebFrame.idl";
 interface IWebFrame;
 interface IWebIconFetcher;
 interface IWebIconFetcherDelegate;
+interface IWebScriptWorld;
 
 typedef enum {
     WebFrameLoadTypeStandard,
@@ -91,4 +92,14 @@ interface IWebFramePrivate : IUnknown
     HRESULT numberOfActiveAnimations([out, retval] UINT* number);
 
     HRESULT isDisplayingStandaloneImage([out, retval] BOOL* result);
+
+    HRESULT allowsFollowingLink([in] BSTR url, [out, retval] BOOL* result);
+
+    [local] HRESULT stringByEvaluatingJavaScriptInScriptWorld([in] IWebScriptWorld*, [in] JSObjectRef globalObject, [in] BSTR script, [out, retval] BSTR* result);
+
+    [local] JSGlobalContextRef globalContextForScriptWorld([in] IWebScriptWorld*);
+
+    HRESULT counterValueForElementById([in] BSTR id, [out, retval] BSTR* result);
+
+    HRESULT pauseSVGAnimation([in] BSTR elementId, [in] IDOMNode* node, [in] double secondsFromNow, [out, retval] BOOL* animationWasRunning);
 }

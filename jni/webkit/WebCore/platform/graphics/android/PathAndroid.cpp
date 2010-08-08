@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -25,16 +25,16 @@
 
 #include "config.h"
 #include "Path.h"
+
+#include "AffineTransform.h"
 #include "FloatRect.h"
 #include "GraphicsContext.h"
 #include "ImageBuffer.h"
-#include "StrokeStyleApplier.h"
-#include "TransformationMatrix.h"
-
 #include "SkPaint.h"
 #include "SkPath.h"
 #include "SkRegion.h"
-
+#include "StrokeStyleApplier.h"
+#include "TransformationMatrix.h"
 #include "android_graphics.h"
 
 namespace WebCore {
@@ -265,11 +265,11 @@ void Path::apply(void* info, PathApplierFunction function) const
     }
 }
 
-void Path::transform(const TransformationMatrix& xform)
+void Path::transform(const AffineTransform& xform)
 {
     m_path->transform(xform);
 }
-    
+
 #if ENABLE(SVG)
 String Path::debugString() const
 {

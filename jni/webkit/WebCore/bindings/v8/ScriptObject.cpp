@@ -37,6 +37,9 @@
 #include "Document.h"
 #include "Frame.h"
 #include "V8Binding.h"
+#include "V8InjectedScriptHost.h"
+#include "V8InspectorBackend.h"
+#include "V8InspectorFrontendHost.h"
 #include "V8Proxy.h"
 
 #include <v8.h>
@@ -64,6 +67,10 @@ bool ScriptObject::set(const String& name, const String& value)
 
 bool ScriptObject::set(const char* name, const ScriptObject& value)
 {
+    if (value.scriptState() != m_scriptState) {
+        ASSERT_NOT_REACHED();
+        return false;
+    }
     ScriptScope scope(m_scriptState);
     v8Object()->Set(v8::String::New(name), value.v8Value());
     return scope.success();
@@ -83,6 +90,13 @@ bool ScriptObject::set(const char* name, double value)
     return scope.success();
 }
 
+bool ScriptObject::set(const char* name, long value)
+{
+    ScriptScope scope(m_scriptState);
+    v8Object()->Set(v8::String::New(name), v8::Number::New(value));
+    return scope.success();
+}
+
 bool ScriptObject::set(const char* name, long long value)
 {
     ScriptScope scope(m_scriptState);
@@ -91,6 +105,20 @@ bool ScriptObject::set(const char* name, long long value)
 }
 
 bool ScriptObject::set(const char* name, int value)
+{
+    ScriptScope scope(m_scriptState);
+    v8Object()->Set(v8::String::New(name), v8::Number::New(value));
+    return scope.success();
+}
+
+bool ScriptObject::set(const char* name, unsigned value)
+{
+    ScriptScope scope(m_scriptState);
+    v8Object()->Set(v8::String::New(name), v8::Number::New(value));
+    return scope.success();
+}
+
+bool ScriptObject::set(const char* name, unsigned long value)
 {
     ScriptScope scope(m_scriptState);
     v8Object()->Set(v8::String::New(name), v8::Number::New(value));
@@ -117,14 +145,28 @@ bool ScriptGlobalObject::set(ScriptState* scriptState, const char* name, const S
     return scope.success();
 }
 
+#if ENABLE(INSPECTOR)
 bool ScriptGlobalObject::set(ScriptState* scriptState, const char* name, InspectorBackend* value)
 {
     ScriptScope scope(scriptState);
-#if !PLATFORM(ANDROID)
-    scope.global()->Set(v8::String::New(name), V8DOMWrapper::convertToV8Object(V8ClassIndex::INSPECTORBACKEND, value));
-#endif
+    scope.global()->Set(v8::String::New(name), toV8(value));
     return scope.success();
 }
+
+bool ScriptGlobalObject::set(ScriptState* scriptState, const char* name, InspectorFrontendHost* value)
+{
+    ScriptScope scope(scriptState);
+    scope.global()->Set(v8::String::New(name), toV8(value));
+    return scope.success();
+}
+
+bool ScriptGlobalObject::set(ScriptState* scriptState, const char* name, InjectedScriptHost* value)
+{
+    ScriptScope scope(scriptState);
+    scope.global()->Set(v8::String::New(name), toV8(value));
+    return scope.success();
+}
+#endif
 
 bool ScriptGlobalObject::get(ScriptState* scriptState, const char* name, ScriptObject& value)
 {

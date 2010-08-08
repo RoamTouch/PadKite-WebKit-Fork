@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -23,31 +23,21 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
 #include "config.h"
 #include "SSLKeyGenerator.h"
 
-#include "JavaSharedClient.h"
-#include "KeyGeneratorClient.h"
+#include "PlatformBridge.h"
 
 namespace WebCore {
 
 void getSupportedKeySizes(Vector<String>& keys)
 {
-    if (android::JavaSharedClient::GetKeyGeneratorClient()) {
-        keys = android::JavaSharedClient::GetKeyGeneratorClient()->
-                getSupportedKeyStrengthList();
-    }
+    keys = PlatformBridge::getSupportedKeyStrengthList();
 }
 
-String signedPublicKeyAndChallengeString(unsigned index,
-        const String& challenge, const KURL& url)
+String signedPublicKeyAndChallengeString(unsigned index, const String& challenge, const KURL& url)
 {
-    if (android::JavaSharedClient::GetKeyGeneratorClient()) {
-        return android::JavaSharedClient::GetKeyGeneratorClient()->
-                getSignedPublicKeyAndChallengeString(index, challenge, url);
-    }
-    return String();
+    return PlatformBridge::getSignedPublicKeyAndChallengeString(index, challenge, url);
 }
 
 }

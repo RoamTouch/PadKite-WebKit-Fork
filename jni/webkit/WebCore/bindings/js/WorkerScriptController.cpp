@@ -52,14 +52,12 @@ WorkerScriptController::WorkerScriptController(WorkerContext* workerContext)
     , m_workerContext(workerContext)
     , m_executionForbidden(false)
 {
+    m_globalData->clientData = new WebCoreJSClientData(m_globalData.get());
 }
 
 WorkerScriptController::~WorkerScriptController()
 {
     m_workerContextWrapper = 0; // Unprotect the global object.
-
-    ASSERT(!m_globalData->heap.protectedObjectCount());
-    ASSERT(!m_globalData->heap.isBusy());
     m_globalData->heap.destroy();
 }
 

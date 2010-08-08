@@ -67,10 +67,11 @@ static Color disabledTextColor(const Color& textColor, const Color& backgroundCo
     return disabledColor;
 }
 
-RenderTextControl::RenderTextControl(Node* node)
+RenderTextControl::RenderTextControl(Node* node, bool placeholderVisible)
     : RenderBlock(node)
-    , m_edited(false)
-    , m_userEdited(false)
+    , m_placeholderVisible(placeholderVisible)
+    , m_wasChangedSinceLastChangeEvent(false)
+    , m_lastChangeWasUserEdit(false)
 {
 }
 
@@ -92,14 +93,22 @@ void RenderTextControl::styleDidChange(StyleDifference diff, const RenderStyle* 
         // Reset them now to avoid getting a spurious layout hint.
         textBlockRenderer->style()->setHeight(Length());
         textBlockRenderer->style()->setWidth(Length());
-        textBlockRenderer->setStyle(textBlockStyle);
-        for (Node* n = m_innerText->firstChild(); n; n = n->traverseNextNode(m_innerText.get())) {
-            if (n->renderer())
-                n->renderer()->setStyle(textBlockStyle);
-        }
+        setInnerTextStyle(textBlockStyle);
     }
 
     setReplaced(isInline());
+}
+
+void RenderTextControl::setInnerTextStyle(PassRefPtr<RenderStyle> style)
+{
+    if (m_innerText) {
+        RefPtr<RenderStyle> textStyle = style;
+        m_innerText->renderer()->setStyle(textStyle);
+        for (Node* n = m_innerText->firstChild(); n; n = n->traverseNextNode(m_innerText.get())) {
+            if (n->renderer())
+                n->renderer()->setStyle(textStyle);
+        }
+    }
 }
 
 static inline bool updateUserModifyProperty(Node* node, RenderStyle* style)
@@ -173,7 +182,7 @@ void RenderTextControl::setInnerTextValue(const String& innerTextValue)
                 frame->editor()->clearUndoRedoOperations();
                 
                 if (AXObjectCache::accessibilityEnabled())
-                    document()->axObjectCache()->postNotification(this, "AXValueChanged", false);
+                    document()->axObjectCache()->postNotification(this, AXObjectCache::AXValueChanged, false);
             }
         }
 
@@ -186,17 +195,17 @@ void RenderTextControl::setInnerTextValue(const String& innerTextValue)
             ASSERT(!ec);
         }
 
-        m_edited = false;
-        m_userEdited = false;
+        // We set m_lastChangeWasUserEdit to false since this change was not explicitly made by the user (say, via typing on the keyboard), see <rdar://problem/5359921>.
+        m_lastChangeWasUserEdit = false;
     }
 
     static_cast<Element*>(node())->setFormControlValueMatchesRenderer(true);
 }
 
-void RenderTextControl::setUserEdited(bool isUserEdited)
+void RenderTextControl::setLastChangeWasUserEdit(bool lastChangeWasUserEdit)
 {
-    m_userEdited = isUserEdited;
-    document()->setIgnoreAutofocus(isUserEdited);
+    m_lastChangeWasUserEdit = lastChangeWasUserEdit;
+    document()->setIgnoreAutofocus(lastChangeWasUserEdit);
 }
 
 int RenderTextControl::selectionStart()
@@ -303,15 +312,12 @@ int RenderTextControl::indexForVisiblePosition(const VisiblePosition& pos)
 
 void RenderTextControl::subtreeHasChanged()
 {
-    m_edited = true;
-    m_userEdited = true;
+    m_wasChangedSinceLastChangeEvent = true;
+    m_lastChangeWasUserEdit = true;
 }
 
 String RenderTextControl::finishText(Vector<UChar>& result) const
 {
-    // ANDROID: This method was modified with a fix from WebKit r31081. This
-    // comment can be removed the next time we update.
-
     // Remove one trailing newline; there's always one that's collapsed out by rendering.
     size_t size = result.size();
     if (size && result[size - 1] == '\n')
@@ -486,18 +492,6 @@ void RenderTextControl::calcPrefWidths()
     m_minPrefWidth += toAdd;
     m_maxPrefWidth += toAdd;
 
-    // FIXME: This causes cnn.com loading way slow. Comment it out for now
-//#ifdef ANDROID_LAYOUT
-#if 0
-    Frame* frame = document()->frame();
-    if (frame && frame->settings()->layoutAlgorithm() == Settings::kLayoutFitColumnToScreen) {
-        int maxWidth = frame->view()->visibleWidth() - 2 * ANDROID_FCTS_MARGIN_PADDING;
-        if (maxWidth > 0 && maxWidth < m_minPrefWidth)
-            m_minPrefWidth = maxWidth;
-        if (maxWidth > 0 && maxWidth < m_maxPrefWidth)
-            m_maxPrefWidth = maxWidth;
-    }
-#endif
     setPrefWidthsDirty(false);
 }
 
@@ -507,18 +501,33 @@ void RenderTextControl::selectionChanged(bool userTriggered)
 
     if (Frame* frame = document()->frame()) {
         if (frame->selection()->isRange() && userTriggered)
-            node()->dispatchEvent(eventNames().selectEvent, true, false);
+            node()->dispatchEvent(Event::create(eventNames().selectEvent, true, false));
     }
 }
 
-void RenderTextControl::addFocusRingRects(GraphicsContext* graphicsContext, int tx, int ty)
+void RenderTextControl::addFocusRingRects(Vector<IntRect>& rects, int tx, int ty)
 {
-    graphicsContext->addFocusRingRect(IntRect(tx, ty, width(), height()));
+    if (width() && height())
+        rects.append(IntRect(tx, ty, width(), height()));
 }
 
 HTMLElement* RenderTextControl::innerTextElement() const
 {
     return m_innerText.get();
+}
+
+void RenderTextControl::updatePlaceholderVisibility(bool placeholderShouldBeVisible, bool placeholderValueChanged)
+{
+    bool oldPlaceholderVisible = m_placeholderVisible;
+    m_placeholderVisible = placeholderShouldBeVisible;
+    if (oldPlaceholderVisible != m_placeholderVisible || placeholderValueChanged) {
+        // Sets the inner text style to the normal style or :placeholder style.
+        setInnerTextStyle(createInnerTextStyle(textBaseStyle()));
+
+        // updateFromElement() of the subclasses updates the text content
+        // to the element's value(), placeholder(), or the empty string.
+        updateFromElement();
+    }
 }
 
 } // namespace WebCore

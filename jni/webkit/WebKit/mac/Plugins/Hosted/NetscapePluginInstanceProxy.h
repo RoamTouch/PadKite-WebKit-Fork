@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008, 2009, 2010 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -49,11 +49,13 @@ namespace JSC {
     }
 }
 @class WebHostedNetscapePluginView;
+@class WebFrame;
 
 namespace WebKit {
 
 class HostedNetscapePluginStream;
 class NetscapePluginHostProxy;
+class PluginRequest;
 class ProxyInstance;
     
 class NetscapePluginInstanceProxy : public RefCounted<NetscapePluginInstanceProxy> {
@@ -138,7 +140,7 @@ public:
                                data_t& usernameData, mach_msg_type_number_t& usernameLength, data_t& passwordData, mach_msg_type_number_t& passwordLength);
     bool convertPoint(double sourceX, double sourceY, NPCoordinateSpace sourceSpace, 
                       double& destX, double& destY, NPCoordinateSpace destSpace);
-    
+
     PassRefPtr<JSC::Bindings::Instance> createBindingsInstance(PassRefPtr<JSC::Bindings::RootObject>);
     RetainPtr<NSData *> marshalValues(JSC::ExecState*, const JSC::ArgList& args);
     void marshalValue(JSC::ExecState*, JSC::JSValue value, data_t& resultData, mach_msg_type_number_t& resultLength);
@@ -162,6 +164,12 @@ public:
 
     void resolveURL(const char* url, const char* target, data_t& resolvedURLData, mach_msg_type_number_t& resolvedURLLength);
     
+    void didDraw();
+    void privateBrowsingModeDidChange(bool isPrivateBrowsingEnabled);
+    
+    static void setGlobalException(const WebCore::String&);
+    static void moveGlobalExceptionToExecState(JSC::ExecState*);
+
     // Reply structs
     struct Reply {
         enum Type {
@@ -244,6 +252,8 @@ public:
     template <typename T>
     std::auto_ptr<T> waitForReply(uint32_t requestID)
     {
+        willCallPluginFunction();
+        
         m_waitingForReply = true;
 
         Reply* reply = processRequestsAndWaitForReply(requestID);
@@ -251,13 +261,18 @@ public:
             ASSERT(reply->m_type == T::ReplyType);
         
         m_waitingForReply = false;
+        
+        didCallPluginFunction();
+
         return std::auto_ptr<T>(static_cast<T*>(reply));
     }
     
-private:
-    NetscapePluginInstanceProxy(NetscapePluginHostProxy*, WebHostedNetscapePluginView *, bool fullFramePlugin);
+    void webFrameDidFinishLoadWithReason(WebFrame*, NPReason);
 
-    NPError loadRequest(NSURLRequest *, const char* cTarget, bool currentEventIsUserGesture, uint32_t& streamID);
+private:
+    NetscapePluginInstanceProxy(NetscapePluginHostProxy*, WebHostedNetscapePluginView*, bool fullFramePlugin);
+
+    NPError loadRequest(NSURLRequest*, const char* cTarget, bool currentEventIsUserGesture, uint32_t& streamID);
     
     class PluginRequest;
     void performRequest(PluginRequest*);
@@ -271,7 +286,7 @@ private:
 
     void requestTimerFired(WebCore::Timer<NetscapePluginInstanceProxy>*);
     WebCore::Timer<NetscapePluginInstanceProxy> m_requestTimer;
-    Deque<PluginRequest*> m_pluginRequests;
+    Deque<RefPtr<PluginRequest> > m_pluginRequests;
     
     HashMap<uint32_t, RefPtr<HostedNetscapePluginStream> > m_streams;
 
@@ -307,8 +322,12 @@ private:
     bool m_shouldStopSoon;
     uint32_t m_currentRequestID;
     bool m_inDestroy;
+    bool m_pluginIsWaitingForDraw;
     
     RefPtr<HostedNetscapePluginStream> m_manualStream;
+
+    typedef HashMap<WebFrame*, RefPtr<PluginRequest> > FrameLoadMap;
+    FrameLoadMap m_pendingFrameLoads;
 };
     
 } // namespace WebKit

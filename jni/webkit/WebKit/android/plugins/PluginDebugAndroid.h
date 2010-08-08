@@ -1,5 +1,5 @@
 /*
- * Copyright 2008, The Android Open Source Project
+ * Copyright 2010, The Android Open Source Project
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -26,20 +26,32 @@
 #ifndef PLUGIN_DEBUG_ANDROID_H__
 #define PLUGIN_DEBUG_ANDROID_H__
 
-#ifdef ANDROID_PLUGINS
+#include "android_npapi.h"
 
 // Define PLUGIN_DEBUG_LOCAL in an individual C++ file to enable for
 // that file only.
 
 // Define PLUGIN_DEBUG_GLOBAL to 1 to turn plug-in debug for all
-// Android plug-in code in this direectory.
+// Android plug-in code in this directory.
 #define PLUGIN_DEBUG_GLOBAL     0
 
 #if PLUGIN_DEBUG_GLOBAL || defined(PLUGIN_DEBUG_LOCAL)
-# define PLUGIN_LOG(A, B...)    do { LOGI( A , ## B ); } while(0)
+# define PLUGIN_LOG(FORMAT, ARGS...) do { anp_logPlugin(FORMAT, ## ARGS); } while(0)
+# define PLUGIN_LOG_EVENT(NPP, EVT, RET, TIME) do { anp_logPluginEvent(NPP, EVT, RET, TIME); } while(0)
+
+/* Logs the given character array and optional arguments. All log entries use
+   the DEBUG priority and use the same "webkit_plugin" log tag.
+ */
+void anp_logPlugin(const char format[], ...);
+/* Logs a user readable description of a plugin event. The relevant contents of
+   each event are logged, as well as the value returned by the plugin instance
+   and how long the instance took to process the event (in milliseconds).
+ */
+void anp_logPluginEvent(void* npp, const ANPEvent* event, int16 returnVal, int elapsedTime);
+
 #else
 # define PLUGIN_LOG(A, B...)    do { } while(0)
-#endif
+# define PLUGIN_LOG_EVENT(NPP, EVT, RET, TIME) do { } while(0)
 
 #endif
 

@@ -27,6 +27,7 @@
 #include "FrameView.h"
 #include "GraphicsContext.h"
 #include "NotImplemented.h"
+#include "TimeRanges.h"
 #include "Widget.h"
 #include <wtf/HashSet.h>
 
@@ -37,14 +38,16 @@
 #include <QUrl>
 #include <QEvent>
 
-#include <Phonon/AudioOutput>
-#include <Phonon/MediaObject>
-#include <Phonon/VideoWidget>
+#include <phonon/path.h>
+#include <phonon/audiooutput.h>
+#include <phonon/mediaobject.h>
+#include <phonon/videowidget.h>
 
 using namespace Phonon;
 
 #define LOG_MEDIAOBJECT() (LOG(Media, "%s", debugMediaObject(this, *m_mediaObject).constData()))
 
+#if !LOG_DISABLED
 static QByteArray debugMediaObject(WebCore::MediaPlayerPrivate* mediaPlayer, const MediaObject& mediaObject)
 {
     QByteArray byteArray;
@@ -72,6 +75,7 @@ static QByteArray debugMediaObject(WebCore::MediaPlayerPrivate* mediaPlayer, con
 
     return byteArray;
 }
+#endif
 
 using namespace WTF;
 
@@ -88,9 +92,7 @@ MediaPlayerPrivate::MediaPlayerPrivate(MediaPlayer* player)
 {
     // Hint to Phonon to disable overlay painting
     m_videoWidget->setAttribute(Qt::WA_DontShowOnScreen);
-#if QT_VERSION < 0x040500
     m_videoWidget->setAttribute(Qt::WA_QuitOnClose, false);
-#endif
 
     createPath(m_mediaObject, m_videoWidget);
     createPath(m_mediaObject, m_audioOutput);
@@ -100,15 +102,15 @@ MediaPlayerPrivate::MediaPlayerPrivate(MediaPlayer* player)
     foreach (QWidget* widget, qFindChildren<QWidget*>(m_videoWidget))
         widget->installEventFilter(this);
 
-    connect(m_mediaObject, SIGNAL(stateChanged(Phonon::State, Phonon::State)),
-            this, SLOT(stateChanged(Phonon::State, Phonon::State)));
+    connect(m_mediaObject, SIGNAL(stateChanged(Phonon::State,Phonon::State)),
+            this, SLOT(stateChanged(Phonon::State,Phonon::State)));
     connect(m_mediaObject, SIGNAL(metaDataChanged()), this, SLOT(metaDataChanged()));
     connect(m_mediaObject, SIGNAL(seekableChanged(bool)), this, SLOT(seekableChanged(bool)));
     connect(m_mediaObject, SIGNAL(hasVideoChanged(bool)), this, SLOT(hasVideoChanged(bool)));
     connect(m_mediaObject, SIGNAL(bufferStatus(int)), this, SLOT(bufferStatus(int)));
     connect(m_mediaObject, SIGNAL(finished()), this, SLOT(finished()));
-    connect(m_mediaObject, SIGNAL(currentSourceChanged(const Phonon::MediaSource&)),
-            this, SLOT(currentSourceChanged(const Phonon::MediaSource&)));
+    connect(m_mediaObject, SIGNAL(currentSourceChanged(Phonon::MediaSource)),
+            this, SLOT(currentSourceChanged(Phonon::MediaSource)));
     connect(m_mediaObject, SIGNAL(aboutToFinish()), this, SLOT(aboutToFinish()));
     connect(m_mediaObject, SIGNAL(totalTimeChanged(qint64)), this, SLOT(totalTimeChanged(qint64)));
 }
@@ -146,7 +148,7 @@ void MediaPlayerPrivate::getSupportedTypes(HashSet<String>&)
     notImplemented();
 }
 
-MediaPlayer::SupportsType MediaPlayerPrivate::supportsType(const String& type, const String& codecs)
+MediaPlayer::SupportsType MediaPlayerPrivate::supportsType(const String&, const String&)
 {
     // FIXME: do the real thing
     notImplemented();
@@ -158,6 +160,14 @@ bool MediaPlayerPrivate::hasVideo() const
     bool hasVideo = m_mediaObject->hasVideo();
     LOG(Media, "MediaPlayerPrivatePhonon::hasVideo() -> %s", hasVideo ? "true" : "false");
     return hasVideo;
+}
+
+bool MediaPlayerPrivate::hasAudio() const
+{
+    // FIXME: Phonon::MediaObject does not have such a hasAudio() function
+    bool hasAudio = true;
+    LOG(Media, "MediaPlayerPrivatePhonon::hasAudio() -> %s", hasAudio ? "true" : "false");
+    return hasAudio;
 }
 
 void MediaPlayerPrivate::load(const String& url)
@@ -247,15 +257,10 @@ float MediaPlayerPrivate::currentTime() const
     return currentTime;
 }
 
-void MediaPlayerPrivate::setEndTime(float endTime)
+PassRefPtr<TimeRanges> MediaPlayerPrivate::buffered() const
 {
     notImplemented();
-}
-
-float MediaPlayerPrivate::maxTimeBuffered() const
-{
-    notImplemented();
-    return 0.0f;
+    return TimeRanges::create();
 }
 
 float MediaPlayerPrivate::maxTimeSeekable() const
@@ -268,12 +273,6 @@ unsigned MediaPlayerPrivate::bytesLoaded() const
 {
     notImplemented();
     return 0;
-}
-
-bool MediaPlayerPrivate::totalBytesKnown() const
-{
-    //notImplemented();
-    return false;
 }
 
 unsigned MediaPlayerPrivate::totalBytes() const
@@ -298,14 +297,6 @@ void MediaPlayerPrivate::setMuted(bool muted)
     LOG(Media, "MediaPlayerPrivatePhonon::setMuted()");
     m_audioOutput->setMuted(muted);
 }
-
-
-int MediaPlayerPrivate::dataRate() const
-{
-    // This is not used at the moment
-    return 0;
-}
-
 
 MediaPlayer::NetworkState MediaPlayerPrivate::networkState() const
 {
@@ -493,7 +484,7 @@ void MediaPlayerPrivate::aboutToFinish()
 
 void MediaPlayerPrivate::totalTimeChanged(qint64 totalTime)
 {
-    LOG(Media, "MediaPlayerPrivatePhonon::totalTimeChanged(%d)", totalTime);
+    LOG(Media, "MediaPlayerPrivatePhonon::totalTimeChanged(%lld)", totalTime);
     LOG_MEDIAOBJECT();
 }
 

@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -36,7 +36,7 @@
 #include "SkRect.h"
 #include "SkRegion.h"
 #include "SkStream.h"
-#include <wtf/CurrentTime.h>
+#include "TimeCounter.h"
 
 #define MAX_DRAW_TIME 100
 #define MIN_SPLITTABLE 400
@@ -270,9 +270,9 @@ bool PictureSet::draw(SkCanvas* canvas)
         }
         canvas->translate(pathBounds.fLeft, pathBounds.fTop);
         canvas->save();
-        uint32_t startTime = WTF::get_thread_msec();
+        uint32_t startTime = getThreadMsec();
         canvas->drawPicture(*working->mPicture);
-        size_t elapsed = working->mElapsed = WTF::get_thread_msec() - startTime;
+        size_t elapsed = working->mElapsed = getThreadMsec() - startTime;
         working->mWroteElapsed = true;
         if (maxElapsed < elapsed && (pathBounds.width() >= MIN_SPLITTABLE ||
                 pathBounds.height() >= MIN_SPLITTABLE))
@@ -355,7 +355,13 @@ public:
         mEmpty = false;
         mPicture->abortPlayback();    
     }
-    
+
+    virtual bool clipPath(const SkPath&, SkRegion::Op) {
+        // this can be expensive to actually do, and doesn't affect the
+        // question of emptiness, so we make it a no-op
+        return true;
+    }
+
     virtual void commonDrawBitmap(const SkBitmap& bitmap,
             const SkMatrix& , const SkPaint& ) {
         if (bitmap.width() <= 1 || bitmap.height() <= 1)

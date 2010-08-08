@@ -26,6 +26,9 @@
 #include "config.h"
 #include "AccessibilityUIElement.h"
 
+#include "AccessibilityController.h"
+#include "DumpRenderTree.h"
+#include "FrameLoadDelegate.h"
 #include <JavaScriptCore/JSStringRef.h>
 #include <tchar.h>
 #include <string>
@@ -98,6 +101,12 @@ AccessibilityUIElement AccessibilityUIElement::getChildAtIndex(unsigned index)
     return COMPtr<IAccessible>(Query, child);
 }
 
+unsigned AccessibilityUIElement::indexOfChild(AccessibilityUIElement* element)
+{ 
+    // FIXME: implement
+    return 0;
+}
+
 JSStringRef AccessibilityUIElement::allAttributes()
 {
     return JSStringCreateWithCharacters(0, 0);
@@ -120,7 +129,11 @@ AccessibilityUIElement AccessibilityUIElement::titleUIElement()
 
 AccessibilityUIElement AccessibilityUIElement::parentElement()
 {
-    return 0;
+    COMPtr<IDispatch> parent;
+    m_element->get_accParent(&parent);
+
+    COMPtr<IAccessible> parentAccessible(Query, parent);
+    return parentAccessible;
 }
 
 JSStringRef AccessibilityUIElement::attributesOfChildren()
@@ -151,10 +164,34 @@ JSStringRef AccessibilityUIElement::role()
     VARIANT vRole;
     if (FAILED(m_element->get_accRole(self(), &vRole)))
         return JSStringCreateWithCharacters(0, 0);
-    ASSERT(V_VT(&vRole) == VT_I4);
-    TCHAR roleText[64] = {0};
-    ::GetRoleText(V_I4(&vRole), roleText, ARRAYSIZE(roleText));
-    return JSStringCreateWithCharacters(roleText, _tcslen(roleText));
+
+    ASSERT(V_VT(&vRole) == VT_I4 || V_VT(&vRole) == VT_BSTR);
+
+    wstring result;
+    if (V_VT(&vRole) == VT_I4) {
+        unsigned roleTextLength = ::GetRoleText(V_I4(&vRole), 0, 0) + 1;
+
+        Vector<TCHAR> roleText(roleTextLength);
+
+        ::GetRoleText(V_I4(&vRole), roleText.data(), roleTextLength);
+
+        result = roleText.data();
+    } else if (V_VT(&vRole) == VT_BSTR)
+        result = wstring(V_BSTR(&vRole), ::SysStringLen(V_BSTR(&vRole)));
+
+    ::VariantClear(&vRole);
+
+    return JSStringCreateWithCharacters(result.data(), result.length());
+}
+
+JSStringRef AccessibilityUIElement::subrole()
+{
+    return 0;
+}
+
+JSStringRef AccessibilityUIElement::roleDescription()
+{
+    return 0;
 }
 
 JSStringRef AccessibilityUIElement::title()
@@ -170,11 +207,16 @@ JSStringRef AccessibilityUIElement::title()
 JSStringRef AccessibilityUIElement::description()
 {
     BSTR descriptionBSTR;
-    if (FAILED(m_element->get_accName(self(), &descriptionBSTR)) || !descriptionBSTR)
+    if (FAILED(m_element->get_accDescription(self(), &descriptionBSTR)) || !descriptionBSTR)
         return JSStringCreateWithCharacters(0, 0);
     wstring description(descriptionBSTR, SysStringLen(descriptionBSTR));
     ::SysFreeString(descriptionBSTR);
     return JSStringCreateWithCharacters(description.data(), description.length());
+}
+
+JSStringRef AccessibilityUIElement::stringValue()
+{
+    return JSStringCreateWithCharacters(0, 0);
 }
 
 JSStringRef AccessibilityUIElement::language()
@@ -229,7 +271,60 @@ JSStringRef AccessibilityUIElement::valueDescription()
     return 0;
 }
 
-double AccessibilityUIElement::intValue()
+static DWORD accessibilityState(COMPtr<IAccessible> element)
+{
+    VARIANT state;
+    element->get_accState(self(), &state);
+
+    ASSERT(V_VT(&state) == VT_I4);
+
+    DWORD result = state.lVal;
+    VariantClear(&state);
+
+    return result;
+}
+
+bool AccessibilityUIElement::isSelected() const
+{
+    DWORD state = accessibilityState(m_element);
+    return (state & STATE_SYSTEM_SELECTED) == STATE_SYSTEM_SELECTED;
+}
+
+int AccessibilityUIElement::hierarchicalLevel() const
+{
+    return 0;
+}
+
+bool AccessibilityUIElement::ariaIsGrabbed() const
+{
+    return false;
+}
+ 
+JSStringRef AccessibilityUIElement::ariaDropEffects() const
+{
+    return 0;
+}
+
+bool AccessibilityUIElement::isExpanded() const
+{
+    return false;
+}
+
+bool AccessibilityUIElement::isChecked() const
+{
+    VARIANT vState;
+    if (FAILED(m_element->get_accState(self(), &vState)))
+        return false;
+
+    return vState.lVal & STATE_SYSTEM_CHECKED;
+}
+
+JSStringRef AccessibilityUIElement::orientation() const
+{
+    return 0;
+}
+
+double AccessibilityUIElement::intValue() const
 {
     BSTR valueBSTR;
     if (FAILED(m_element->get_accValue(self(), &valueBSTR)) || !valueBSTR)
@@ -257,13 +352,15 @@ bool AccessibilityUIElement::isActionSupported(JSStringRef action)
 
 bool AccessibilityUIElement::isEnabled()
 {
-    return false;
+    DWORD state = accessibilityState(m_element);
+    return (state & STATE_SYSTEM_UNAVAILABLE) != STATE_SYSTEM_UNAVAILABLE;
 }
 
 bool AccessibilityUIElement::isRequired() const
 {
     return false;
 }
+
 
 int AccessibilityUIElement::insertionPointLineNumber()
 {
@@ -325,6 +422,11 @@ JSStringRef AccessibilityUIElement::boundsForRange(unsigned location, unsigned l
     return JSStringCreateWithCharacters(0, 0);
 }
 
+JSStringRef AccessibilityUIElement::stringForRange(unsigned, unsigned)
+{
+    return JSStringCreateWithCharacters(0, 0);
+}
+
 AccessibilityUIElement AccessibilityUIElement::cellForColumnAndRow(unsigned column, unsigned row)
 {
     return 0;
@@ -339,12 +441,24 @@ void AccessibilityUIElement::setSelectedTextRange(unsigned location, unsigned le
 {
 }
 
-JSStringRef AccessibilityUIElement::attributeValue(JSStringRef attribute)
+JSStringRef AccessibilityUIElement::stringAttributeValue(JSStringRef attribute)
 {
+    // FIXME: implement
     return JSStringCreateWithCharacters(0, 0);
 }
 
+bool AccessibilityUIElement::boolAttributeValue(JSStringRef attribute)
+{
+    // FIXME: implement
+    return false;
+}
+
 bool AccessibilityUIElement::isAttributeSettable(JSStringRef attribute)
+{
+    return false;
+}
+
+bool AccessibilityUIElement::isAttributeSupported(JSStringRef attribute)
 {
     return false;
 }
@@ -355,4 +469,130 @@ void AccessibilityUIElement::increment()
 
 void AccessibilityUIElement::decrement()
 {
+}
+
+void AccessibilityUIElement::showMenu()
+{
+    ASSERT(hasPopup());
+    m_element->accDoDefaultAction(self());
+}
+
+AccessibilityUIElement AccessibilityUIElement::disclosedRowAtIndex(unsigned index)
+{
+    return 0;
+}
+
+AccessibilityUIElement AccessibilityUIElement::ariaOwnsElementAtIndex(unsigned index)
+{
+    return 0;
+}
+
+AccessibilityUIElement AccessibilityUIElement::ariaFlowToElementAtIndex(unsigned index)
+{
+    return 0;
+}
+
+AccessibilityUIElement AccessibilityUIElement::selectedRowAtIndex(unsigned index)
+{
+    return 0;
+}
+
+AccessibilityUIElement AccessibilityUIElement::disclosedByRow()
+{
+    return 0;
+}
+
+JSStringRef AccessibilityUIElement::accessibilityValue() const
+{
+    BSTR valueBSTR;
+    if (FAILED(m_element->get_accValue(self(), &valueBSTR)) || !valueBSTR)
+        return JSStringCreateWithCharacters(0, 0);
+
+    wstring value(valueBSTR, SysStringLen(valueBSTR));
+    ::SysFreeString(valueBSTR);
+
+    return JSStringCreateWithCharacters(value.data(), value.length());
+}
+
+
+JSStringRef AccessibilityUIElement::documentEncoding()
+{
+    return JSStringCreateWithCharacters(0, 0);
+}
+
+JSStringRef AccessibilityUIElement::documentURI()
+{
+    return JSStringCreateWithCharacters(0, 0);
+}
+
+JSStringRef AccessibilityUIElement::url()
+{
+    // FIXME: implement
+    return JSStringCreateWithCharacters(0, 0);
+}
+
+bool AccessibilityUIElement::addNotificationListener(JSObjectRef functionCallback)
+{
+    if (!functionCallback)
+        return false;
+
+    sharedFrameLoadDelegate->accessibilityController()->addNotificationListener(m_element, functionCallback);
+    return true;
+}
+
+bool AccessibilityUIElement::isSelectable() const
+{
+    DWORD state = accessibilityState(m_element);
+    return (state & STATE_SYSTEM_SELECTABLE) == STATE_SYSTEM_SELECTABLE;
+}
+
+bool AccessibilityUIElement::isMultiSelectable() const
+{
+    DWORD multiSelectable = STATE_SYSTEM_EXTSELECTABLE | STATE_SYSTEM_MULTISELECTABLE;
+    DWORD state = accessibilityState(m_element);
+    return (state & multiSelectable) == multiSelectable;
+}
+
+bool AccessibilityUIElement::isVisible() const
+{
+    DWORD state = accessibilityState(m_element);
+    return (state & STATE_SYSTEM_INVISIBLE) != STATE_SYSTEM_INVISIBLE;
+}
+
+bool AccessibilityUIElement::isOffScreen() const
+{
+    DWORD state = accessibilityState(m_element);
+    return (state & STATE_SYSTEM_OFFSCREEN) == STATE_SYSTEM_OFFSCREEN;
+}
+
+bool AccessibilityUIElement::isCollapsed() const
+{
+    DWORD state = accessibilityState(m_element);
+    return (state & STATE_SYSTEM_COLLAPSED) == STATE_SYSTEM_COLLAPSED;
+}
+
+bool AccessibilityUIElement::hasPopup() const
+{
+    DWORD state = accessibilityState(m_element);
+    return (state & STATE_SYSTEM_HASPOPUP) == STATE_SYSTEM_HASPOPUP;
+}
+
+void AccessibilityUIElement::takeFocus()
+{
+    m_element->accSelect(SELFLAG_TAKEFOCUS, self());
+}
+
+void AccessibilityUIElement::takeSelection()
+{
+    m_element->accSelect(SELFLAG_TAKESELECTION, self());
+}
+
+void AccessibilityUIElement::addSelection()
+{
+    m_element->accSelect(SELFLAG_ADDSELECTION, self());
+}
+
+void AccessibilityUIElement::removeSelection()
+{
+    m_element->accSelect(SELFLAG_REMOVESELECTION, self());
 }

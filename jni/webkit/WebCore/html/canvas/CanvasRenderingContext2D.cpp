@@ -30,7 +30,7 @@
 #include "config.h"
 #include "CanvasRenderingContext2D.h"
 
-#include "TransformationMatrix.h"
+#include "AffineTransform.h"
 #include "CSSParser.h"
 #include "CachedImage.h"
 #include "CanvasGradient.h"
@@ -42,7 +42,6 @@
 #include "Document.h"
 #include "ExceptionCode.h"
 #include "FloatConversion.h"
-#include "Frame.h"
 #include "GraphicsContext.h"
 #include "HTMLCanvasElement.h"
 #include "HTMLImageElement.h"
@@ -94,7 +93,7 @@ private:
 
 
 CanvasRenderingContext2D::CanvasRenderingContext2D(HTMLCanvasElement* canvas)
-    : m_canvas(canvas)
+    : CanvasRenderingContext(canvas)
     , m_stateStack(1)
 {
     // Make sure that even if the drawingContext() has a different default
@@ -102,14 +101,8 @@ CanvasRenderingContext2D::CanvasRenderingContext2D(HTMLCanvasElement* canvas)
     setLineWidth(lineWidth());
 }
 
-void CanvasRenderingContext2D::ref()
+CanvasRenderingContext2D::~CanvasRenderingContext2D()
 {
-    m_canvas->ref();
-}
-
-void CanvasRenderingContext2D::deref()
-{
-    m_canvas->deref(); 
 }
 
 void CanvasRenderingContext2D::reset()
@@ -171,10 +164,10 @@ void CanvasRenderingContext2D::setStrokeStyle(PassRefPtr<CanvasStyle> style)
     if (!style)
         return;
 
-    if (m_canvas->originClean()) {
+    if (canvas()->originClean()) {
         if (CanvasPattern* pattern = style->canvasPattern()) {
             if (!pattern->originClean())
-                m_canvas->setOriginTainted();
+                canvas()->setOriginTainted();
         }
     }
 
@@ -195,10 +188,10 @@ void CanvasRenderingContext2D::setFillStyle(PassRefPtr<CanvasStyle> style)
     if (!style)
         return;
  
-    if (m_canvas->originClean()) {
+    if (canvas()->originClean()) {
         if (CanvasPattern* pattern = style->canvasPattern()) {
             if (!pattern->originClean())
-                m_canvas->setOriginTainted();
+                canvas()->setOriginTainted();
         }
     }
 
@@ -361,7 +354,10 @@ void CanvasRenderingContext2D::scale(float sx, float sy)
     if (!state().m_invertibleCTM)
         return;
 
-    TransformationMatrix newTransform = state().m_transform;
+    if (!isfinite(sx) | !isfinite(sy))
+        return;
+
+    AffineTransform newTransform = state().m_transform;
     newTransform.scaleNonUniform(sx, sy);
     if (!newTransform.isInvertible()) {
         state().m_invertibleCTM = false;
@@ -370,7 +366,7 @@ void CanvasRenderingContext2D::scale(float sx, float sy)
 
     state().m_transform = newTransform;
     c->scale(FloatSize(sx, sy));
-    m_path.transform(TransformationMatrix().scaleNonUniform(1.0/sx, 1.0/sy));
+    m_path.transform(AffineTransform().scaleNonUniform(1.0 / sx, 1.0 / sy));
 }
 
 void CanvasRenderingContext2D::rotate(float angleInRadians)
@@ -381,7 +377,10 @@ void CanvasRenderingContext2D::rotate(float angleInRadians)
     if (!state().m_invertibleCTM)
         return;
 
-    TransformationMatrix newTransform = state().m_transform;
+    if (!isfinite(angleInRadians))
+        return;
+
+    AffineTransform newTransform = state().m_transform;
     newTransform.rotate(angleInRadians / piDouble * 180.0);
     if (!newTransform.isInvertible()) {
         state().m_invertibleCTM = false;
@@ -390,7 +389,7 @@ void CanvasRenderingContext2D::rotate(float angleInRadians)
 
     state().m_transform = newTransform;
     c->rotate(angleInRadians);
-    m_path.transform(TransformationMatrix().rotate(-angleInRadians / piDouble * 180.0));
+    m_path.transform(AffineTransform().rotate(-angleInRadians / piDouble * 180.0));
 }
 
 void CanvasRenderingContext2D::translate(float tx, float ty)
@@ -401,7 +400,10 @@ void CanvasRenderingContext2D::translate(float tx, float ty)
     if (!state().m_invertibleCTM)
         return;
 
-    TransformationMatrix newTransform = state().m_transform;
+    if (!isfinite(tx) | !isfinite(ty))
+        return;
+
+    AffineTransform newTransform = state().m_transform;
     newTransform.translate(tx, ty);
     if (!newTransform.isInvertible()) {
         state().m_invertibleCTM = false;
@@ -410,7 +412,7 @@ void CanvasRenderingContext2D::translate(float tx, float ty)
 
     state().m_transform = newTransform;
     c->translate(tx, ty);
-    m_path.transform(TransformationMatrix().translate(-tx, -ty));
+    m_path.transform(AffineTransform().translate(-tx, -ty));
 }
 
 void CanvasRenderingContext2D::transform(float m11, float m12, float m21, float m22, float dx, float dy)
@@ -420,14 +422,13 @@ void CanvasRenderingContext2D::transform(float m11, float m12, float m21, float 
         return;
     if (!state().m_invertibleCTM)
         return;
-    
-    // HTML5 3.14.11.1 -- ignore any calls that pass non-finite numbers
+
     if (!isfinite(m11) | !isfinite(m21) | !isfinite(dx) | 
         !isfinite(m12) | !isfinite(m22) | !isfinite(dy))
         return;
 
-    TransformationMatrix transform(m11, m12, m21, m22, dx, dy);
-    TransformationMatrix newTransform = transform * state().m_transform;
+    AffineTransform transform(m11, m12, m21, m22, dx, dy);
+    AffineTransform newTransform = transform * state().m_transform;
     if (!newTransform.isInvertible()) {
         state().m_invertibleCTM = false;
         return;
@@ -444,16 +445,15 @@ void CanvasRenderingContext2D::setTransform(float m11, float m12, float m21, flo
     if (!c)
         return;
     
-    // HTML5 3.14.11.1 -- ignore any calls that pass non-finite numbers
     if (!isfinite(m11) | !isfinite(m21) | !isfinite(dx) | 
         !isfinite(m12) | !isfinite(m22) | !isfinite(dy))
         return;
 
-    TransformationMatrix ctm = state().m_transform;
+    AffineTransform ctm = state().m_transform;
     if (!ctm.isInvertible())
         return;
     c->concatCTM(c->getCTM().inverse());
-    c->concatCTM(m_canvas->baseTransform());
+    c->concatCTM(canvas()->baseTransform());
     state().m_transform.multiply(ctm.inverse());
     m_path.transform(ctm);
 
@@ -636,7 +636,7 @@ void CanvasRenderingContext2D::rect(float x, float y, float width, float height)
 #if ENABLE(DASHBOARD_SUPPORT)
 void CanvasRenderingContext2D::clearPathForDashboardBackwardCompatibilityMode()
 {
-    if (Settings* settings = m_canvas->document()->settings())
+    if (Settings* settings = canvas()->document()->settings())
         if (settings->usesDashboardBackwardCompatibilityMode())
             m_path.clear();
 }
@@ -693,7 +693,7 @@ void CanvasRenderingContext2D::clip()
         return;
     if (!state().m_invertibleCTM)
         return;
-    c->clip(m_path);
+    c->canvasClip(m_path);
 #if ENABLE(DASHBOARD_SUPPORT)
     clearPathForDashboardBackwardCompatibilityMode();
 #endif
@@ -708,7 +708,7 @@ bool CanvasRenderingContext2D::isPointInPath(const float x, const float y)
         return false;
 
     FloatPoint point(x, y);
-    TransformationMatrix ctm = state().m_transform;
+    AffineTransform ctm = state().m_transform;
     FloatPoint transformedPoint = ctm.inverse().mapPoint(point);
     return m_path.contains(transformedPoint);
 }
@@ -823,7 +823,7 @@ void CanvasRenderingContext2D::setShadow(float width, float height, float blur, 
         return;
 
     RGBA32 rgba = makeRGBA32FromFloats(grayLevel, grayLevel, grayLevel, 1.0f);
-    c->setShadow(IntSize(width, -height), state().m_shadowBlur, Color(rgba));
+    c->setShadow(IntSize(width, -height), state().m_shadowBlur, Color(rgba), DeviceColorSpace);
 }
 
 void CanvasRenderingContext2D::setShadow(float width, float height, float blur, const String& color, float alpha)
@@ -839,7 +839,7 @@ void CanvasRenderingContext2D::setShadow(float width, float height, float blur, 
     RGBA32 rgba = 0; // default is transparent black
     if (!state().m_shadowColor.isEmpty())
         CSSParser::parseColor(rgba, state().m_shadowColor);
-    c->setShadow(IntSize(width, -height), state().m_shadowBlur, Color(colorWithOverrideAlpha(rgba, alpha)));
+    c->setShadow(IntSize(width, -height), state().m_shadowBlur, Color(colorWithOverrideAlpha(rgba, alpha)), DeviceColorSpace);
 }
 
 void CanvasRenderingContext2D::setShadow(float width, float height, float blur, float grayLevel, float alpha)
@@ -853,7 +853,7 @@ void CanvasRenderingContext2D::setShadow(float width, float height, float blur, 
         return;
 
     RGBA32 rgba = makeRGBA32FromFloats(grayLevel, grayLevel, grayLevel, alpha);
-    c->setShadow(IntSize(width, -height), state().m_shadowBlur, Color(rgba));
+    c->setShadow(IntSize(width, -height), state().m_shadowBlur, Color(rgba), DeviceColorSpace);
 }
 
 void CanvasRenderingContext2D::setShadow(float width, float height, float blur, float r, float g, float b, float a)
@@ -869,7 +869,7 @@ void CanvasRenderingContext2D::setShadow(float width, float height, float blur, 
     RGBA32 rgba = makeRGBA32FromFloats(r, g, b, a); // default is transparent black
     if (!state().m_shadowColor.isEmpty())
         CSSParser::parseColor(rgba, state().m_shadowColor);
-    c->setShadow(IntSize(width, -height), state().m_shadowBlur, Color(rgba));
+    c->setShadow(IntSize(width, -height), state().m_shadowBlur, Color(rgba), DeviceColorSpace);
 }
 
 void CanvasRenderingContext2D::setShadow(float width, float height, float blur, float c, float m, float y, float k, float a)
@@ -889,7 +889,7 @@ void CanvasRenderingContext2D::setShadow(float width, float height, float blur, 
     CGContextSetShadowWithColor(dc->platformContext(), adjustedShadowSize(width, -height), blur, shadowColor);
     CGColorRelease(shadowColor);
 #else
-    dc->setShadow(IntSize(width, -height), blur, Color(c, m, y, k, a));
+    dc->setShadow(IntSize(width, -height), blur, Color(c, m, y, k, a), DeviceColorSpace);
 #endif
 }
 
@@ -912,7 +912,7 @@ void CanvasRenderingContext2D::applyShadow()
         CSSParser::parseColor(rgba, state().m_shadowColor);
     float width = state().m_shadowOffset.width();
     float height = state().m_shadowOffset.height();
-    c->setShadow(IntSize(width, -height), state().m_shadowBlur, Color(rgba));
+    c->setShadow(IntSize(width, -height), state().m_shadowBlur, Color(rgba), DeviceColorSpace);
 }
 
 static IntSize size(HTMLImageElement* image)
@@ -941,16 +941,13 @@ static inline FloatRect normalizeRect(const FloatRect& rect)
 
 void CanvasRenderingContext2D::checkOrigin(const KURL& url)
 {
-    RefPtr<SecurityOrigin> origin = SecurityOrigin::create(url);
-    if (!m_canvas->document()->securityOrigin()->canAccess(origin.get()))
-        m_canvas->setOriginTainted();
+    if (canvas()->document()->securityOrigin()->taintsCanvas(url))
+        canvas()->setOriginTainted();
 }
 
 void CanvasRenderingContext2D::checkOrigin(const String& url)
 {
-    RefPtr<SecurityOrigin> origin = SecurityOrigin::createFromString(url);
-    if (!m_canvas->document()->securityOrigin()->canAccess(origin.get()))
-        m_canvas->setOriginTainted();
+    checkOrigin(KURL(KURL(), url));
 }
 
 void CanvasRenderingContext2D::drawImage(HTMLImageElement* image, float x, float y)
@@ -995,16 +992,16 @@ void CanvasRenderingContext2D::drawImage(HTMLImageElement* image, const FloatRec
     if (!cachedImage)
         return;
 
-    if (m_canvas->originClean())
+    if (canvas()->originClean())
         checkOrigin(cachedImage->response().url());
 
-    if (m_canvas->originClean() && !cachedImage->image()->hasSingleSecurityOrigin())
-        m_canvas->setOriginTainted();
+    if (canvas()->originClean() && !cachedImage->image()->hasSingleSecurityOrigin())
+        canvas()->setOriginTainted();
 
     FloatRect sourceRect = c->roundToDevicePixels(srcRect);
     FloatRect destRect = c->roundToDevicePixels(dstRect);
     willDraw(destRect);
-    c->drawImage(cachedImage->image(), destRect, sourceRect, state().m_globalComposite);
+    c->drawImage(cachedImage->image(), DeviceColorSpace, destRect, sourceRect, state().m_globalComposite);
 }
 
 void CanvasRenderingContext2D::drawImage(HTMLCanvasElement* canvas, float x, float y)
@@ -1021,14 +1018,14 @@ void CanvasRenderingContext2D::drawImage(HTMLCanvasElement* canvas,
     drawImage(canvas, FloatRect(0, 0, canvas->width(), canvas->height()), FloatRect(x, y, width, height), ec);
 }
 
-void CanvasRenderingContext2D::drawImage(HTMLCanvasElement* canvas, const FloatRect& srcRect,
+void CanvasRenderingContext2D::drawImage(HTMLCanvasElement* sourceCanvas, const FloatRect& srcRect,
     const FloatRect& dstRect, ExceptionCode& ec)
 {
-    ASSERT(canvas);
+    ASSERT(sourceCanvas);
 
     ec = 0;
 
-    FloatRect srcCanvasRect = FloatRect(FloatPoint(), canvas->size());
+    FloatRect srcCanvasRect = FloatRect(FloatPoint(), sourceCanvas->size());
     if (!srcCanvasRect.contains(normalizeRect(srcRect)) || srcRect.width() == 0 || srcRect.height() == 0) {
         ec = INDEX_SIZE_ERR;
         return;
@@ -1047,14 +1044,14 @@ void CanvasRenderingContext2D::drawImage(HTMLCanvasElement* canvas, const FloatR
     FloatRect destRect = c->roundToDevicePixels(dstRect);
         
     // FIXME: Do this through platform-independent GraphicsContext API.
-    ImageBuffer* buffer = canvas->buffer();
+    ImageBuffer* buffer = sourceCanvas->buffer();
     if (!buffer)
         return;
 
-    if (!canvas->originClean())
-        m_canvas->setOriginTainted();
+    if (!sourceCanvas->originClean())
+        canvas()->setOriginTainted();
 
-    c->drawImage(buffer->image(), destRect, sourceRect, state().m_globalComposite);
+    c->drawImage(buffer->image(), DeviceColorSpace, destRect, sourceRect, state().m_globalComposite);
     willDraw(destRect); // This call comes after drawImage, since the buffer we draw into may be our own, and we need to make sure it is dirty.
                         // FIXME: Arguably willDraw should become didDraw and occur after drawing calls and not before them to avoid problems like this.
 }
@@ -1097,11 +1094,11 @@ void CanvasRenderingContext2D::drawImage(HTMLVideoElement* video, const FloatRec
     if (!state().m_invertibleCTM)
         return;
 
-    if (m_canvas->originClean())
+    if (canvas()->originClean())
         checkOrigin(video->currentSrc());
 
-    if (m_canvas->originClean() && !video->hasSingleSecurityOrigin())
-        m_canvas->setOriginTainted();
+    if (canvas()->originClean() && !video->hasSingleSecurityOrigin())
+        canvas()->setOriginTainted();
 
     FloatRect sourceRect = c->roundToDevicePixels(srcRect);
     FloatRect destRect = c->roundToDevicePixels(dstRect);
@@ -1130,11 +1127,11 @@ void CanvasRenderingContext2D::drawImageFromRect(HTMLImageElement* image,
     if (!cachedImage)
         return;
 
-    if (m_canvas->originClean())
+    if (canvas()->originClean())
         checkOrigin(cachedImage->response().url());
 
-    if (m_canvas->originClean() && !cachedImage->image()->hasSingleSecurityOrigin())
-        m_canvas->setOriginTainted();
+    if (canvas()->originClean() && !cachedImage->image()->hasSingleSecurityOrigin())
+        canvas()->setOriginTainted();
 
     GraphicsContext* c = drawingContext();
     if (!c)
@@ -1148,7 +1145,7 @@ void CanvasRenderingContext2D::drawImageFromRect(HTMLImageElement* image,
 
     FloatRect destRect = FloatRect(dx, dy, dw, dh);
     willDraw(destRect);
-    c->drawImage(cachedImage->image(), destRect, FloatRect(sx, sy, sw, sh), op);
+    c->drawImage(cachedImage->image(), DeviceColorSpace, destRect, FloatRect(sx, sy, sw, sh), op);
 }
 
 void CanvasRenderingContext2D::setAlpha(float alpha)
@@ -1164,7 +1161,7 @@ void CanvasRenderingContext2D::setCompositeOperation(const String& operation)
 void CanvasRenderingContext2D::prepareGradientForDashboard(CanvasGradient* gradient) const
 {
 #if ENABLE(DASHBOARD_SUPPORT)
-    if (Settings* settings = m_canvas->document()->settings())
+    if (Settings* settings = canvas()->document()->settings())
         if (settings->usesDashboardBackwardCompatibilityMode())
             gradient->setDashboardCompatibilityMode();
 #else
@@ -1214,8 +1211,7 @@ PassRefPtr<CanvasPattern> CanvasRenderingContext2D::createPattern(HTMLImageEleme
     if (!cachedImage || !image->cachedImage()->image())
         return CanvasPattern::create(Image::nullImage(), repeatX, repeatY, true);
 
-    RefPtr<SecurityOrigin> origin = SecurityOrigin::createFromString(cachedImage->url());
-    bool originClean = m_canvas->document()->securityOrigin()->canAccess(origin.get());
+    bool originClean = !canvas()->document()->securityOrigin()->taintsCanvas(KURL(KURL(), cachedImage->url())) && cachedImage->image()->hasSingleSecurityOrigin();
     return CanvasPattern::create(cachedImage->image(), repeatX, repeatY, originClean);
 }
 
@@ -1245,7 +1241,7 @@ void CanvasRenderingContext2D::willDraw(const FloatRect& r, unsigned options)
 
     FloatRect dirtyRect = r;
     if (options & CanvasWillDrawApplyTransform) {
-        TransformationMatrix ctm = state().m_transform;
+        AffineTransform ctm = state().m_transform;
         dirtyRect = ctm.mapRect(r);
     }
     
@@ -1263,12 +1259,12 @@ void CanvasRenderingContext2D::willDraw(const FloatRect& r, unsigned options)
         // we'd have to keep the clip path around.
     }
     
-    m_canvas->willDraw(dirtyRect);
+    canvas()->willDraw(dirtyRect);
 }
 
 GraphicsContext* CanvasRenderingContext2D::drawingContext() const
 {
-    return m_canvas->drawingContext();
+    return canvas()->drawingContext();
 }
 
 static PassRefPtr<ImageData> createEmptyImageData(const IntSize& size)
@@ -1278,10 +1274,15 @@ static PassRefPtr<ImageData> createEmptyImageData(const IntSize& size)
     return data.get();
 }
 
-PassRefPtr<ImageData> CanvasRenderingContext2D::createImageData(float sw, float sh) const
+PassRefPtr<ImageData> CanvasRenderingContext2D::createImageData(float sw, float sh, ExceptionCode& ec) const
 {
+    ec = 0;
+    if (!isfinite(sw) || !isfinite(sh)) {
+        ec = NOT_SUPPORTED_ERR;
+        return 0;
+    }
     FloatSize unscaledSize(sw, sh);
-    IntSize scaledSize = m_canvas->convertLogicalToDevice(unscaledSize);
+    IntSize scaledSize = canvas()->convertLogicalToDevice(unscaledSize);
     if (scaledSize.width() < 1)
         scaledSize.setWidth(1);
     if (scaledSize.height() < 1)
@@ -1292,21 +1293,21 @@ PassRefPtr<ImageData> CanvasRenderingContext2D::createImageData(float sw, float 
 
 PassRefPtr<ImageData> CanvasRenderingContext2D::getImageData(float sx, float sy, float sw, float sh, ExceptionCode& ec) const
 {
-    if (!m_canvas->originClean()) {
+    if (!canvas()->originClean()) {
         ec = SECURITY_ERR;
         return 0;
     }
     
     FloatRect unscaledRect(sx, sy, sw, sh);
-    IntRect scaledRect = m_canvas->convertLogicalToDevice(unscaledRect);
+    IntRect scaledRect = canvas()->convertLogicalToDevice(unscaledRect);
     if (scaledRect.width() < 1)
         scaledRect.setWidth(1);
     if (scaledRect.height() < 1)
         scaledRect.setHeight(1);
-    ImageBuffer* buffer = m_canvas ? m_canvas->buffer() : 0;
+    ImageBuffer* buffer = canvas() ? canvas()->buffer() : 0;
     if (!buffer)
         return createEmptyImageData(scaledRect.size());
-    return buffer->getImageData(scaledRect);
+    return buffer->getUnmultipliedImageData(scaledRect);
 }
 
 void CanvasRenderingContext2D::putImageData(ImageData* data, float dx, float dy, ExceptionCode& ec)
@@ -1331,7 +1332,7 @@ void CanvasRenderingContext2D::putImageData(ImageData* data, float dx, float dy,
         return;
     }
 
-    ImageBuffer* buffer = m_canvas->buffer();
+    ImageBuffer* buffer = canvas()->buffer();
     if (!buffer)
         return;
 
@@ -1357,7 +1358,7 @@ void CanvasRenderingContext2D::putImageData(ImageData* data, float dx, float dy,
     sourceRect.move(-destOffset);
     IntPoint destPoint(destOffset.width(), destOffset.height());
     
-    buffer->putImageData(data, sourceRect, destPoint);
+    buffer->putUnmultipliedImageData(data, sourceRect, destPoint);
 }
 
 String CanvasRenderingContext2D::font() const
@@ -1368,7 +1369,7 @@ String CanvasRenderingContext2D::font() const
 void CanvasRenderingContext2D::setFont(const String& newFont)
 {
     RefPtr<CSSMutableStyleDeclaration> tempDecl = CSSMutableStyleDeclaration::create();
-    CSSParser parser(!m_canvas->document()->inCompatMode()); // Use the parse mode of the canvas' document when parsing CSS.
+    CSSParser parser(!canvas()->document()->inCompatMode()); // Use the parse mode of the canvas' document when parsing CSS.
         
     String declarationText("font: ");
     declarationText += newFont;
@@ -1382,11 +1383,11 @@ void CanvasRenderingContext2D::setFont(const String& newFont)
     // Map the <canvas> font into the text style. If the font uses keywords like larger/smaller, these will work
     // relative to the canvas.
     RefPtr<RenderStyle> newStyle = RenderStyle::create();
-    if (m_canvas->computedStyle())
-        newStyle->setFontDescription(m_canvas->computedStyle()->fontDescription());
+    if (canvas()->computedStyle())
+        newStyle->setFontDescription(canvas()->computedStyle()->fontDescription());
 
     // Now map the font property into the style.
-    CSSStyleSelector* styleSelector = m_canvas->document()->styleSelector();
+    CSSStyleSelector* styleSelector = canvas()->document()->styleSelector();
     styleSelector->applyPropertyToStyle(CSSPropertyFont, tempDecl->getPropertyCSSValue(CSSPropertyFont).get(), newStyle.get());
     
     state().m_font = newStyle->font();
@@ -1460,8 +1461,8 @@ void CanvasRenderingContext2D::drawTextInternal(const String& text, float x, flo
     // FIXME: Handle maxWidth.
     // FIXME: Need to turn off font smoothing.
 
-    bool rtl = m_canvas->computedStyle() ? m_canvas->computedStyle()->direction() == RTL : false;
-    bool override = m_canvas->computedStyle() ? m_canvas->computedStyle()->unicodeBidi() == Override : false;
+    bool rtl = canvas()->computedStyle() ? canvas()->computedStyle()->direction() == RTL : false;
+    bool override = canvas()->computedStyle() ? canvas()->computedStyle()->unicodeBidi() == Override : false;
 
     unsigned length = text.length();
     const UChar* string = text.characters();
@@ -1513,11 +1514,11 @@ void CanvasRenderingContext2D::drawTextInternal(const String& text, float x, flo
         textRect.inflate(c->strokeThickness() / 2);
 
     if (fill)
-        m_canvas->willDraw(textRect);
+        canvas()->willDraw(textRect);
     else {
         // When stroking text, pointy miters can extend outside of textRect, so we
         // punt and dirty the whole canvas.
-        m_canvas->willDraw(FloatRect(0, 0, m_canvas->width(), m_canvas->height()));
+        canvas()->willDraw(FloatRect(0, 0, canvas()->width(), canvas()->height()));
     }
     
 #if PLATFORM(CG)
@@ -1531,9 +1532,9 @@ void CanvasRenderingContext2D::drawTextInternal(const String& text, float x, flo
         GraphicsContext* maskImageContext = maskImage->context();
 
         if (fill)
-            maskImageContext->setFillColor(Color::black);
+            maskImageContext->setFillColor(Color::black, DeviceColorSpace);
         else {
-            maskImageContext->setStrokeColor(Color::black);
+            maskImageContext->setStrokeColor(Color::black, DeviceColorSpace);
             maskImageContext->setStrokeThickness(c->strokeThickness());
         }
 

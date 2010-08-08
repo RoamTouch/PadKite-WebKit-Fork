@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -30,6 +30,10 @@
 #include "FrameLoaderClient.h"
 #include "ResourceResponse.h"
 #include "WebIconDatabase.h"
+
+namespace WebCore {
+class PluginManualLoader;
+}
 
 using namespace WebCore;
 
@@ -78,6 +82,9 @@ namespace android {
         virtual void dispatchDidCancelClientRedirect();
         virtual void dispatchWillPerformClientRedirect(const KURL&, double interval, double fireDate);
         virtual void dispatchDidChangeLocationWithinPage();
+        virtual void dispatchDidPushStateWithinPage();
+        virtual void dispatchDidReplaceStateWithinPage();
+        virtual void dispatchDidPopStateWithinPage();
         virtual void dispatchWillClose();
         virtual void dispatchDidReceiveIcon();
         virtual void dispatchDidStartProvisionalLoad();
@@ -126,11 +133,13 @@ namespace android {
         virtual void updateGlobalHistoryRedirectLinks();
 
         virtual bool shouldGoToHistoryItem(HistoryItem*) const;
-#ifdef ANDROID_HISTORY_CLIENT
-        virtual void dispatchDidAddHistoryItem(HistoryItem*) const;
-        virtual void dispatchDidRemoveHistoryItem(HistoryItem*, int) const;
-        virtual void dispatchDidChangeHistoryIndex(BackForwardList*) const;
-#endif
+
+        virtual void didDisplayInsecureContent();
+        virtual void didRunInsecureContent(SecurityOrigin*);
+
+        virtual void dispatchDidAddBackForwardItem(HistoryItem*) const;
+        virtual void dispatchDidRemoveBackForwardItem(HistoryItem*) const;
+        virtual void dispatchDidChangeBackForwardIndex() const;
 
         virtual ResourceError cancelledError(const ResourceRequest&);
         virtual ResourceError blockedError(const ResourceRequest&);
@@ -179,7 +188,7 @@ namespace android {
         virtual ObjectContentType objectContentType(const KURL& url, const String& mimeType);
         virtual String overrideMediaType() const;
 
-        virtual void windowObjectCleared();
+        virtual void dispatchDidClearWindowObjectInWorld(DOMWrapperWorld*);
         virtual void documentElementAvailable();
         virtual void didPerformFirstNavigation() const;
 
@@ -199,10 +208,15 @@ namespace android {
         
         // FIXME: this doesn't really go here, but it's better than Frame
         CacheBuilder& getCacheBuilder() { return m_cacheBuilder; }
+
+        void enableOnDemandPlugins() { m_onDemandPluginsEnabled = true; }
     private:
-        CacheBuilder m_cacheBuilder;
+        CacheBuilder        m_cacheBuilder;
         Frame*              m_frame;
-        WebFrame*  m_webFrame;
+        WebFrame*           m_webFrame;
+        PluginManualLoader* m_manualLoader;
+        bool                m_hasSentResponseToPlugin;
+        bool                m_onDemandPluginsEnabled;
 
         enum ResourceErrors {
             InternalErrorCancelled = -99,

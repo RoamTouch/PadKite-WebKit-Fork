@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -35,6 +35,7 @@
 #include "FrameTree.h"
 #include "FrameView.h"
 //#include "GraphicsContext.h"
+#include "GraphicsLayerAndroid.h"
 #include "HTMLAreaElement.h"
 #include "HTMLImageElement.h"
 #include "HTMLInputElement.h"
@@ -42,12 +43,14 @@
 #include "HTMLNames.h"
 #include "HTMLOptionElement.h"
 #include "HTMLSelectElement.h"
+#include "HTMLTextAreaElement.h"
 #include "InlineTextBox.h"
 #include "KURL.h"
 #include "PluginView.h"
 #include "RegisteredEventListener.h"
 #include "RenderImage.h"
 #include "RenderInline.h"
+#include "RenderLayerBacking.h"
 #include "RenderListBox.h"
 #include "RenderSkinCombo.h"
 #include "RenderTextControl.h"
@@ -93,14 +96,11 @@ Frame* CacheBuilder::FrameAnd(const CacheBuilder* cacheBuilder) {
 #if DUMP_NAV_CACHE
 
 static bool hasEventListener(Node* node, const AtomicString& eventType) {
-    const RegisteredEventListenerVector& listeners = node->eventListeners();
-    size_t size = listeners.size();
-    for (size_t i = 0; i < size; ++i) {
-        const RegisteredEventListener& r = *listeners[i];
-        if (r.eventType() == eventType)
-            return true;
-    }
-    return false;
+    if (!node->isElementNode())
+        return false;
+    Element* element = static_cast<Element*>(node);
+    EventListener* listener = element->getAttributeEventListener(eventType);
+    return 0 != listener;
 }
 
 #define DEBUG_BUFFER_SIZE 256
@@ -143,7 +143,9 @@ void CacheBuilder::Debug::flush() {
                     break;
                 len++;
             }
-            while (mBuffer[len] == '\\' || mBuffer[len] == '"')
+            while (len > 0 && mBuffer[len - 1] == '\\')
+                len--;
+            while (mBuffer[len] == '"')
                 len++;
         }
         const char* prefix = mPrefix;
@@ -349,8 +351,11 @@ void CacheBuilder::Debug::groups() {
     } while ((node = node->traverseNextNode()) != NULL);
     int focusIndex = -1;
     if (atLeastOne == false) {
-        DUMP_NAV_LOGD("#define TEST%s_RECTS NULL\n", name);
-        DUMP_NAV_LOGD("static int TEST%s_RECT_COUNT = 0; // no focusable nodes\n", name);
+        DUMP_NAV_LOGD("static DebugTestNode TEST%s_RECTS[] = {\n"
+            "{{0, 0, 0, 0}, \"\", 0, -1, \"\", {0, 0, 0, 0}, false, 0}\n"
+            "};\n\n", name);
+        DUMP_NAV_LOGD("static int TEST%s_RECT_COUNT = 1;"
+            " // no focusable nodes\n", name);
         DUMP_NAV_LOGD("#define TEST%s_RECTPARTS NULL\n", name);
     } else {
         node = doc;
@@ -430,11 +435,18 @@ void CacheBuilder::Debug::groups() {
                 print("\"\"");
             RenderObject* renderer = node->renderer();
             int tabindex = node->isElementNode() ? node->tabIndex() : 0;
+            RenderLayer* layer = 0;
             if (renderer) {
                 const IntRect& absB = renderer->absoluteBoundingBoxRect();
+                bool hasLayer = renderer->hasLayer();
+                layer = hasLayer ? toRenderBoxModelObject(renderer)->layer() : 0;
                 snprintf(scratch, sizeof(scratch), ", {%d, %d, %d, %d}, %s"
-                    ", %d},",absB.x(), absB.y(), absB.width(), absB.height(),
-                    renderer->hasOverflowClip() ? "true" : "false", tabindex);
+                    ", %d, %s, %s},",
+                    absB.x(), absB.y(), absB.width(), absB.height(),
+                    renderer->hasOverflowClip() ? "true" : "false", tabindex,
+                    hasLayer ? "true" : "false",
+                    hasLayer && layer->isComposited() ? "true" : "false");
+                // TODO: add renderer->style()->visibility()
                 print(scratch);
             } else
                 print(", {0, 0, 0, 0}, false, 0},");
@@ -459,6 +471,20 @@ void CacheBuilder::Debug::groups() {
             }
             count++;
             newLine();
+#if USE(ACCELERATED_COMPOSITING)
+            if (renderer && layer) {
+                RenderLayerBacking* back = layer->backing();
+                GraphicsLayerAndroid* grLayer = static_cast
+                    <GraphicsLayerAndroid*>(back ? back->graphicsLayer() : 0);
+                LayerAndroid* aLayer = grLayer ? grLayer->contentLayer() : 0;
+                const SkPicture* pict = aLayer ? aLayer->picture() : 0;
+                snprintf(scratch, sizeof(scratch), "// layer:%p back:%p"
+                    " gLayer:%p aLayer:%p pict:%p", layer, back, grLayer,
+                    aLayer, pict);
+                print(scratch);
+                newLine();
+           }
+#endif
         } while ((node = node->traverseNextNode()) != NULL);
         DUMP_NAV_LOGD("}; // focusables = %d\n", count - 1);
         DUMP_NAV_LOGD("\n");
@@ -547,7 +573,7 @@ void CacheBuilder::Debug::groups() {
     int contentsHeight = layer->height();
     DUMP_NAV_LOGD("static int TEST%s_FOCUS = %d;\n", name, focusIndex);        
     DUMP_NAV_LOGD("static int TEST%s_WIDTH = %d;\n", name, contentsWidth);
-    DUMP_NAV_LOGD("static int TEST%s_HEIGHT = %d;\n", name, contentsHeight);
+    DUMP_NAV_LOGD("static int TEST%s_HEIGHT = %d;\n\n", name, contentsHeight);
 }
 
 bool CacheBuilder::Debug::isFocusable(Node* node) {
@@ -721,7 +747,7 @@ void CacheBuilder::Debug::wideString(const String& str) {
 
 CacheBuilder::CacheBuilder()
 {
-    mAllowableTypes = ALL_CACHEDNODETYPES;
+    mAllowableTypes = ALL_CACHEDNODE_BITS;
 #ifdef DUMP_NAV_CACHE_USING_PRINTF
     gNavCacheLogFile = NULL;
 #endif
@@ -756,14 +782,9 @@ void CacheBuilder::adjustForColumns(const ClipColumnTracker& track,
 
 // Checks if a node has one of event listener types.
 bool CacheBuilder::NodeHasEventListeners(Node* node, AtomicString* eventTypes, int length) {
-    const RegisteredEventListenerVector& listeners = node->eventListeners();
-    size_t size = listeners.size();
-    for (size_t i = 0; i < size; ++i) {
-        const RegisteredEventListener& r = *listeners[i];
-        for (int j = 0; j < length; ++j) {
-            if (r.eventType() == eventTypes[j])
-                return true;
-        }
+    for (int i = 0; i < length; ++i) {
+        if (!node->getEventListeners(eventTypes[i]).isEmpty())
+            return true;
     }
     return false;
 }
@@ -825,6 +846,21 @@ void CacheBuilder::buildCache(CachedRoot* root)
     setData((CachedFrame*) root);
 }
 
+static Node* ParentWithChildren(Node* node)
+{
+    Node* parent = node;
+    while ((parent = parent->parentNode())) {
+        if (parent->childNodeCount() > 1)
+            return parent;
+    }
+    return 0;
+}
+
+// FIXME
+// Probably this should check for null instead of the caller. If the
+// Tracker object is the last thing in the dom, checking for null in the
+// caller in some cases fails to set up Tracker state which may be useful
+// to the nodes parsed immediately after the tracked noe.
 static Node* OneAfter(Node* node) 
 {
     Node* parent = node;
@@ -842,14 +878,28 @@ static Node* OneAfter(Node* node)
 static bool checkForPluginViewThatWantsFocus(RenderObject* renderer) {
     if (renderer->isWidget()) {
         Widget* widget = static_cast<RenderWidget*>(renderer)->widget();
-        if (widget && widget->isPluginView()) {
-            PluginView* pv = static_cast<PluginView*>(widget);
+        if (widget && (widget->isPluginView() || widget->isPluginWidget())) {
             // check if this plugin really wants key events (TODO)
             return true;
         }
     }
     return false;
 }
+
+#if USE(ACCELERATED_COMPOSITING)
+static void AddLayer(CachedFrame* frame, size_t index, const IntPoint& location,
+    int id)
+{
+    DBG_NAV_LOGD("frame=%p index=%d loc=(%d,%d) id=%d", frame, index,
+        location.x(), location.y(), id);
+    CachedLayer cachedLayer;
+    cachedLayer.reset();
+    cachedLayer.setCachedNodeIndex(index);
+    cachedLayer.setOffset(location);
+    cachedLayer.setUniqueId(id);
+    frame->add(cachedLayer);
+}
+#endif
 
 // when new focus is found, push it's parent on a stack
     // as long as more focii are found with the same (grand) parent, note it
@@ -866,22 +916,18 @@ static bool checkForPluginViewThatWantsFocus(RenderObject* renderer) {
 void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
     CachedRoot* cachedRoot, CachedFrame* cachedFrame)
 {
-    WTF::Vector<Tracker> tracker(1);
+    WTF::Vector<FocusTracker> tracker(1); // sentinel
     {
-        Tracker* baseTracker = tracker.data(); // sentinel
-        bzero(baseTracker, sizeof(Tracker));
+        FocusTracker* baseTracker = tracker.data();
+        bzero(baseTracker, sizeof(FocusTracker));
         baseTracker->mCachedNodeIndex = -1;
     }
-    WTF::Vector<ClipColumnTracker> clipTracker(1);
-    {
-        ClipColumnTracker* baseTracker = clipTracker.data(); // sentinel
-        bzero(baseTracker, sizeof(ClipColumnTracker));
-    }
-    WTF::Vector<TabIndexTracker> tabIndexTracker(1);
-    {
-        TabIndexTracker* baseTracker = tabIndexTracker.data(); // sentinel
-        bzero(baseTracker, sizeof(TabIndexTracker));
-    }
+    WTF::Vector<LayerTracker> layerTracker(1); // sentinel
+    bzero(layerTracker.data(), sizeof(LayerTracker));
+    WTF::Vector<ClipColumnTracker> clipTracker(1); // sentinel
+    bzero(clipTracker.data(), sizeof(ClipColumnTracker));
+    WTF::Vector<TabIndexTracker> tabIndexTracker(1); // sentinel
+    bzero(tabIndexTracker.data(), sizeof(TabIndexTracker));
 #if DUMP_NAV_CACHE
     char* frameNamePtr = cachedFrame->mDebug.mFrameName;
     Builder(frame)->mDebug.frameName(frameNamePtr, frameNamePtr + 
@@ -900,16 +946,18 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
     cachedFrame->add(cachedParentNode);
     Node* node = parent;
     int cacheIndex = 1;
+    int textInputIndex = 0;
     Node* focused = doc->focusedNode();
     if (focused)
         cachedRoot->setFocusBounds(focused->getRect());
     int globalOffsetX, globalOffsetY;
     GetGlobalOffset(frame, &globalOffsetX, &globalOffsetY);
+    IntPoint bodyPos = IntPoint(0, 0);
     while (walk.mMore || (node = node->traverseNextNode()) != NULL) {
 #if DUMP_NAV_CACHE
         nodeIndex++;
 #endif
-        Tracker* last = &tracker.last();
+        FocusTracker* last = &tracker.last();
         int lastChildIndex = cachedFrame->size() - 1;
         while (node == last->mLastChild) {
             if (CleanUpContainedNodes(cachedFrame, last, lastChildIndex))
@@ -918,13 +966,17 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
             lastChildIndex = last->mCachedNodeIndex;
             last = &tracker.last();
         }
-        if (node == last->mParentLastChild)
-            last->mParentLastChild = NULL;
         do {
             const ClipColumnTracker* lastClip = &clipTracker.last();
             if (node != lastClip->mLastChild)
                 break;
             clipTracker.removeLast();
+        } while (true);
+        do {
+            const LayerTracker* lastLayer = &layerTracker.last();
+            if (node != lastLayer->mLastChild)
+                break;
+            layerTracker.removeLast();
         } while (true);
         do {
             const TabIndexTracker* lastTabIndex = &tabIndexTracker.last();
@@ -946,7 +998,8 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
             cachedFrame->addFrame(cachedChild);
             cachedNode.init(node);
             cachedNode.setIndex(cacheIndex++);
-            cachedNode.setChildFrameIndex(childFrameIndex);
+            cachedNode.setDataIndex(childFrameIndex);
+            cachedNode.setType(FRAME_CACHEDNODETYPE);
 #if DUMP_NAV_CACHE
             cachedNode.mDebug.mNodeIndex = nodeIndex;
             cachedNode.mDebug.mParentGroupIndex = Debug::ParentIndex(
@@ -979,6 +1032,37 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
 #ifdef ANDROID_CSS_TAP_HIGHLIGHT_COLOR
             hasCursorRing = style->tapHighlightColor().alpha() > 0;
 #endif
+#if USE(ACCELERATED_COMPOSITING)
+            if (nodeRenderer->hasLayer()) {
+                TrackLayer(layerTracker, nodeRenderer, lastChild,
+                    globalOffsetX - bodyPos.x(), globalOffsetY - bodyPos.y());
+                size_t size = tracker.size();
+                const LayerAndroid* layer = layerTracker.last().mLayer;
+                if (layer) {
+                    int id = layer->uniqueId();
+                    IntPoint loc = nodeRenderer->
+                        absoluteBoundingBoxRect().location();
+                    loc.move(globalOffsetX, globalOffsetY);
+                    // if this is a child of a CachedNode, add a layer
+                    size_t limit = cachedFrame->layerCount() == 0 ? 0 :
+                        cachedFrame->lastLayer()->cachedNodeIndex();
+                    for (size_t index = 1; index < tracker.size(); index++) {
+                        const FocusTracker& cursorNode = tracker.at(index);
+                        size_t index = cursorNode.mCachedNodeIndex;
+                        if (index <= limit) { // already added?
+                            DBG_NAV_LOGD("index=%d limit=%d id=%d", index,
+                                limit, id);
+                            continue;
+                        }
+                        DBG_NAV_LOGD("call add layer %d", id);
+                        CachedNode* trackedNode = cachedFrame->getIndex(index);
+                        trackedNode->setIsInLayer(true);
+                        trackedNode->setIsUnclipped(true);
+                        AddLayer(cachedFrame, index, loc, id);
+                    }
+                }
+            }
+#endif
         }
         bool more = walk.mMore;
         walk.reset();
@@ -986,29 +1070,23 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
         bool computeCursorRings = false;
         bool hasClip = false;
         bool hasMouseOver = false;
-        bool isAnchor = false;
-        bool isArea = node->hasTagName(HTMLNames::areaTag);
-        bool isPassword = false;
-        bool isTextArea = false;
-        bool isTextField = false;
-        bool isRtlText = false;
         bool isUnclipped = false;
         bool isFocus = node == focused;
         bool takesFocus = false;
-        bool wantsKeyEvents = false;
-        int maxLength = -1;
-        int textSize = 12;
         int columnGap = 0;
         TextDirection direction = LTR;
-        String name;
         String exported;
         CachedNodeType type = NORMAL_CACHEDNODETYPE;
+        CachedInput cachedInput;
         IntRect bounds;
         IntRect absBounds;
+        IntRect originalAbsBounds;
         WTF::Vector<IntRect>* columns = NULL;
-        if (isArea) {
+        if (node->hasTagName(HTMLNames::areaTag)) {
+            type = AREA_CACHEDNODETYPE;
             HTMLAreaElement* area = static_cast<HTMLAreaElement*>(node);
             bounds = getAreaRect(area);
+            originalAbsBounds = bounds;
             bounds.move(globalOffsetX, globalOffsetY);
             absBounds = bounds;
             isUnclipped = true;  // FIXME: areamaps require more effort to detect
@@ -1021,14 +1099,17 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
 
         // some common setup
         absBounds = nodeRenderer->absoluteBoundingBoxRect();
+        originalAbsBounds = absBounds;
         absBounds.move(globalOffsetX, globalOffsetY);
         hasClip = nodeRenderer->hasOverflowClip();
 
+        if (node->hasTagName(HTMLNames::bodyTag))
+            bodyPos = originalAbsBounds.location();
         if (checkForPluginViewThatWantsFocus(nodeRenderer)) {
             bounds = absBounds;
             isUnclipped = true;
             takesFocus = true;
-            wantsKeyEvents = true;
+            type = PLUGIN_CACHEDNODETYPE;
             goto keepNode;
         }
         if (nodeRenderer->isRenderBlock()) {
@@ -1052,11 +1133,11 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
             clip.mHasClip = hasClip;
             clip.mDirection = direction;
             if (columns != NULL) {
-                const IntRect& oRect = ((RenderBox*)nodeRenderer)->overflowRect(true);
+                const IntRect& oRect = ((RenderBox*)nodeRenderer)->visibleOverflowRect();
                 clip.mBounds.move(oRect.x(), oRect.y());
             }
         }
-        if (node->isTextNode() && mAllowableTypes != NORMAL_CACHEDNODETYPE) {
+        if (node->isTextNode() && mAllowableTypes != NORMAL_CACHEDNODE_BITS) {
             if (last->mSomeParentTakesFocus) // don't look at text inside focusable node
                 continue;
             CachedNodeType checkType;
@@ -1072,7 +1153,7 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
                 DUMP_NAV_LOGD("%s\n", buffer);
             }
         #endif
-            type = (CachedNodeType) checkType;
+            type = checkType;
             // !!! test ! is the following line correctly needed for frames to work?
             cachedNode.init(node);
             const ClipColumnTracker& clipTrack = clipTracker.last();
@@ -1080,7 +1161,7 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
                 IntRect(0, 0, INT_MAX, INT_MAX);
             if (ConstructTextRects((WebCore::Text*) node, walk.mStart, 
                     (WebCore::Text*) walk.mFinalNode, walk.mEnd, globalOffsetX,
-                    globalOffsetY, &bounds, clip, &cachedNode.cursorRings()) == false)
+                    globalOffsetY, &bounds, clip, &cachedNode.mCursorRing) == false)
                 continue;
             absBounds = bounds;
             cachedNode.setBounds(bounds);
@@ -1095,19 +1176,34 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
             goto keepTextNode;
         }
         if (node->hasTagName(WebCore::HTMLNames::inputTag)) {
-            HTMLInputElement* input = (HTMLInputElement*) node;
-            if (input->inputType() == HTMLInputElement::FILE)
+            HTMLInputElement* input = static_cast<HTMLInputElement*>(node);
+            HTMLInputElement::InputType inputType = input->inputType();
+            if (input->isTextField()) {
+                type = TEXT_INPUT_CACHEDNODETYPE;
+                cachedInput.init();
+                cachedInput.setFormPointer(input->form());
+                cachedInput.setIsTextField(true);
+                exported = input->value().threadsafeCopy();
+                cachedInput.setMaxLength(input->maxLength());
+                cachedInput.setInputType(inputType);
+    // If this does not need to be threadsafe, we can use crossThreadString().
+    // See http://trac.webkit.org/changeset/49160.
+                cachedInput.setName(input->name().string().threadsafeCopy());
+    // can't detect if this is drawn on top (example: deviant.com login parts)
+                isUnclipped = isTransparent;
+            } else if (inputType == HTMLInputElement::HIDDEN)
                 continue;
-            isTextField = input->isTextField();
-            if (isTextField)
-                wantsKeyEvents = true;
-            isPassword = input->inputType() == HTMLInputElement::PASSWORD;
-            maxLength = input->maxLength();
-            name = input->name().string().copy();
-            isUnclipped = isTransparent; // can't detect if this is drawn on top (example: deviant.com login parts)
-        } else if (node->hasTagName(HTMLNames::textareaTag))
-            isTextArea = wantsKeyEvents = true;
-        else if (node->hasTagName(HTMLNames::aTag)) {
+        } else if (node->hasTagName(HTMLNames::textareaTag)) {
+            cachedInput.init();
+            type = TEXT_INPUT_CACHEDNODETYPE;
+            HTMLTextAreaElement* area = static_cast<HTMLTextAreaElement*>(node);
+            cachedInput.setFormPointer(area->form());
+            // Although technically it is not an HTMLInputElement, and therefore
+            // has no InputType, this one is the most appropriate.
+            cachedInput.setInputType(HTMLInputElement::TEXT);
+            cachedInput.setIsTextField(false);
+            exported = area->value().threadsafeCopy();
+        } else if (node->hasTagName(HTMLNames::aTag)) {
             const HTMLAnchorElement* anchorNode = 
                 (const HTMLAnchorElement*) node;
             if (!anchorNode->isFocusable() && !HasTriggerEvent(node))
@@ -1115,32 +1211,31 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
             if (node->disabled())
                 continue;
             hasMouseOver = NodeHasEventListeners(node, &eventNames().mouseoverEvent, 1);
-            isAnchor = true;
+            type = ANCHOR_CACHEDNODETYPE;
             KURL href = anchorNode->href();
             if (!href.isEmpty() && !WebCore::protocolIsJavaScript(href.string()))
                 // Set the exported string for all non-javascript anchors.
-                exported = href.string().copy();
+                exported = href.string().threadsafeCopy();
         }
-        if (isTextField || isTextArea) {
+        if (type == TEXT_INPUT_CACHEDNODETYPE) {
             RenderTextControl* renderText = 
                 static_cast<RenderTextControl*>(nodeRenderer);
             if (isFocus)
                 cachedRoot->setSelection(renderText->selectionStart(), renderText->selectionEnd());
-            exported = renderText->text().copy();
             // FIXME: Would it be better to use (float) size()?
             // FIXME: Are we sure there will always be a style and font, and it's correct?
             RenderStyle* style = nodeRenderer->style();
             if (style) {
                 isUnclipped |= !style->hasAppearance();
-                textSize = style->fontSize();
-                isRtlText = style->direction() == RTL ||
-                        style->textAlign() == WebCore::RIGHT ||
-                        style->textAlign() == WebCore::WEBKIT_RIGHT;
+                cachedInput.setTextSize(style->fontSize());
+                cachedInput.setIsRtlText(style->direction() == RTL
+                        || style->textAlign() == WebCore::RIGHT
+                        || style->textAlign() == WebCore::WEBKIT_RIGHT);
             }
         }
         takesFocus = true;
         bounds = absBounds;
-        if (!isAnchor) {
+        if (type != ANCHOR_CACHEDNODETYPE) {
             bool isFocusable = node->isKeyboardFocusable(NULL) || 
                 node->isMouseFocusable() || node->isFocusable();
             if (isFocusable == false) {
@@ -1158,9 +1253,9 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
         cachedNode.init(node);
         if (computeCursorRings == false) {
             cachedNode.setBounds(bounds);
-            cachedNode.cursorRings().append(bounds);
-        } else if (ConstructPartRects(node, bounds, cachedNode.boundsPtr(), 
-                globalOffsetX, globalOffsetY, &cachedNode.cursorRings()) == false)
+            cachedNode.mCursorRing.append(bounds);
+        } else if (ConstructPartRects(node, bounds, &cachedNode.mBounds,
+                globalOffsetX, globalOffsetY, &cachedNode.mCursorRing) == false)
             continue;
     keepTextNode:
         IntRect clip = hasClip ? bounds : absBounds;
@@ -1174,43 +1269,55 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
                 continue;
             }
             const IntRect& parentClip = clipTrack.mBounds;
-            if (hasClip == false && isAnchor)
+            if (hasClip == false && type == ANCHOR_CACHEDNODETYPE)
                 clip = parentClip;
             else
                 clip.intersect(parentClip);
             hasClip = true;
         }
-        if (hasClip && !clip.isEmpty() && cachedNode.clip(clip) == false) {
-            cachedNode.setBounds(clip);
-            cachedNode.cursorRings().append(clip);
-            isUnclipped = true;
+        if (hasClip) {
+            if (clip.isEmpty())
+                continue; // skip this node if clip prevents all drawing
+            else if (cachedNode.clip(clip) == false)
+                continue; // skip this node if outside of the clip
         }
+        bool isInLayer = false;
+#if USE(ACCELERATED_COMPOSITING)
+        // FIXME: does not work for area rects
+        LayerAndroid* layer = layerTracker.last().mLayer;
+        if (layer) {
+            const IntRect& layerClip = layerTracker.last().mBounds;
+            if (!layerClip.isEmpty() && !cachedNode.clip(layerClip)) {
+                DBG_NAV_LOGD("skipped on layer clip %d", cacheIndex);
+                continue; // skip this node if outside of the clip
+            }
+            isInLayer = true;
+            isUnclipped = true; // assume that layers do not have occluded nodes
+            AddLayer(cachedFrame, cachedFrame->size(), layerClip.location(),
+                layer->uniqueId());
+        }
+#endif
         cachedNode.setNavableRects();
-        cachedNode.setChildFrameIndex(-1);
         cachedNode.setExport(exported);
         cachedNode.setHasCursorRing(hasCursorRing);
         cachedNode.setHasMouseOver(hasMouseOver);
         cachedNode.setHitBounds(absBounds);
         cachedNode.setIndex(cacheIndex);
-        cachedNode.setIsAnchor(isAnchor);
-        cachedNode.setIsArea(isArea);
         cachedNode.setIsFocus(isFocus);
-        cachedNode.setIsPassword(isPassword);
-        cachedNode.setIsRtlText(isRtlText);
-        cachedNode.setIsTextArea(isTextArea);
-        cachedNode.setIsTextField(isTextField);
+        cachedNode.setIsInLayer(isInLayer);
         cachedNode.setIsTransparent(isTransparent);
         cachedNode.setIsUnclipped(isUnclipped);
-        cachedNode.setMaxLength(maxLength);
-        cachedNode.setName(name);
+        cachedNode.setOriginalAbsoluteBounds(originalAbsBounds);
         cachedNode.setParentIndex(last->mCachedNodeIndex);
-        if (last->mParentLastChild == NULL)
-            last->mParentLastChild = OneAfter(node->parentNode()->lastChild());
-        cachedNode.setParentGroup(last->mParentLastChild);
+        cachedNode.setParentGroup(ParentWithChildren(node));
         cachedNode.setTabIndex(tabIndex);
-        cachedNode.setTextSize(textSize);
         cachedNode.setType(type);
-        cachedNode.setWantsKeyEvents(wantsKeyEvents);
+        if (type == TEXT_INPUT_CACHEDNODETYPE) {
+            cachedFrame->add(cachedInput);
+            cachedNode.setDataIndex(textInputIndex);
+            textInputIndex++;
+        } else
+            cachedNode.setDataIndex(-1);
 #if DUMP_NAV_CACHE
         cachedNode.mDebug.mNodeIndex = nodeIndex;
         cachedNode.mDebug.mParentGroupIndex = Debug::ParentIndex(
@@ -1225,10 +1332,9 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
             }
             if (lastChild != NULL) {
                 tracker.grow(tracker.size() + 1);
-                Tracker& working = tracker.last();
+                FocusTracker& working = tracker.last();
                 working.mCachedNodeIndex = lastIndex;
                 working.mLastChild = OneAfter(lastChild);
-                working.mParentLastChild = OneAfter(node->parentNode()->lastChild());
                 last = &tracker.at(tracker.size() - 2);
                 working.mSomeParentTakesFocus = last->mSomeParentTakesFocus | takesFocus;
             } 
@@ -1236,7 +1342,7 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
         cacheIndex++;
     }
     while (tracker.size() > 1) {
-        Tracker* last = &tracker.last();
+        FocusTracker* last = &tracker.last();
         int lastChildIndex = cachedFrame->size() - 1;
         if (CleanUpContainedNodes(cachedFrame, last, lastChildIndex))
             cacheIndex--;
@@ -1245,7 +1351,7 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
 }
 
 bool CacheBuilder::CleanUpContainedNodes(CachedFrame* cachedFrame, 
-    const Tracker* last, int lastChildIndex)
+    const FocusTracker* last, int lastChildIndex)
 {
     // if outer is body, disable outer
     // or if there's more than one inner, disable outer
@@ -1260,7 +1366,7 @@ bool CacheBuilder::CleanUpContainedNodes(CachedFrame* cachedFrame,
             lastNode->hasTagName(HTMLNames::bodyTag) ||
             lastNode->hasTagName(HTMLNames::formTag)) {
         lastCached->setBounds(IntRect(0, 0, 0, 0));
-        lastCached->cursorRings().clear();
+        lastCached->mCursorRing.clear();
         lastCached->setNavableRects();
         return false;
     }
@@ -1672,9 +1778,7 @@ CacheBuilder::FoundState CacheBuilder::FindPartialAddress(const UChar* baseChars
 // is that suggested this fix.
 //                    if (s->mWordCount == 0 && s->mContinuationNode)
 //                        return FOUND_NONE;
-                    s->mBases[s->mWordCount] = baseChars;
-                    s->mWords[s->mWordCount] = chars - s->mNumberCount;
-                    s->mStarts[s->mWordCount] = s->mCurrentStart;
+                    s->newWord(baseChars, chars);
                     if (WTF::isASCIILower(ch) && s->mNumberCount == 0)
                         s->mFirstLower = chars;
                     s->mNumberCount = 0;
@@ -1722,9 +1826,7 @@ CacheBuilder::FoundState CacheBuilder::FindPartialAddress(const UChar* baseChars
                         s->mNumberWords >>= ++shift;
                         if (s->mBases[0] != s->mBases[shift]) // if we're past the original node, bail
                             break;
-                        memmove(s->mBases, &s->mBases[shift], (sizeof(s->mBases) / sizeof(s->mBases[0]) - shift) * sizeof(s->mBases[0]));
-                        memmove(s->mWords, &s->mWords[shift], (sizeof(s->mWords) / sizeof(s->mWords[0]) - shift) * sizeof(s->mWords[0]));
-                        memmove(s->mStarts, &s->mStarts[shift], (sizeof(s->mStarts) / sizeof(s->mStarts[0]) - shift) * sizeof(s->mStarts[0]));
+                        s->shiftWords(shift);
                         s->mStartResult = s->mWords[0] - s->mStarts[0];
                         s->mWordCount -= shift;
                         // FIXME: need to adjust lineCount to account for discarded delimiters
@@ -1771,9 +1873,7 @@ CacheBuilder::FoundState CacheBuilder::FindPartialAddress(const UChar* baseChars
                             continue;
                         if (s->mWordCount == 0 && s->mContinuationNode)
                             return FOUND_NONE;
-                        s->mBases[s->mWordCount] = baseChars;
-                        s->mWords[s->mWordCount] = chars;
-                        s->mStarts[s->mWordCount] = s->mCurrentStart;
+                        s->newWord(baseChars, chars);
                         s->mNumberWords |= 1 << s->mWordCount;
                         s->mUnparsed = true;
                     }
@@ -1796,9 +1896,7 @@ CacheBuilder::FoundState CacheBuilder::FindPartialAddress(const UChar* baseChars
             case SECOND_HALF:
                 if (WTF::isASCIIAlpha(ch)) {
                     if (s->mLetterCount == 0) {
-                        s->mBases[s->mWordCount] = baseChars;
-                        s->mWords[s->mWordCount] = chars;
-                        s->mStarts[s->mWordCount] = s->mCurrentStart;
+                        s->newWord(baseChars, chars);
                         s->mWordCount++;
                     }
                     s->mLetterCount++;
@@ -1885,7 +1983,9 @@ CacheBuilder::FoundState CacheBuilder::FindPartialAddress(const UChar* baseChars
                 s->mProgress = ZIP_CODE;
                 // a couple of delimiters is an indication that the state name is good
                 // or, a non-space / non-alpha-digit is also good
-                s->mZipDelimiter = s->mLineCount > 2 || isUnicodeSpace(ch) == false;
+                s->mZipDelimiter = s->mLineCount > 2
+                    || isUnicodeSpace(ch) == false
+                    || chars == s->mEnd;
                 if (WTF::isASCIIDigit(ch))
                     s->mZipStart = chars;
                 goto resetState;
@@ -1917,9 +2017,7 @@ CacheBuilder::FoundState CacheBuilder::FindPartialAddress(const UChar* baseChars
                     s->mZipDelimiter = true;
                 else {
                     if (s->mLetterCount == 0) {
-                        s->mBases[s->mWordCount] = baseChars;
-                        s->mWords[s->mWordCount] = chars;
-                        s->mStarts[s->mWordCount] = s->mCurrentStart;
+                        s->newWord(baseChars, chars);
                         s->mUnparsed = true;
                     }
                     ++s->mLetterCount;
@@ -1990,7 +2088,8 @@ CacheBuilder::FoundState CacheBuilder::FindPartialAddress(const UChar* baseChars
                                 goto nextTest;
                             abbr = true;
                         }
-                        letter = test[testIndex];
+                        letter = &test[testIndex] < s->mEnds[wordsIndex] ?
+                            test[testIndex] : ' ';
                         if (WTF::isASCIIAlpha(letter) == false && WTF::isASCIIDigit(letter) == false) {
                             if (s->mNumberWords != 0) {
                                 int shift = 0;
@@ -2031,9 +2130,7 @@ CacheBuilder::FoundState CacheBuilder::FindPartialAddress(const UChar* baseChars
                     s->mNumberWords >>= ++shift;
                     if (s->mBases[0] != s->mBases[shift])
                         return FOUND_NONE;
-                    memmove(s->mBases, &s->mBases[shift], (sizeof(s->mBases) / sizeof(s->mBases[0]) - shift) * sizeof(s->mBases[0]));
-                    memmove(s->mWords, &s->mWords[shift], (sizeof(s->mWords) / sizeof(s->mWords[0]) - shift) * sizeof(s->mWords[0]));
-                    memmove(s->mStarts, &s->mStarts[shift], (sizeof(s->mStarts) / sizeof(s->mStarts[0]) - shift) * sizeof(s->mStarts[0]));
+                    s->shiftWords(shift);
                     s->mStartResult = s->mWords[0] - s->mStarts[0];
                     s->mWordCount -= shift;
                     s->mProgress = ADDRESS_LINE;
@@ -2431,7 +2528,7 @@ bool CacheBuilder::isFocusableText(NodeWalk* walk, bool more, Node* node,
     CachedNodeType* type, String* exported) const
 {
     Text* textNode = static_cast<Text*>(node);
-    StringImpl* string = textNode->string();
+    StringImpl* string = textNode->dataImpl();
     const UChar* baseChars = string->characters();
 //    const UChar* originalBase = baseChars;
     int length = string->length();
@@ -2462,9 +2559,9 @@ bool CacheBuilder::isFocusableText(NodeWalk* walk, bool more, Node* node,
     baseStart = start;
     for (CachedNodeType checkType = ADDRESS_CACHEDNODETYPE;
         checkType <= PHONE_CACHEDNODETYPE; 
-        checkType = (CachedNodeType) (checkType << 1))
+        checkType = static_cast<CachedNodeType>(checkType + 1))
     {
-        if ((checkType & mAllowableTypes) == 0)
+        if ((1 << (checkType - 1) & mAllowableTypes) == 0)
             continue;
         InlineTextBox* inlineTextBox = baseInline;
         FindState findState;
@@ -2536,7 +2633,7 @@ bool CacheBuilder::isFocusableText(NodeWalk* walk, bool more, Node* node,
                             exported->truncate(0);
                             do {
                                 Text* tempText = static_cast<Text*>(temp);
-                                StringImpl* string = tempText->string();
+                                StringImpl* string = tempText->dataImpl();
                                 int end = tempText == walk->mFinalNode ? 
                                     walk->mEnd : string->length();
                                 exported->append(String(string->substring(
@@ -2577,7 +2674,9 @@ bool CacheBuilder::isFocusableText(NodeWalk* walk, bool more, Node* node,
                 do {
                     do {
                         node = node->traverseNextNode();
-                        if (node == NULL || node->hasTagName(HTMLNames::aTag)) {
+                        if (node == NULL || node->hasTagName(HTMLNames::aTag)
+                                || node->hasTagName(HTMLNames::inputTag)
+                                || node->hasTagName(HTMLNames::textareaTag)) {
                             if (state == FOUND_PARTIAL && 
                                     checkType == ADDRESS_CACHEDNODETYPE && 
                                     findState.mProgress == ZIP_CODE && 
@@ -2596,7 +2695,7 @@ bool CacheBuilder::isFocusableText(NodeWalk* walk, bool more, Node* node,
                 } while (renderer == NULL);
                 baseInline = renderer->firstTextBox();
             } while (baseInline == NULL);
-            string = nextNode->string();
+            string = nextNode->dataImpl();
             baseChars = string->characters();
             inlineTextBox = baseInline;
             start = inlineTextBox->start();
@@ -2606,7 +2705,7 @@ bool CacheBuilder::isFocusableText(NodeWalk* walk, bool more, Node* node,
 tryNextCheckType:
         node = textNode;
         baseInline = saveInline;
-        string = textNode->string();
+        string = textNode->dataImpl();
         baseChars = string->characters();
     }
     if (foundBetter) {
@@ -2678,6 +2777,33 @@ bool CacheBuilder::setData(CachedFrame* cachedFrame)
     } while (cachedFrame++ != lastCachedFrame);
     return true;
 }
+
+#if USE(ACCELERATED_COMPOSITING)
+void CacheBuilder::TrackLayer(WTF::Vector<LayerTracker>& layerTracker,
+    RenderObject* nodeRenderer, Node* lastChild, int offsetX, int offsetY)
+{
+    RenderLayer* layer = toRenderBoxModelObject(nodeRenderer)->layer();
+    RenderLayerBacking* back = layer->backing();
+    if (!back)
+        return;
+    GraphicsLayerAndroid* grLayer = static_cast
+        <GraphicsLayerAndroid*>(back->graphicsLayer());
+    if (!grLayer)
+        return;
+    LayerAndroid* aLayer = grLayer->contentLayer();
+    if (!aLayer)
+        return;
+    layerTracker.grow(layerTracker.size() + 1);
+    LayerTracker& indexTracker = layerTracker.last();
+    indexTracker.mLayer = aLayer;
+    indexTracker.mBounds = nodeRenderer->absoluteBoundingBoxRect();
+    indexTracker.mBounds.move(offsetX, offsetY);
+    indexTracker.mLastChild = lastChild ? OneAfter(lastChild) : 0;
+    DBG_NAV_LOGD("layer=%p [%d] bounds=(%d,%d,w=%d,h=%d)", aLayer,
+        aLayer->uniqueId(), indexTracker.mBounds.x(), indexTracker.mBounds.y(),
+        indexTracker.mBounds.width(), indexTracker.mBounds.height());
+}
+#endif
 
 bool CacheBuilder::validNode(Frame* startFrame, void* matchFrame,
         void* matchNode)
@@ -2865,7 +2991,7 @@ bool CacheBuilder::ConstructTextRect(Text* textNode,
 {
     RenderText* renderText = (RenderText*) textNode->renderer();
     EVisibility vis = renderText->style()->visibility();
-    StringImpl* string = textNode->string();
+    StringImpl* string = textNode->dataImpl();
     const UChar* chars = string->characters();
     FloatPoint pt = renderText->localToAbsolute();
     do {

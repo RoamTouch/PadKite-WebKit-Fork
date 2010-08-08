@@ -39,7 +39,7 @@
 // The static initializer here should work okay, but we want to avoid
 // static initialization in general.
 
-namespace {
+namespace npruntime {
 
 // We use StringKey here as the key-type to avoid a string copy to
 // construct the map key and for faster comparisons than strcmp.
@@ -112,7 +112,10 @@ struct StringKeyHash {
     static const bool safeToCompareToEmptyOrDeleted = true;
 };
 
-}  // namespace
+}  // namespace npruntime
+
+using npruntime::StringKey;
+using npruntime::StringKeyHash;
 
 // Implement HashTraits<StringKey>
 struct StringKeyHashTraits : WTF::GenericHashTraits<StringKey> {
@@ -309,6 +312,15 @@ void _NPN_DeallocateObject(NPObject* npObject)
     }
 }
 
+#if PLATFORM(ANDROID)
+// Android uses NPN_ReleaseObject (the 'public' version of _NPN_ReleaseObject)
+// in WebCoreFrameBridge.cpp. See http://trac.webkit.org/changeset/47021.
+// TODO: Upstream this to webkit.org.
+void NPN_ReleaseObject(NPObject *obj)
+{
+    _NPN_ReleaseObject(obj);
+}
+#endif
 void _NPN_ReleaseObject(NPObject* npObject)
 {
     ASSERT(npObject);

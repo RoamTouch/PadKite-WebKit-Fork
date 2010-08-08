@@ -28,16 +28,22 @@
 #include "HTMLNames.h"
 #include "MappedAttribute.h"
 #include "RenderApplet.h"
+#include "SecurityOrigin.h"
 #include "Settings.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLAppletElement::HTMLAppletElement(const QualifiedName& tagName, Document* doc)
-    : HTMLPlugInElement(tagName, doc)
+inline HTMLAppletElement::HTMLAppletElement(const QualifiedName& tagName, Document* document)
+    : HTMLPlugInElement(tagName, document)
 {
     ASSERT(hasTagName(appletTag));
+}
+
+PassRefPtr<HTMLAppletElement> HTMLAppletElement::create(const QualifiedName& tagName, Document* document)
+{
+    return adoptRef(new HTMLAppletElement(tagName, document));
 }
 
 void HTMLAppletElement::parseMappedAttribute(MappedAttribute* attr)
@@ -57,7 +63,7 @@ void HTMLAppletElement::parseMappedAttribute(MappedAttribute* attr)
             document->addNamedItem(newName);
         }
         m_name = newName;
-    } else if (attr->name() == idAttr) {
+    } else if (attr->name() == idAttributeName()) {
         const AtomicString& newId = attr->value();
         if (inDocument() && document()->isHTMLDocument()) {
             HTMLDocument* document = static_cast<HTMLDocument*>(this->document());
@@ -103,9 +109,7 @@ bool HTMLAppletElement::rendererIsNeeded(RenderStyle* style)
 
 RenderObject* HTMLAppletElement::createRenderer(RenderArena*, RenderStyle* style)
 {
-    Settings* settings = document()->settings();
-
-    if (settings && settings->isJavaEnabled()) {
+    if (canEmbedJava()) {
         HashMap<String, String> args;
 
         args.set("code", getAttribute(codeAttr));
@@ -114,7 +118,7 @@ RenderObject* HTMLAppletElement::createRenderer(RenderArena*, RenderStyle* style
         if (!codeBase.isNull())
             args.set("codeBase", codeBase);
 
-        const AtomicString& name = getAttribute(document()->isHTMLDocument() ? nameAttr : idAttr);
+        const AtomicString& name = getAttribute(document()->isHTMLDocument() ? nameAttr : idAttributeName());
         if (!name.isNull())
             args.set("name", name);
         const AtomicString& archive = getAttribute(archiveAttr);
@@ -137,8 +141,7 @@ RenderObject* HTMLAppletElement::createRenderer(RenderArena*, RenderStyle* style
 
 RenderWidget* HTMLAppletElement::renderWidgetForJSBindings() const
 {
-    Settings* settings = document()->settings();
-    if (!settings || !settings->isJavaEnabled())
+    if (!canEmbedJava())
         return 0;
 
     RenderApplet* applet = toRenderApplet(renderer());
@@ -146,6 +149,15 @@ RenderWidget* HTMLAppletElement::renderWidgetForJSBindings() const
         applet->createWidgetIfNecessary();
 
     return applet;
+}
+
+bool HTMLAppletElement::canEmbedJava() const
+{
+    if (document()->securityOrigin()->isSandboxed(SandboxPlugins))
+        return false;
+
+    Settings* settings = document()->settings();
+    return settings && settings->isJavaEnabled();
 }
 
 void HTMLAppletElement::finishParsingChildren()

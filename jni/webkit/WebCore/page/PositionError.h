@@ -35,7 +35,6 @@ namespace WebCore {
 class PositionError : public RefCounted<PositionError> {
 public:
     enum ErrorCode {
-        UNKNOWN_ERROR = 0,
         PERMISSION_DENIED = 1,
         POSITION_UNAVAILABLE = 2,
         TIMEOUT = 3
@@ -46,7 +45,7 @@ public:
     ErrorCode code() const { return m_code; }
     const String& message() const { return m_message; }
     void setIsFatal(bool isFatal) { m_isFatal = isFatal; }
-    bool isFatal() { return m_isFatal; }
+    bool isFatal() const { return m_isFatal; }
     
 private:
     PositionError(ErrorCode code, const String& message) 

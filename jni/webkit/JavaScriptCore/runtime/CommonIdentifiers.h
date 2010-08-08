@@ -37,17 +37,27 @@
     macro(callee) \
     macro(caller) \
     macro(compile) \
+    macro(configurable) \
     macro(constructor) \
+    macro(create) \
+    macro(defineProperty) \
+    macro(defineProperties) \
+    macro(enumerable) \
     macro(eval) \
     macro(exec) \
     macro(fromCharCode) \
     macro(global) \
+    macro(get) \
     macro(getPrototypeOf) \
+    macro(getOwnPropertyDescriptor) \
+    macro(getOwnPropertyNames) \
     macro(hasOwnProperty) \
     macro(ignoreCase) \
     macro(index) \
     macro(input) \
+    macro(isArray) \
     macro(isPrototypeOf) \
+    macro(keys) \
     macro(length) \
     macro(message) \
     macro(multiline) \
@@ -56,6 +66,7 @@
     macro(parse) \
     macro(propertyIsEnumerable) \
     macro(prototype) \
+    macro(set) \
     macro(source) \
     macro(test) \
     macro(toExponential) \
@@ -66,7 +77,9 @@
     macro(toPrecision) \
     macro(toString) \
     macro(UTC) \
+    macro(value) \
     macro(valueOf) \
+    macro(writable) \
     macro(displayName)
 
 namespace JSC {
@@ -77,7 +90,6 @@ namespace JSC {
         friend class JSGlobalData;
 
     public:
-        const Identifier nullIdentifier;
         const Identifier emptyIdentifier;
         const Identifier underscoreProto;
         const Identifier thisIdentifier;

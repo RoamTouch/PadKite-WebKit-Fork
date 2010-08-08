@@ -91,6 +91,10 @@ private:
     virtual void dispatchDidCancelClientRedirect();
     virtual void dispatchWillPerformClientRedirect(const WebCore::KURL&, double interval, double fireDate);
     virtual void dispatchDidChangeLocationWithinPage();
+    virtual void dispatchDidPushStateWithinPage();
+    virtual void dispatchDidReplaceStateWithinPage();
+    virtual void dispatchDidPopStateWithinPage();
+    
     virtual void dispatchWillClose();
     virtual void dispatchDidReceiveIcon();
     virtual void dispatchDidStartProvisionalLoad();
@@ -143,6 +147,12 @@ private:
     virtual void updateGlobalHistoryRedirectLinks();
 
     virtual bool shouldGoToHistoryItem(WebCore::HistoryItem*) const;
+    virtual void dispatchDidAddBackForwardItem(WebCore::HistoryItem*) const;
+    virtual void dispatchDidRemoveBackForwardItem(WebCore::HistoryItem*) const;
+    virtual void dispatchDidChangeBackForwardIndex() const;
+
+    virtual void didDisplayInsecureContent();
+    virtual void didRunInsecureContent(WebCore::SecurityOrigin*);
 
     virtual WebCore::ResourceError cancelledError(const WebCore::ResourceRequest&);
     virtual WebCore::ResourceError blockedError(const WebCore::ResourceRequest&);
@@ -188,7 +198,7 @@ private:
     virtual WebCore::ObjectContentType objectContentType(const WebCore::KURL& url, const WebCore::String& mimeType);
     virtual WebCore::String overrideMediaType() const;
     
-    virtual void windowObjectCleared();
+    virtual void dispatchDidClearWindowObjectInWorld(WebCore::DOMWrapperWorld*);
     virtual void documentElementAvailable();
     virtual void didPerformFirstNavigation() const;
 
@@ -205,7 +215,7 @@ private:
     NSDictionary *actionDictionary(const WebCore::NavigationAction&, PassRefPtr<WebCore::FormState>) const;
     
     virtual bool canCachePage() const;
-
+    
     RetainPtr<WebFrame> m_webFrame;
 
     RetainPtr<WebFramePolicyListener> m_policyListener;

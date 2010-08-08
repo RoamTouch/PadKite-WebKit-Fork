@@ -27,7 +27,7 @@
 #include <tchar.h>
 #include <windows.h>
 
-#if PLATFORM(WINCE)
+#if OS(WINCE)
 // SHGFI_SHELLICONSIZE is not available on WINCE
 #define SHGFI_SHELLICONSIZE         0
 #endif
@@ -47,21 +47,23 @@ Icon::~Icon()
     DestroyIcon(m_hIcon);
 }
 
-PassRefPtr<Icon> Icon::createIconForFile(const String& filename)
+PassRefPtr<Icon> Icon::createIconForFiles(const Vector<String>& filenames)
 {
-    SHFILEINFO sfi;
-    memset(&sfi, 0, sizeof(sfi));
-
-    String tmpFilename = filename;
-    if (!SHGetFileInfo(tmpFilename.charactersWithNullTermination(), 0, &sfi, sizeof(sfi), SHGFI_ICON | SHGFI_SHELLICONSIZE | SHGFI_SMALLICON))
+    if (filenames.isEmpty())
         return 0;
 
-    return adoptRef(new Icon(sfi.hIcon));
-}
+    if (filenames.size() == 1) {
+        SHFILEINFO sfi;
+        memset(&sfi, 0, sizeof(sfi));
 
-PassRefPtr<Icon> Icon::createIconForFiles(const Vector<String>&)
-{
-#if PLATFORM(WINCE)
+        String tmpFilename = filenames[0];
+        if (!SHGetFileInfo(tmpFilename.charactersWithNullTermination(), 0, &sfi, sizeof(sfi), SHGFI_ICON | SHGFI_SHELLICONSIZE | SHGFI_SMALLICON))
+            return 0;
+
+        return adoptRef(new Icon(sfi.hIcon));
+    }
+
+#if OS(WINCE)
     return 0;
 #else
     TCHAR buffer[MAX_PATH];    
@@ -84,7 +86,7 @@ void Icon::paint(GraphicsContext* context, const IntRect& r)
     if (context->paintingDisabled())
         return;
 
-#if PLATFORM(WINCE)
+#if OS(WINCE)
     context->drawIcon(m_hIcon, r, DI_NORMAL);
 #else
     HDC hdc = context->getWindowsContext(r);

@@ -24,8 +24,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef SQLDatabase_h
-#define SQLDatabase_h
+#ifndef SQLiteDatabase_h
+#define SQLiteDatabase_h
 
 #include "PlatformString.h"
 #include <wtf/Threading.h>
@@ -106,6 +106,7 @@ public:
     // (un)locks the database like a mutex
     void lock();
     void unlock();
+    bool isAutoCommitOn() const;
 
 private:
     static int authorizerFunction(void*, int, const char*, const char*, const char*, const char*);

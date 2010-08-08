@@ -124,6 +124,11 @@ public class MimeTypeMap {
         return null;
     }
 
+    // Static method called by jni.
+    private static String mimeTypeFromExtension(String extension) {
+        return getSingleton().getMimeTypeFromExtension(extension);
+    }
+
     /**
      * Return true if the given extension has a registered MIME type.
      * @param extension A file extension without the leading '.'
@@ -344,6 +349,7 @@ public class MimeTypeMap {
             sMimeTypeMap.loadEntry("application/x-pkcs7-crl", "crl");
             sMimeTypeMap.loadEntry("application/x-quicktimeplayer", "qtl");
             sMimeTypeMap.loadEntry("application/x-shar", "shar");
+            sMimeTypeMap.loadEntry("application/x-shockwave-flash", "swf");
             sMimeTypeMap.loadEntry("application/x-stuffit", "sit");
             sMimeTypeMap.loadEntry("application/x-sv4cpio", "sv4cpio");
             sMimeTypeMap.loadEntry("application/x-sv4crc", "sv4crc");
@@ -362,6 +368,7 @@ public class MimeTypeMap {
             sMimeTypeMap.loadEntry("application/x-xcf", "xcf");
             sMimeTypeMap.loadEntry("application/x-xfig", "fig");
             sMimeTypeMap.loadEntry("application/xhtml+xml", "xhtml");
+            sMimeTypeMap.loadEntry("audio/3gpp", "3gpp");
             sMimeTypeMap.loadEntry("audio/basic", "snd");
             sMimeTypeMap.loadEntry("audio/midi", "mid");
             sMimeTypeMap.loadEntry("audio/midi", "midi");
@@ -431,6 +438,8 @@ public class MimeTypeMap {
             sMimeTypeMap.loadEntry("text/calendar", "icz");
             sMimeTypeMap.loadEntry("text/comma-separated-values", "csv");
             sMimeTypeMap.loadEntry("text/css", "css");
+            sMimeTypeMap.loadEntry("text/html", "htm");
+            sMimeTypeMap.loadEntry("text/html", "html");
             sMimeTypeMap.loadEntry("text/h323", "323");
             sMimeTypeMap.loadEntry("text/iuls", "uls");
             sMimeTypeMap.loadEntry("text/mathml", "mml");
@@ -475,12 +484,14 @@ public class MimeTypeMap {
             sMimeTypeMap.loadEntry("text/x-tex", "cls");
             sMimeTypeMap.loadEntry("text/x-vcalendar", "vcs");
             sMimeTypeMap.loadEntry("text/x-vcard", "vcf");
+            sMimeTypeMap.loadEntry("video/3gpp", "3gpp");
             sMimeTypeMap.loadEntry("video/3gpp", "3gp");
             sMimeTypeMap.loadEntry("video/3gpp", "3g2");
             sMimeTypeMap.loadEntry("video/dl", "dl");
             sMimeTypeMap.loadEntry("video/dv", "dif");
             sMimeTypeMap.loadEntry("video/dv", "dv");
             sMimeTypeMap.loadEntry("video/fli", "fli");
+            sMimeTypeMap.loadEntry("video/m4v", "m4v");
             sMimeTypeMap.loadEntry("video/mpeg", "mpeg");
             sMimeTypeMap.loadEntry("video/mpeg", "mpg");
             sMimeTypeMap.loadEntry("video/mpeg", "mpe");

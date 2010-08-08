@@ -56,9 +56,9 @@ KURL StyleBase::baseURL() const
     StyleSheet* sheet = const_cast<StyleBase*>(this)->stylesheet();
     if (!sheet)
         return KURL();
-    if (!sheet->href().isNull())
-        return KURL(sheet->href());
-    if (sheet->parent()) 
+    if (!sheet->finalURL().isNull())
+        return sheet->finalURL();
+    if (sheet->parent())
         return sheet->parent()->baseURL();
     if (!sheet->ownerNode()) 
         return KURL();
@@ -68,16 +68,28 @@ KURL StyleBase::baseURL() const
 #ifdef ANDROID_INSTRUMENT
 static size_t styleSize = 0;
 
-void* StyleBase::operator new(size_t s) throw()
+void* StyleBase::operator new(size_t size)
 {
-    styleSize += s;
-    return ::operator new(s);
+    styleSize += size;
+    return ::operator new(size);
 }
 
-void StyleBase::operator delete(void* ptr, size_t s)
+void* StyleBase::operator new[](size_t size)
 {
-    styleSize -= s;
-    ::operator delete(ptr);
+    styleSize += size;
+    return ::operator new[](size);
+}
+
+void StyleBase::operator delete(void* p, size_t size)
+{
+    styleSize -= size;
+    ::operator delete(p);
+}
+
+void StyleBase::operator delete[](void* p, size_t size)
+{
+    styleSize -= size;
+    ::operator delete[](p);
 }
 
 size_t StyleBase::reportStyleSize()

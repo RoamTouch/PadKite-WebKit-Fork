@@ -76,8 +76,7 @@ string descriptionSuitableForTestResult(IWebFrame* webFrame)
     string frameName = (webFrame == mainFrame) ? "main frame" : "frame";
     frameName += " \"" + BSTRtoString(frameNameBSTR) + "\""; 
 
-    SysFreeString(frameNameBSTR);
-
+    SysFreeString(frameNameBSTR); 
     return frameName;
 }
 
@@ -101,6 +100,8 @@ HRESULT STDMETHODCALLTYPE FrameLoadDelegate::QueryInterface(REFIID riid, void** 
         *ppvObject = static_cast<IWebFrameLoadDelegate*>(this);
     else if (IsEqualGUID(riid, IID_IWebFrameLoadDelegatePrivate))
         *ppvObject = static_cast<IWebFrameLoadDelegatePrivate*>(this);
+    else if (IsEqualGUID(riid, IID_IWebFrameLoadDelegatePrivate2))
+        *ppvObject = static_cast<IWebFrameLoadDelegatePrivate2*>(this);
     else
         return E_NOINTERFACE;
 
@@ -180,6 +181,9 @@ HRESULT STDMETHODCALLTYPE FrameLoadDelegate::didReceiveTitle(
     /* [in] */ BSTR title,
     /* [in] */ IWebFrame *frame)
 {
+    if (!done && gLayoutTestController->dumpFrameLoadCallbacks())
+        printf("%s - didReceiveTitle: %S\n", descriptionSuitableForTestResult(frame).c_str(), title);
+
     if (::gLayoutTestController->dumpTitleChanges() && !done)
         printf("TITLE CHANGED: %S\n", title ? title : L"");
     return S_OK;
@@ -194,6 +198,11 @@ void FrameLoadDelegate::processWork()
     // if we finish all the commands, we're ready to dump state
     if (WorkQueue::shared()->processWork() && !::gLayoutTestController->waitToDump())
         dump();
+}
+
+void FrameLoadDelegate::resetToConsistentState()
+{
+    m_accessibilityController->resetToConsistentState();
 }
 
 static void CALLBACK processWorkTimer(HWND, UINT, UINT_PTR id, DWORD)
@@ -280,12 +289,53 @@ HRESULT STDMETHODCALLTYPE FrameLoadDelegate::willCloseFrame(
     return E_NOTIMPL;
 }
 
-HRESULT STDMETHODCALLTYPE FrameLoadDelegate::didClearWindowObject( 
-    /* [in] */ IWebView*webView,
-    /* [in] */ JSContextRef context,
-    /* [in] */ JSObjectRef windowObject,
-    /* [in] */ IWebFrame* frame)
+HRESULT FrameLoadDelegate::didClearWindowObject(IWebView*, JSContextRef, JSObjectRef, IWebFrame*)
 {
+    return E_NOTIMPL;
+}
+
+HRESULT FrameLoadDelegate::didClearWindowObjectForFrameInScriptWorld(IWebView* webView, IWebFrame* frame, IWebScriptWorld* world)
+{
+    ASSERT_ARG(webView, webView);
+    ASSERT_ARG(frame, frame);
+    ASSERT_ARG(world, world);
+    if (!webView || !frame || !world)
+        return E_POINTER;
+
+    COMPtr<IWebScriptWorld> standardWorld;
+    if (FAILED(world->standardWorld(&standardWorld)))
+        return S_OK;
+
+    if (world == standardWorld)
+        didClearWindowObjectForFrameInStandardWorld(frame);
+    else
+        didClearWindowObjectForFrameInIsolatedWorld(frame, world);
+    return S_OK;
+}
+
+void FrameLoadDelegate::didClearWindowObjectForFrameInIsolatedWorld(IWebFrame* frame, IWebScriptWorld* world)
+{
+    COMPtr<IWebFramePrivate> framePrivate(Query, frame);
+    if (!framePrivate)
+        return;
+
+    JSGlobalContextRef ctx = framePrivate->globalContextForScriptWorld(world);
+    if (!ctx)
+        return;
+
+    JSObjectRef globalObject = JSContextGetGlobalObject(ctx);
+    if (!globalObject)
+        return;
+
+    JSObjectSetProperty(ctx, globalObject, JSRetainPtr<JSStringRef>(Adopt, JSStringCreateWithUTF8CString("__worldID")).get(), JSValueMakeNumber(ctx, worldIDForWorld(world)), kJSPropertyAttributeReadOnly, 0);
+    return;
+}
+
+void FrameLoadDelegate::didClearWindowObjectForFrameInStandardWorld(IWebFrame* frame)
+{
+    JSGlobalContextRef context = frame->globalContext();
+    JSObjectRef windowObject = JSContextGetGlobalObject(context);
+
     JSValueRef exception = 0;
 
     ::gLayoutTestController->makeWindowObject(context, windowObject, &exception);
@@ -301,8 +351,6 @@ HRESULT STDMETHODCALLTYPE FrameLoadDelegate::didClearWindowObject(
     JSValueRef eventSender = makeEventSender(context);
     JSObjectSetProperty(context, windowObject, eventSenderStr, eventSender, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete, 0);
     JSStringRelease(eventSenderStr);
-
-    return S_OK;
 }
 
 HRESULT STDMETHODCALLTYPE FrameLoadDelegate::didFinishDocumentLoadForFrame( 
@@ -346,3 +394,23 @@ HRESULT STDMETHODCALLTYPE FrameLoadDelegate::didFirstVisuallyNonEmptyLayoutInFra
 {
     return S_OK;
 }
+
+HRESULT STDMETHODCALLTYPE FrameLoadDelegate::didDisplayInsecureContent( 
+    /* [in] */ IWebView *sender)
+{
+    if (!done && gLayoutTestController->dumpFrameLoadCallbacks())
+        printf("didDisplayInsecureContent\n");
+
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE FrameLoadDelegate::didRunInsecureContent( 
+    /* [in] */ IWebView *sender,
+    /* [in] */ IWebSecurityOrigin *origin)
+{
+    if (!done && gLayoutTestController->dumpFrameLoadCallbacks())
+        printf("didRunInsecureContent\n");
+
+    return S_OK;
+}
+

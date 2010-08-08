@@ -37,20 +37,20 @@ void AXObjectCache::attachWrapper(AccessibilityObject* obj)
     g_object_unref(atkObj);
 }
 
-void AXObjectCache::postPlatformNotification(AccessibilityObject* coreObject, const String& message)
+void AXObjectCache::postPlatformNotification(AccessibilityObject* coreObject, AXNotification notification)
 {
-    if (message == "AXCheckedStateChanged") {
+    if (notification == AXCheckedStateChanged) {
         if (!coreObject->isCheckboxOrRadio())
             return;
         g_signal_emit_by_name(coreObject->wrapper(), "state-change", "checked", coreObject->isChecked());
+    } else if (notification == AXSelectedChildrenChanged) {
+        if (!coreObject->isListBox())
+            return;
+        g_signal_emit_by_name(coreObject->wrapper(), "selection-changed");
     }
 }
-    
-void AXObjectCache::handleFocusedUIElementChanged()
-{
-}
 
-void AXObjectCache::handleFocusedUIElementChangedWithRenderers(RenderObject* oldFocusedRender, RenderObject* newFocusedRender)
+void AXObjectCache::handleFocusedUIElementChanged(RenderObject* oldFocusedRender, RenderObject* newFocusedRender)
 {
     RefPtr<AccessibilityObject> oldObject = getOrCreate(oldFocusedRender);
     if (oldObject) {
@@ -62,6 +62,10 @@ void AXObjectCache::handleFocusedUIElementChangedWithRenderers(RenderObject* old
         g_signal_emit_by_name(newObject->wrapper(), "focus-event", true);
         g_signal_emit_by_name(newObject->wrapper(), "state-change", "focused", true);
     }
+}
+
+void AXObjectCache::handleScrolledToAnchor(const Node*)
+{
 }
 
 } // namespace WebCore

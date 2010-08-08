@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -35,9 +35,10 @@
 #include "Frame.h"
 #include "FrameLoader.h"
 #include "FrameView.h"
-#include "Geolocation.h"
 #include "GeolocationPermissions.h"
+#include "GeolocationPositionCache.h"
 #include "Page.h"
+#include "PageCache.h"
 #include "RenderTable.h"
 #include "Settings.h"
 #include "WebCoreFrameBridge.h"
@@ -82,7 +83,8 @@ struct FieldIds {
         mBlockNetworkImage = env->GetFieldID(clazz, "mBlockNetworkImage", "Z");
 #endif
         mJavaScriptEnabled = env->GetFieldID(clazz, "mJavaScriptEnabled", "Z");
-        mPluginsEnabled = env->GetFieldID(clazz, "mPluginsEnabled", "Z");
+        mPluginState = env->GetFieldID(clazz, "mPluginState",
+                "Landroid/webkit/WebSettings$PluginState;");
 #if ENABLE(DATABASE)
         mDatabaseEnabled = env->GetFieldID(clazz, "mDatabaseEnabled", "Z");
 #endif
@@ -93,6 +95,7 @@ struct FieldIds {
         // The databases saved to disk for both the SQL and DOM Storage APIs are stored
         // in the same base directory.
         mDatabasePath = env->GetFieldID(clazz, "mDatabasePath", "Ljava/lang/String;");
+        mDatabasePathHasBeenSet = env->GetFieldID(clazz, "mDatabasePathHasBeenSet", "Z");
 #endif
 #if ENABLE(OFFLINE_WEB_APPLICATIONS)
         mAppCacheEnabled = env->GetFieldID(clazz, "mAppCacheEnabled", "Z");
@@ -110,6 +113,7 @@ struct FieldIds {
         mSupportMultipleWindows = env->GetFieldID(clazz, "mSupportMultipleWindows", "Z");
         mShrinksStandaloneImagesToFit = env->GetFieldID(clazz, "mShrinksStandaloneImagesToFit", "Z");
         mUseDoubleTree = env->GetFieldID(clazz, "mUseDoubleTree", "Z");
+        mPageCacheCapacity = env->GetFieldID(clazz, "mPageCacheCapacity", "I");
 
         LOG_ASSERT(mLayoutAlgorithm, "Could not find field mLayoutAlgorithm");
         LOG_ASSERT(mTextSize, "Could not find field mTextSize");
@@ -130,7 +134,7 @@ struct FieldIds {
         LOG_ASSERT(mBlockNetworkImage, "Could not find field mBlockNetworkImage");
 #endif
         LOG_ASSERT(mJavaScriptEnabled, "Could not find field mJavaScriptEnabled");
-        LOG_ASSERT(mPluginsEnabled, "Could not find field mPluginsEnabled");
+        LOG_ASSERT(mPluginState, "Could not find field mPluginState");
 #if ENABLE(OFFLINE_WEB_APPLICATIONS)
         LOG_ASSERT(mAppCacheEnabled, "Could not find field mAppCacheEnabled");
         LOG_ASSERT(mAppCachePath, "Could not find field mAppCachePath");
@@ -145,6 +149,7 @@ struct FieldIds {
         LOG_ASSERT(mSupportMultipleWindows, "Could not find field mSupportMultipleWindows");
         LOG_ASSERT(mShrinksStandaloneImagesToFit, "Could not find field mShrinksStandaloneImagesToFit");
         LOG_ASSERT(mUseDoubleTree, "Could not find field mUseDoubleTree");
+        LOG_ASSERT(mPageCacheCapacity, "Could not find field mPageCacheCapacity");
 
         jclass c = env->FindClass("java/lang/Enum");
         LOG_ASSERT(c, "Could not find Enum class!");
@@ -175,7 +180,7 @@ struct FieldIds {
     jfieldID mBlockNetworkImage;
 #endif
     jfieldID mJavaScriptEnabled;
-    jfieldID mPluginsEnabled;
+    jfieldID mPluginState;
 #if ENABLE(OFFLINE_WEB_APPLICATIONS)
     jfieldID mAppCacheEnabled;
     jfieldID mAppCachePath;
@@ -189,6 +194,7 @@ struct FieldIds {
     jfieldID mSupportMultipleWindows;
     jfieldID mShrinksStandaloneImagesToFit;
     jfieldID mUseDoubleTree;
+    jfieldID mPageCacheCapacity;
     // Ordinal() method and value field for enums
     jmethodID mOrdinal;
     jfieldID  mTextSizeValue;
@@ -203,6 +209,7 @@ struct FieldIds {
     jfieldID mGeolocationDatabasePath;
 #if ENABLE(DATABASE) || ENABLE(DOM_STORAGE)
     jfieldID mDatabasePath;
+    jfieldID mDatabasePathHasBeenSet;
 #endif
 };
 
@@ -307,8 +314,15 @@ public:
         flag = env->GetBooleanField(obj, gFieldIds->mJavaScriptEnabled);
         s->setJavaScriptEnabled(flag);
 
-        flag = env->GetBooleanField(obj, gFieldIds->mPluginsEnabled);
-        s->setPluginsEnabled(flag);
+        // ON = 0
+        // ON_DEMAND = 1
+        // OFF = 2
+        jobject pluginState = env->GetObjectField(obj, gFieldIds->mPluginState);
+        int state = env->CallIntMethod(pluginState, gFieldIds->mOrdinal);
+        s->setPluginsEnabled(state < 2);
+#ifdef ANDROID_PLUGINS
+        s->setPluginsOnDemand(state == 1);
+#endif
 
 #if ENABLE(OFFLINE_WEB_APPLICATIONS)
         flag = env->GetBooleanField(obj, gFieldIds->mAppCacheEnabled);
@@ -341,8 +355,14 @@ public:
 #if ENABLE(DATABASE)
         flag = env->GetBooleanField(obj, gFieldIds->mDatabaseEnabled);
         s->setDatabasesEnabled(flag);
-        str = (jstring)env->GetObjectField(obj, gFieldIds->mDatabasePath);
-        WebCore::DatabaseTracker::tracker().setDatabaseDirectoryPath(to_string(env, str));
+
+        flag = env->GetBooleanField(obj, gFieldIds->mDatabasePathHasBeenSet);
+        if (flag) {
+            // If the user has set the database path, sync it to the DatabaseTracker.
+            str = (jstring)env->GetObjectField(obj, gFieldIds->mDatabasePath);
+            if (str)
+                WebCore::DatabaseTracker::tracker().setDatabaseDirectoryPath(to_string(env, str));
+        }
 #endif
 #if ENABLE(DOM_STORAGE)
         flag = env->GetBooleanField(obj, gFieldIds->mDomStorageEnabled);
@@ -361,8 +381,15 @@ public:
         str = (jstring)env->GetObjectField(obj, gFieldIds->mGeolocationDatabasePath);
         if (str) {
             GeolocationPermissions::setDatabasePath(to_string(env,str));
-            WebCore::Geolocation::setDatabasePath(to_string(env,str));
+            WebCore::GeolocationPositionCache::setDatabasePath(to_string(env,str));
         }
+
+        size = env->GetIntField(obj, gFieldIds->mPageCacheCapacity);
+        if (size > 0) {
+            s->setUsesPageCache(true);
+            WebCore::pageCache()->setCapacity(size);
+        } else
+            s->setUsesPageCache(false);
     }
 };
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2008, The Android Open Source Project
+ * Copyright 2009, The Android Open Source Project
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -118,14 +118,26 @@ typedef uint32_t ANPMatrixFlag;
 #define kBitmapInterfaceV0_ANPGetValue      ((NPNVariable)1008)
 #define kSurfaceInterfaceV0_ANPGetValue     ((NPNVariable)1009)
 #define kSystemInterfaceV0_ANPGetValue      ((NPNVariable)1010)
+#define kEventInterfaceV0_ANPGetValue       ((NPNVariable)1011)
 
-/** queries for which drawing model is desired (for the draw event)
+/** queries for the drawing models supported on this device.
 
-    Should be called inside NPP_New(...)
-
-    NPN_GetValue(inst, ANPSupportedDrawingModel_EnumValue, uint32_t* bits)
+    NPN_GetValue(inst, kSupportedDrawingModel_ANPGetValue, uint32_t* bits)
  */
 #define kSupportedDrawingModel_ANPGetValue  ((NPNVariable)2000)
+
+/** queries for the context (android.content.Context) of the plugin. If no
+    instance is specified the application's context is returned. If the instance
+    is given then the context returned is identical to the context used to
+    create the webview in which that instance resides.
+
+    NOTE: Holding onto a non-application context after your instance has been
+    destroyed will cause a memory leak.  Refer to the android documentation to
+    determine what context is best suited for your particular scenario.
+
+    NPN_GetValue(inst, kJavaContext_ANPGetValue, jobject context)
+ */
+#define kJavaContext_ANPGetValue            ((NPNVariable)2001)
 
 ///////////////////////////////////////////////////////////////////////////////
 // NPN_SetValue
@@ -137,20 +149,6 @@ typedef uint32_t ANPMatrixFlag;
  */
 #define kRequestDrawingModel_ANPSetValue    ((NPPVariable)1000)
 
-/** Set the name of the Java class found in the plugin's apk that implements the
-    PluginStub interface.  The value provided must be a null terminated char*
-    that contains the fully qualified class name (e.g., your.package.className).
-    A local copy is made of the char* so the caller can safely free the memory
-    as soon as the function returns.
-
-    This value must be set prior to selecting the Surface_ANPDrawingModel or
-    requesting to enter full-screen mode.
-
-    NPN_SetValue(inst, kSetPluginStubJavaClassName_ANPSetValue,
-                (void*)nullTerminatedChar*)
- */
-#define kSetPluginStubJavaClassName_ANPSetValue ((NPPVariable)1001)
-
 /** These are used as bitfields in ANPSupportedDrawingModels_EnumValue,
     and as-is in ANPRequestDrawingModel_EnumValue. The drawing model determines
     how to interpret the ANPDrawingContext provided in the Draw event and how
@@ -160,18 +158,28 @@ enum ANPDrawingModels {
     /** Draw into a bitmap from the browser thread in response to a Draw event.
         NPWindow->window is reserved (ignore)
      */
-    kBitmap_ANPDrawingModel  = 0,
-    /** Draw into a surface (e.g. raster, opengl, etc.)using the surface interface.
-        Unlike the bitmap model a surface model is opaque so no html content behind
-        the plugin will be  visible. Unless the surface needs to be transparent the
-        surface model should be chosen over the bitmap model as it will have faster
-        performance. An example surface is the raster surface where the service
-        interface is used to lock/unlock and draw into bitmap without waiting for
-        draw events. Prior to requesting this drawing model the plugin must provide
-        the name of the Java class that implements the PluginStub interface via
-        kSetJavaClassName_ANPSetValue.
+    kBitmap_ANPDrawingModel  = 1 << 0,
+    /** Draw into a surface (e.g. raster, openGL, etc.) using the Java surface
+        interface. When this model is used the browser will invoke the Java
+        class specified in the plugin's apk manifest. From that class the browser
+        will invoke the appropriate method to return an an instance of a android
+        Java View. The instance is then embedded in the html. The plugin can then
+        manipulate the view as it would any normal Java View in android.
+
+        Unlike the bitmap model, a surface model is opaque so no html content
+        behind the plugin will be  visible. Unless the plugin needs to be
+        transparent the surface model should be chosen over the bitmap model as
+        it will have better performance.
+
+        Further, a plugin can manipulate some surfaces in native code using the
+        ANPSurfaceInterface.  This interface can be used to manipulate Java
+        objects that extend Surface.class by allowing them to access the
+        surface's underlying bitmap in native code.  For instance, if a raster
+        surface is used the plugin can lock, draw directly into the bitmap, and
+        unlock the surface in native code without making JNI calls to the Java
+        surface object.
      */
-    kSurface_ANPDrawingModel = 1,
+    kSurface_ANPDrawingModel = 1 << 1,
 };
 typedef int32_t ANPDrawingModel;
 
@@ -181,7 +189,7 @@ typedef int32_t ANPDrawingModel;
 
     NPN_SetValue(inst, ANPAcceptEvents, (void*)EventFlags)
  */
-#define kAcceptEvents_ANPSetValue           ((NPPVariable)1002)
+#define kAcceptEvents_ANPSetValue           ((NPPVariable)1001)
 
 /** The EventFlags are a set of bits used to determine which types of events the
     plugin wishes to receive. For example, if the value is 0x03 then both key
@@ -192,6 +200,20 @@ enum ANPEventFlag {
     kTouch_ANPEventFlag             = 0x02,
 };
 typedef uint32_t ANPEventFlags;
+
+///////////////////////////////////////////////////////////////////////////////
+// NPP_GetValue
+
+/** Requests that the plugin return a java surface to be displayed. This will
+    only be used if the plugin has choosen the kSurface_ANPDrawingModel.
+
+    NPP_GetValue(inst, kJavaSurface_ANPGetValue, jobject surface)
+ */
+#define kJavaSurface_ANPGetValue            ((NPPVariable)2000)
+
+
+///////////////////////////////////////////////////////////////////////////////
+// ANDROID INTERFACE DEFINITIONS
 
 /** Interfaces provide additional functionality to the plugin via function ptrs.
     Once an interface is retrieved, it is valid for the lifetime of the plugin
@@ -216,7 +238,7 @@ struct ANPLogInterfaceV0 : ANPInterface {
     /** dumps printf messages to the log file
         e.g. interface->log(instance, kWarning_ANPLogType, "value is %d", value);
      */
-    void (*log)(NPP instance, ANPLogType, const char format[], ...);
+    void (*log)(ANPLogType, const char format[], ...);
 };
 
 struct ANPBitmapInterfaceV0 : ANPInterface {
@@ -622,23 +644,6 @@ struct ANPCanvasInterfaceV0 : ANPInterface {
 };
 
 struct ANPWindowInterfaceV0 : ANPInterface {
-    /** Given the window field from the NPWindow struct, and an optional rect
-        describing the subset of the window that will be drawn to (may be null)
-        return true if the bitmap for that window can be accessed, and if so,
-        fill out the specified ANPBitmap to point to the window's pixels.
-
-        When drawing is complete, call unlock(window)
-     */
-    bool    (*lockRect)(void* window, const ANPRectI* inval, ANPBitmap*);
-    /** The same as lockRect, but takes a region instead of a rect to specify
-        the area that will be changed/drawn.
-     */
-    bool    (*lockRegion)(void* window, const ANPRegion* inval, ANPBitmap*);
-    /** Given a successful call to lock(window, inval, &bitmap), call unlock
-        to release access to the pixels, and allow the browser to display the
-        results. If lock returned false, unlock should not be called.
-     */
-    void    (*unlock)(void* window);
     /** Registers a set of rectangles that the plugin would like to keep on
         screen. The rectangles are listed in order of priority with the highest
         priority rectangle in location rects[0].  The browser will attempt to keep
@@ -660,10 +665,17 @@ struct ANPWindowInterfaceV0 : ANPInterface {
      */
     void    (*showKeyboard)(NPP instance, bool value);
     /** Called when a plugin wishes to enter into full screen mode. The plugin's
-        Java class (set using kSetPluginStubJavaClassName_ANPSetValue) will be
-        called asynchronously to provide a View object to be displayed full screen.
+        Java class (defined in the plugin's apk manifest) will be called
+        asynchronously to provide a View object to be displayed full screen.
      */
     void    (*requestFullScreen)(NPP instance);
+    /** Called when a plugin wishes to exit from full screen mode. As a result,
+        the plugin's full screen view will be discarded by the view system.
+     */
+    void    (*exitFullScreen)(NPP instance);
+    /** Called when a plugin wishes to be zoomed and centered in the current view.
+     */
+    void    (*requestCenterFitZoom)(NPP instance);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -751,7 +763,7 @@ struct ANPAudioTrackInterfaceV0 : ANPInterface {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-// HandleEvent
+// DEFINITION OF VALUES PASSED THROUGH NPP_HandleEvent
 
 enum ANPEventTypes {
     kNull_ANPEventType          = 0,
@@ -772,6 +784,21 @@ enum ANPEventTypes {
      */
     kDraw_ANPEventType          = 4,
     kLifecycle_ANPEventType     = 5,
+
+    /** This event type is completely defined by the plugin.
+        When creating an event, the caller must always set the first
+        two fields, the remaining data is optional.
+            ANPEvent evt;
+            evt.inSize = sizeof(ANPEvent);
+            evt.eventType = kCustom_ANPEventType
+            // other data slots are optional
+            evt.other[] = ...;
+        To post a copy of the event, call
+            eventInterface->postEvent(myNPPInstance, &evt);
+        That call makes a copy of the event struct, and post that on the event
+        queue for the plugin.
+     */
+    kCustom_ANPEventType   = 6,
 };
 typedef int32_t ANPEventType;
 
@@ -803,10 +830,13 @@ enum ANPTouchActions {
         the plugin chooses to not handle this action then no other events
         related to that particular touch gesture will be generated.
      */
-    kDown_ANPTouchAction   = 0,
-    kUp_ANPTouchAction     = 1,
-    kMove_ANPTouchAction   = 2,
-    kCancel_ANPTouchAction = 3,
+    kDown_ANPTouchAction        = 0,
+    kUp_ANPTouchAction          = 1,
+    kMove_ANPTouchAction        = 2,
+    kCancel_ANPTouchAction      = 3,
+    // The web view will ignore the return value from the following actions
+    kLongPress_ANPTouchAction   = 4,
+    kDoubleTap_ANPTouchAction   = 5,
 };
 typedef int32_t ANPTouchAction;
 
@@ -814,28 +844,46 @@ enum ANPLifecycleActions {
     /** The web view containing this plugin has been paused.  See documentation
         on the android activity lifecycle for more information.
      */
-    kPause_ANPLifecycleAction      = 0,
+    kPause_ANPLifecycleAction           = 0,
     /** The web view containing this plugin has been resumed. See documentation
         on the android activity lifecycle for more information.
      */
-    kResume_ANPLifecycleAction     = 1,
+    kResume_ANPLifecycleAction          = 1,
     /** The plugin has focus and is now the recipient of input events (e.g. key,
         touch, etc.)
      */
-    kGainFocus_ANPLifecycleAction  = 2,
+    kGainFocus_ANPLifecycleAction       = 2,
     /** The plugin has lost focus and will not receive any input events until it
         regains focus. This event is always preceded by a GainFocus action.
      */
-    kLoseFocus_ANPLifecycleAction  = 3,
+    kLoseFocus_ANPLifecycleAction       = 3,
     /** The browser is running low on available memory and is requesting that
         the plugin free any unused/inactive resources to prevent a performance
         degradation.
      */
-    kFreeMemory_ANPLifecycleAction = 4,
+    kFreeMemory_ANPLifecycleAction      = 4,
     /** The page has finished loading. This happens when the page's top level
         frame reports that it has completed loading.
      */
-    kOnLoad_ANPLifecycleAction     = 5,
+    kOnLoad_ANPLifecycleAction          = 5,
+    /** The browser is honoring the plugin's request to go full screen. Upon
+        returning from this event the browser will resize the plugin's java
+        surface to full-screen coordinates.
+     */
+    kEnterFullScreen_ANPLifecycleAction = 6,
+    /** The browser has exited from full screen mode. Immediately prior to
+        sending this event the browser has resized the plugin's java surface to
+        its original coordinates.
+     */
+    kExitFullScreen_ANPLifecycleAction  = 7,
+    /** The plugin is visible to the user on the screen. This event will always
+        occur after a kOffScreen_ANPLifecycleAction event.
+     */
+    kOnScreen_ANPLifecycleAction        = 8,
+    /** The plugin is no longer visible to the user on the screen. This event
+        will always occur prior to an kOnScreen_ANPLifecycleAction event.
+     */
+    kOffScreen_ANPLifecycleAction       = 9,
 };
 typedef uint32_t ANPLifecycleAction;
 
@@ -880,15 +928,14 @@ struct ANPEvent {
     } data;
 };
 
-///////////////////////////////////////////////////////////////////////////////
-// System properties
-
-struct ANPSystemInterfaceV0 : ANPInterface {
-    /** Return the path name for the current Application's plugin data directory,
-     *  or NULL if not supported
+struct ANPEventInterfaceV0 : ANPInterface {
+    /** Post a copy of the specified event to the plugin. The event will be
+        delivered to the plugin in its main thread (the thread that receives
+        other ANPEvents). If, after posting before delivery, the NPP instance
+        is torn down, the event will be discarded.
      */
-    const char* (*getApplicationDataDirectory)();
+    void (*postEvent)(NPP inst, const ANPEvent* event);
 };
 
-#endif
 
+#endif

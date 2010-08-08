@@ -27,6 +27,12 @@
 
 namespace WebCore {
 
+// FIXME: This would be in GraphicsContextCG.h if that existed.
+CGColorSpaceRef deviceRGBColorSpaceRef();
+
+// FIXME: This would be in GraphicsContextCG.h if that existed.
+CGColorSpaceRef sRGBColorSpaceRef();
+
 class GraphicsContextPlatformPrivate {
 public:
     GraphicsContextPlatformPrivate(CGContextRef cgContext)
@@ -38,12 +44,10 @@ public:
 #endif
         , m_userToDeviceTransformKnownToBeIdentity(false)
     {
-        CGContextRetain(m_cgContext);
     }
     
     ~GraphicsContextPlatformPrivate()
     {
-        CGContextRelease(m_cgContext);
     }
 
 #if PLATFORM(MAC) || PLATFORM(CHROMIUM)
@@ -56,7 +60,7 @@ public:
     void scale(const FloatSize&) {}
     void rotate(float) {}
     void translate(float, float) {}
-    void concatCTM(const TransformationMatrix&) {}
+    void concatCTM(const AffineTransform&) {}
     void beginTransparencyLayer() {}
     void endTransparencyLayer() {}
 #endif
@@ -71,7 +75,7 @@ public:
     void scale(const FloatSize&);
     void rotate(float);
     void translate(float, float);
-    void concatCTM(const TransformationMatrix&);
+    void concatCTM(const AffineTransform&);
     void beginTransparencyLayer() { m_transparencyCount++; }
     void endTransparencyLayer() { m_transparencyCount--; }
 
@@ -80,7 +84,7 @@ public:
     bool m_shouldIncludeChildWindows;
 #endif
 
-    CGContextRef m_cgContext;
+    RetainPtr<CGContextRef> m_cgContext;
     bool m_userToDeviceTransformKnownToBeIdentity;
 };
 

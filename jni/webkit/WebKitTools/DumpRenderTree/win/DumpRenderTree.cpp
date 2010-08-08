@@ -31,6 +31,7 @@
 
 #include "EditingDelegate.h"
 #include "FrameLoadDelegate.h"
+#include "HistoryDelegate.h"
 #include "LayoutTestController.h"
 #include "PixelDumpSupport.h"
 #include "PolicyDelegate.h"
@@ -50,17 +51,22 @@
 #include <wtf/RetainPtr.h>
 #include <wtf/Vector.h>
 #include <windows.h>
-#if PLATFORM(CFNETWORK)
-#include <CFNetwork/CFURLCachePriv.h>
-#endif
 #include <CoreFoundation/CoreFoundation.h>
 #include <JavaScriptCore/JavaScriptCore.h>
 #include <WebKit/WebKit.h>
 #include <WebKit/WebKitCOMAPI.h>
 
+#if USE(CFNETWORK)
+#include <CFNetwork/CFURLCachePriv.h>
+#endif
+
+#if USE(CFNETWORK)
+#include <CFNetwork/CFHTTPCookiesPriv.h>
+#endif
+
 using namespace std;
 
-#ifndef NDEBUG
+#if !defined(NDEBUG) && (!defined(DEBUG_INTERNAL) || defined(DEBUG_ALL))
 const LPWSTR TestPluginDir = L"TestNetscapePlugin_Debug";
 #else
 const LPWSTR TestPluginDir = L"TestNetscapePlugin";
@@ -92,6 +98,7 @@ COMPtr<FrameLoadDelegate> sharedFrameLoadDelegate;
 COMPtr<UIDelegate> sharedUIDelegate;
 COMPtr<EditingDelegate> sharedEditingDelegate;
 COMPtr<ResourceLoadDelegate> sharedResourceLoadDelegate;
+COMPtr<HistoryDelegate> sharedHistoryDelegate;
 
 IWebFrame* frame;
 HWND webViewWindow;
@@ -106,6 +113,25 @@ const unsigned maxViewHeight = 600;
 void setPersistentUserStyleSheetLocation(CFStringRef url)
 {
     persistentUserStyleSheetLocation = url;
+}
+
+bool setAlwaysAcceptCookies(bool alwaysAcceptCookies)
+{
+#if USE(CFNETWORK)
+    COMPtr<IWebCookieManager> cookieManager;
+    if (FAILED(WebKitCreateInstance(CLSID_WebCookieManager, 0, IID_IWebCookieManager, reinterpret_cast<void**>(&cookieManager))))
+        return false;
+    CFHTTPCookieStorageRef cookieStorage = 0;
+    if (FAILED(cookieManager->cookieStorage(&cookieStorage)) || !cookieStorage)
+        return false;
+
+    WebKitCookieStorageAcceptPolicy cookieAcceptPolicy = alwaysAcceptCookies ? WebKitCookieStorageAcceptPolicyAlways : WebKitCookieStorageAcceptPolicyOnlyFromMainDocumentDomain;
+    CFHTTPCookieStorageSetCookieAcceptPolicy(cookieStorage, cookieAcceptPolicy);
+    return true;
+#else
+    // FIXME: Implement!
+    return false;
+#endif
 }
 
 wstring urlSuitableForTestResult(const wstring& url)
@@ -175,7 +201,44 @@ static const wstring& fontsPath()
     return path;
 }
 
-#ifdef DEBUG_WEBKIT_HAS_SUFFIX
+static void addQTDirToPATH()
+{
+    static LPCWSTR pathEnvironmentVariable = L"PATH";
+    static LPCWSTR quickTimeKeyName = L"Software\\Apple Computer, Inc.\\QuickTime";
+    static LPCWSTR quickTimeSysDir = L"QTSysDir";
+    static bool initialized;
+
+    if (initialized)
+        return;
+    initialized = true;
+
+    // Get the QuickTime dll directory from the registry. The key can be in either HKLM or HKCU.
+    WCHAR qtPath[MAX_PATH];
+    DWORD qtPathBufferLen = sizeof(qtPath);
+    DWORD keyType;
+    HRESULT result = SHGetValue(HKEY_LOCAL_MACHINE, quickTimeKeyName, quickTimeSysDir, &keyType, (LPVOID)qtPath, &qtPathBufferLen);
+    if (result != ERROR_SUCCESS || !qtPathBufferLen || keyType != REG_SZ) {
+        qtPathBufferLen = sizeof(qtPath);
+        result = SHGetValue(HKEY_CURRENT_USER, quickTimeKeyName, quickTimeSysDir, &keyType, (LPVOID)qtPath, &qtPathBufferLen);
+        if (result != ERROR_SUCCESS || !qtPathBufferLen || keyType != REG_SZ)
+            return;
+    }
+
+    // Read the current PATH.
+    DWORD pathSize = GetEnvironmentVariableW(pathEnvironmentVariable, 0, 0);
+    Vector<WCHAR> oldPath(pathSize);
+    if (!GetEnvironmentVariableW(pathEnvironmentVariable, oldPath.data(), oldPath.size()))
+        return;
+
+    // And add the QuickTime dll.
+    wstring newPath;
+    newPath.append(qtPath);
+    newPath.append(L";");
+    newPath.append(oldPath.data(), oldPath.size());
+    SetEnvironmentVariableW(pathEnvironmentVariable, newPath.data());
+}
+
+#ifdef DEBUG_ALL
 #define WEBKITDLL TEXT("WebKit_debug.dll")
 #else
 #define WEBKITDLL TEXT("WebKit.dll")
@@ -237,6 +300,10 @@ static void initialize()
         for (int i = 0; i < ARRAYSIZE(fontsToInstall); ++i)
             textRenderer->registerPrivateFont(wstring(resourcesPath + fontsToInstall[i]).c_str());
 
+    // Add the QuickTime dll directory to PATH or QT 7.6 will fail to initialize on systems
+    // linked with older versions of qtmlclientlib.dll.
+    addQTDirToPATH();
+
     // Register a host window
     WNDCLASSEX wcex;
 
@@ -260,7 +327,7 @@ static void initialize()
 void displayWebView()
 {
     ::InvalidateRect(webViewWindow, 0, TRUE);
-    ::UpdateWindow(webViewWindow);
+    ::SendMessage(webViewWindow, WM_PAINT, 0, 0);
 }
 
 void dumpFrameScrollPosition(IWebFrame* frame)
@@ -657,6 +724,82 @@ static bool shouldLogFrameLoadDelegates(const char* pathOrURL)
     return strstr(pathOrURL, "/loading/") || strstr(pathOrURL, "\\loading\\");
 }
 
+static bool shouldLogHistoryDelegates(const char* pathOrURL)
+{
+    return strstr(pathOrURL, "/globalhistory/") || strstr(pathOrURL, "\\globalhistory\\");
+}
+
+static bool shouldOpenWebInspector(const char* pathOrURL)
+{
+    return strstr(pathOrURL, "/inspector/") || strstr(pathOrURL, "\\inspector\\");
+}
+
+static void resetDefaultsToConsistentValues(IWebPreferences* preferences)
+{
+#ifdef USE_MAC_FONTS
+    static BSTR standardFamily = SysAllocString(TEXT("Times"));
+    static BSTR fixedFamily = SysAllocString(TEXT("Courier"));
+    static BSTR sansSerifFamily = SysAllocString(TEXT("Helvetica"));
+    static BSTR cursiveFamily = SysAllocString(TEXT("Apple Chancery"));
+    static BSTR fantasyFamily = SysAllocString(TEXT("Papyrus"));
+#else
+    static BSTR standardFamily = SysAllocString(TEXT("Times New Roman"));
+    static BSTR fixedFamily = SysAllocString(TEXT("Courier New"));
+    static BSTR sansSerifFamily = SysAllocString(TEXT("Arial"));
+    static BSTR cursiveFamily = SysAllocString(TEXT("Comic Sans MS")); // Not actually cursive, but it's what IE and Firefox use.
+    static BSTR fantasyFamily = SysAllocString(TEXT("Times New Roman"));
+#endif
+
+    preferences->setStandardFontFamily(standardFamily);
+    preferences->setFixedFontFamily(fixedFamily);
+    preferences->setSerifFontFamily(standardFamily);
+    preferences->setSansSerifFontFamily(sansSerifFamily);
+    preferences->setCursiveFontFamily(cursiveFamily);
+    preferences->setFantasyFontFamily(fantasyFamily);
+
+    preferences->setAutosaves(FALSE);
+    preferences->setDefaultFontSize(16);
+    preferences->setDefaultFixedFontSize(13);
+    preferences->setMinimumFontSize(1);
+    preferences->setJavaEnabled(FALSE);
+    preferences->setPlugInsEnabled(TRUE);
+    preferences->setDOMPasteAllowed(TRUE);
+    preferences->setEditableLinkBehavior(WebKitEditableLinkOnlyLiveWithShiftKey);
+    preferences->setFontSmoothing(FontSmoothingTypeStandard);
+    preferences->setUsesPageCache(FALSE);
+    preferences->setPrivateBrowsingEnabled(FALSE);
+    preferences->setJavaScriptCanOpenWindowsAutomatically(TRUE);
+    preferences->setJavaScriptEnabled(TRUE);
+    preferences->setTabsToLinks(FALSE);
+    preferences->setShouldPrintBackgrounds(TRUE);
+    preferences->setLoadsImagesAutomatically(TRUE);
+
+    if (persistentUserStyleSheetLocation) {
+        Vector<wchar_t> urlCharacters(CFStringGetLength(persistentUserStyleSheetLocation.get()));
+        CFStringGetCharacters(persistentUserStyleSheetLocation.get(), CFRangeMake(0, CFStringGetLength(persistentUserStyleSheetLocation.get())), (UniChar *)urlCharacters.data());
+        BSTR url = SysAllocStringLen(urlCharacters.data(), urlCharacters.size());
+        preferences->setUserStyleSheetLocation(url);
+        SysFreeString(url);
+        preferences->setUserStyleSheetEnabled(TRUE);
+    } else
+        preferences->setUserStyleSheetEnabled(FALSE);
+
+    COMPtr<IWebPreferencesPrivate> prefsPrivate(Query, preferences);
+    if (prefsPrivate) {
+        prefsPrivate->setAllowUniversalAccessFromFileURLs(TRUE);
+        prefsPrivate->setAuthorAndUserStylesEnabled(TRUE);
+        prefsPrivate->setDeveloperExtrasEnabled(FALSE);
+        prefsPrivate->setExperimentalNotificationsEnabled(TRUE);
+        prefsPrivate->setShouldPaintNativeControls(FALSE); // FIXME - need to make DRT pass with Windows native controls <http://bugs.webkit.org/show_bug.cgi?id=25592>
+        prefsPrivate->setXSSAuditorEnabled(FALSE);
+        prefsPrivate->setFrameSetFlatteningEnabled(FALSE);
+        prefsPrivate->setOfflineWebApplicationCacheEnabled(TRUE);
+    }
+    setAlwaysAcceptCookies(false);
+
+    setlocale(LC_ALL, "");
+}
+
 static void resetWebViewToConsistentStateBeforeTesting()
 {
     COMPtr<IWebView> webView;
@@ -673,30 +816,10 @@ static void resetWebViewToConsistentStateBeforeTesting()
         webIBActions->resetPageZoom(0);
     }
 
+
     COMPtr<IWebPreferences> preferences;
-    if (SUCCEEDED(webView->preferences(&preferences))) {
-        preferences->setPrivateBrowsingEnabled(FALSE);
-        preferences->setJavaScriptCanOpenWindowsAutomatically(TRUE);
-        preferences->setLoadsImagesAutomatically(TRUE);
-
-        if (persistentUserStyleSheetLocation) {
-            Vector<wchar_t> urlCharacters(CFStringGetLength(persistentUserStyleSheetLocation.get()));
-            CFStringGetCharacters(persistentUserStyleSheetLocation.get(), CFRangeMake(0, CFStringGetLength(persistentUserStyleSheetLocation.get())), (UniChar *)urlCharacters.data());
-            BSTR url = SysAllocStringLen(urlCharacters.data(), urlCharacters.size());
-            preferences->setUserStyleSheetLocation(url);
-            SysFreeString(url);
-            preferences->setUserStyleSheetEnabled(TRUE);
-        } else
-            preferences->setUserStyleSheetEnabled(FALSE);
-
-        COMPtr<IWebPreferencesPrivate> prefsPrivate(Query, preferences);
-        if (prefsPrivate) {
-            prefsPrivate->setAuthorAndUserStylesEnabled(TRUE);
-            prefsPrivate->setDeveloperExtrasEnabled(FALSE);
-            prefsPrivate->setShouldPaintNativeControls(FALSE); // FIXME - need to make DRT pass with Windows native controls <http://bugs.webkit.org/show_bug.cgi?id=25592>
-            prefsPrivate->setXSSAuditorEnabled(FALSE);
-        }
-    }
+    if (SUCCEEDED(webView->preferences(&preferences)))
+        resetDefaultsToConsistentValues(preferences.get());
 
     COMPtr<IWebViewEditing> viewEditing;
     if (SUCCEEDED(webView->QueryInterface(&viewEditing)))
@@ -715,8 +838,17 @@ static void resetWebViewToConsistentStateBeforeTesting()
         SetFocus(viewWindow);
 
     webViewPrivate->clearMainFrameName();
+    webViewPrivate->resetOriginAccessWhiteLists();
+
+    BSTR groupName;
+    if (SUCCEEDED(webView->groupName(&groupName))) {
+        webViewPrivate->removeAllUserContentFromGroup(groupName);
+        SysFreeString(groupName);
+    }
 
     sharedUIDelegate->resetUndoManager();
+
+    sharedFrameLoadDelegate->resetToConsistentState();
 }
 
 static void runTest(const string& testPathOrURL)
@@ -763,15 +895,28 @@ static void runTest(const string& testPathOrURL)
     if (shouldLogFrameLoadDelegates(pathOrURL.c_str()))
         gLayoutTestController->setDumpFrameLoadCallbacks(true);
 
+    COMPtr<IWebView> webView;
+    if (SUCCEEDED(frame->webView(&webView))) {
+        COMPtr<IWebViewPrivate> viewPrivate;
+        if (SUCCEEDED(webView->QueryInterface(&viewPrivate))) {
+            if (shouldLogHistoryDelegates(pathOrURL.c_str())) {
+                gLayoutTestController->setDumpHistoryDelegateCallbacks(true);            
+                viewPrivate->setHistoryDelegate(sharedHistoryDelegate.get());
+            } else
+                viewPrivate->setHistoryDelegate(0);
+        }
+    }
     COMPtr<IWebHistory> history;
     if (SUCCEEDED(WebKitCreateInstance(CLSID_WebHistory, 0, __uuidof(history), reinterpret_cast<void**>(&history))))
         history->setOptionalSharedHistory(0);
 
     resetWebViewToConsistentStateBeforeTesting();
 
+    if (shouldOpenWebInspector(pathOrURL.c_str()))
+        gLayoutTestController->showWebInspector();
+
     prevTestBFItem = 0;
-    COMPtr<IWebView> webView;
-    if (SUCCEEDED(frame->webView(&webView))) {
+    if (webView) {
         COMPtr<IWebBackForwardList> bfList;
         if (SUCCEEDED(webView->backForwardList(&bfList)))
             bfList->currentItem(&prevTestBFItem);
@@ -804,6 +949,9 @@ static void runTest(const string& testPathOrURL)
         DispatchMessage(&msg);
     }
 
+    if (shouldOpenWebInspector(pathOrURL.c_str()))
+        gLayoutTestController->closeWebInspector();
+
     resetWebViewToConsistentStateBeforeTesting();
 
     frame->stopLoading();
@@ -828,44 +976,6 @@ exit:
     ::gLayoutTestController = 0;
 
     return;
-}
-
-static void initializePreferences(IWebPreferences* preferences)
-{
-#ifdef USE_MAC_FONTS
-    BSTR standardFamily = SysAllocString(TEXT("Times"));
-    BSTR fixedFamily = SysAllocString(TEXT("Courier"));
-    BSTR sansSerifFamily = SysAllocString(TEXT("Helvetica"));
-    BSTR cursiveFamily = SysAllocString(TEXT("Apple Chancery"));
-    BSTR fantasyFamily = SysAllocString(TEXT("Papyrus"));
-#else
-    BSTR standardFamily = SysAllocString(TEXT("Times New Roman"));
-    BSTR fixedFamily = SysAllocString(TEXT("Courier New"));
-    BSTR sansSerifFamily = SysAllocString(TEXT("Arial"));
-    BSTR cursiveFamily = SysAllocString(TEXT("Comic Sans MS")); // Not actually cursive, but it's what IE and Firefox use.
-    BSTR fantasyFamily = SysAllocString(TEXT("Times New Roman"));
-#endif
-
-    preferences->setStandardFontFamily(standardFamily);
-    preferences->setFixedFontFamily(fixedFamily);
-    preferences->setSerifFontFamily(standardFamily);
-    preferences->setSansSerifFontFamily(sansSerifFamily);
-    preferences->setCursiveFontFamily(cursiveFamily);
-    preferences->setFantasyFontFamily(fantasyFamily);
-
-    preferences->setAutosaves(FALSE);
-    preferences->setJavaEnabled(FALSE);
-    preferences->setPlugInsEnabled(TRUE);
-    preferences->setDOMPasteAllowed(TRUE);
-    preferences->setEditableLinkBehavior(WebKitEditableLinkOnlyLiveWithShiftKey);
-    preferences->setFontSmoothing(FontSmoothingTypeStandard);
-    preferences->setUsesPageCache(FALSE);
-
-    SysFreeString(standardFamily);
-    SysFreeString(fixedFamily);
-    SysFreeString(sansSerifFamily);
-    SysFreeString(cursiveFamily);
-    SysFreeString(fantasyFamily);
 }
 
 static Boolean pthreadEqualCallback(const void* value1, const void* value2)
@@ -1052,23 +1162,19 @@ IWebView* createWebViewAndOffscreenWindow(HWND* webViewWindow)
     if (FAILED(webView->setResourceLoadDelegate(sharedResourceLoadDelegate.get())))
         return 0;
 
-    COMPtr<IWebPreferences> preferences;
-    if (FAILED(webView->preferences(&preferences)))
-        return 0;
-
-    initializePreferences(preferences.get());
-
     openWindows().append(hostWindow);
     windowToWebViewMap().set(hostWindow, webView);
     return webView;
 }
 
-#if PLATFORM(CFNETWORK)
+#if USE(CFNETWORK)
 RetainPtr<CFURLCacheRef> sharedCFURLCache()
 {
+#ifndef DEBUG_ALL
+    HMODULE module = GetModuleHandle(TEXT("CFNetwork.dll"));
+#else
     HMODULE module = GetModuleHandle(TEXT("CFNetwork_debug.dll"));
-    if (!module)
-        module = GetModuleHandle(TEXT("CFNetwork.dll"));
+#endif
     if (!module)
         return 0;
 
@@ -1124,6 +1230,7 @@ int main(int argc, char* argv[])
     sharedUIDelegate.adoptRef(new UIDelegate);
     sharedEditingDelegate.adoptRef(new EditingDelegate);
     sharedResourceLoadDelegate.adoptRef(new ResourceLoadDelegate);
+    sharedHistoryDelegate.adoptRef(new HistoryDelegate);
 
     // FIXME - need to make DRT pass with Windows native controls <http://bugs.webkit.org/show_bug.cgi?id=25592>
     COMPtr<IWebPreferences> tmpPreferences;
@@ -1138,7 +1245,7 @@ int main(int argc, char* argv[])
     standardPreferencesPrivate->setShouldPaintNativeControls(FALSE);
     standardPreferences->setJavaScriptEnabled(TRUE);
     standardPreferences->setDefaultFontSize(16);
-    
+
     COMPtr<IWebView> webView(AdoptCOM, createWebViewAndOffscreenWindow(&webViewWindow));
     if (!webView)
         return -1;
@@ -1153,7 +1260,7 @@ int main(int argc, char* argv[])
     if (FAILED(webView->mainFrame(&frame)))
         return -1;
 
-#if PLATFORM(CFNETWORK)
+#if USE(CFNETWORK)
     RetainPtr<CFURLCacheRef> urlCache = sharedCFURLCache();
     CFURLCacheRemoveAllCachedResponses(urlCache.get());
 #endif

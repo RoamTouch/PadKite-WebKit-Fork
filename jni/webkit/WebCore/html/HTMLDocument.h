@@ -37,7 +37,7 @@ class HTMLDocument : public Document, public CachedResourceClient {
 public:
     static PassRefPtr<HTMLDocument> create(Frame* frame)
     {
-        return new HTMLDocument(frame);
+        return adoptRef(new HTMLDocument(frame));
     }
     virtual ~HTMLDocument();
 
@@ -71,10 +71,6 @@ public:
     void captureEvents();
     void releaseEvents();
 
-    virtual bool childAllowed(Node*);
-
-    virtual PassRefPtr<Element> createElement(const AtomicString& tagName, ExceptionCode&);
-
     void addNamedItem(const AtomicString& name);
     void removeNamedItem(const AtomicString& name);
     bool hasNamedItem(AtomicStringImpl* name);
@@ -86,8 +82,19 @@ public:
 protected:
     HTMLDocument(Frame*);
 
+#ifdef ANDROID_INSTRUMENT
+    // Overridden to resolve the ambiguous
+    void* operator new(size_t size);
+    void* operator new[](size_t size);
+    void operator delete(void* p, size_t size);
+    void operator delete[](void* p, size_t size);
+#endif
+
 private:
-    virtual bool isHTMLDocument() const { return true; }
+    virtual bool childAllowed(Node*);
+
+    virtual PassRefPtr<Element> createElement(const AtomicString& tagName, ExceptionCode&);
+
     virtual bool isFrameSet() const;
     virtual Tokenizer* createTokenizer();
     virtual void determineParseMode();

@@ -146,7 +146,7 @@ public final class WebStorage {
      * @hide
      * Message handler, webcore side
      */
-    public void createHandler() {
+    public synchronized void createHandler() {
         if (mHandler == null) {
             mHandler = new Handler() {
                 @Override
@@ -340,9 +340,18 @@ public final class WebStorage {
     }
 
     /**
+     * Sets the maximum size of the ApplicationCache.
+     * This should only ever be called on the WebKit thread.
+     * @hide Pending API council approval
+     */
+    public void setAppCacheMaximumSize(long size) {
+        nativeSetAppCacheMaximumSize(size);
+    }
+
+    /**
      * Utility function to send a message to our handler
      */
-    private void postMessage(Message msg) {
+    private synchronized void postMessage(Message msg) {
         if (mHandler != null) {
             mHandler.sendMessage(msg);
         }
@@ -389,8 +398,8 @@ public final class WebStorage {
         mOrigins = new HashMap<String, Origin>();
         for (String origin : tmp) {
             Origin website = new Origin(origin,
-                                 nativeGetUsageForOrigin(origin),
-                                 nativeGetQuotaForOrigin(origin));
+                                 nativeGetQuotaForOrigin(origin),
+                                 nativeGetUsageForOrigin(origin));
             mOrigins.put(origin, website);
         }
     }
@@ -402,4 +411,5 @@ public final class WebStorage {
     private static native void nativeSetQuotaForOrigin(String origin, long quota);
     private static native void nativeDeleteOrigin(String origin);
     private static native void nativeDeleteAllData();
+    private static native void nativeSetAppCacheMaximumSize(long size);
 }

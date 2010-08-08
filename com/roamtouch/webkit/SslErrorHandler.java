@@ -51,6 +51,10 @@ public class SslErrorHandler extends Handler {
      */
     private Bundle mSslPrefTable;
 
+    // These are only used in the client facing SslErrorHandler.
+    private final SslErrorHandler mOriginHandler;
+    private final LoadListener mLoadListener;
+
     // Message id for handling the response
     private static final int HANDLE_RESPONSE = 100;
 
@@ -59,9 +63,12 @@ public class SslErrorHandler extends Handler {
         switch (msg.what) {
             case HANDLE_RESPONSE:
                 LoadListener loader = (LoadListener) msg.obj;
-                handleSslErrorResponse(loader, loader.sslError(),
-                        msg.arg1 == 1);
-                fastProcessQueuedSslErrors();
+                synchronized (SslErrorHandler.this) {
+                    handleSslErrorResponse(loader, loader.sslError(),
+                            msg.arg1 == 1);
+                    mLoaderQueue.remove(loader);
+                    fastProcessQueuedSslErrors();
+                }
                 break;
         }
     }
@@ -72,6 +79,18 @@ public class SslErrorHandler extends Handler {
     /* package */ SslErrorHandler() {
         mLoaderQueue = new LinkedList<LoadListener>();
         mSslPrefTable = new Bundle();
+
+        // These are used by client facing SslErrorHandlers.
+        mOriginHandler = null;
+        mLoadListener = null;
+    }
+
+    /**
+     * Create a new error handler that will be passed to the client.
+     */
+    private SslErrorHandler(SslErrorHandler origin, LoadListener listener) {
+        mOriginHandler = origin;
+        mLoadListener = listener;
     }
 
     /**
@@ -191,7 +210,7 @@ public class SslErrorHandler extends Handler {
             // if we do not have information on record, ask
             // the user (display a dialog)
             CallbackProxy proxy = loader.getFrame().getCallbackProxy();
-            proxy.onReceivedSslError(this, error);
+            proxy.onReceivedSslError(new SslErrorHandler(this, loader), error);
         }
 
         // the queue must be empty, stop
@@ -202,7 +221,9 @@ public class SslErrorHandler extends Handler {
      * Proceed with the SSL certificate.
      */
     public void proceed() {
-        sendMessage(obtainMessage(HANDLE_RESPONSE, 1, 0, mLoaderQueue.poll()));
+        mOriginHandler.sendMessage(
+                mOriginHandler.obtainMessage(
+                        HANDLE_RESPONSE, 1, 0, mLoadListener));
     }
 
     /**
@@ -210,7 +231,9 @@ public class SslErrorHandler extends Handler {
      * the error.
      */
     public void cancel() {
-        sendMessage(obtainMessage(HANDLE_RESPONSE, 0, 0, mLoaderQueue.poll()));
+        mOriginHandler.sendMessage(
+                mOriginHandler.obtainMessage(
+                        HANDLE_RESPONSE, 0, 0, mLoadListener));
     }
 
     /**

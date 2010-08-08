@@ -50,17 +50,10 @@ namespace JSC {
         void setSetter(JSObject* setter) { m_setter = setter; }
         static PassRefPtr<Structure> createStructure(JSValue prototype)
         {
-            return Structure::create(prototype, TypeInfo(GetterSetterType));
+            return Structure::create(prototype, TypeInfo(GetterSetterType, OverridesMarkChildren), AnonymousSlotCount);
         }
     private:
         virtual bool isGetterSetter() const;
-
-        virtual JSValue toPrimitive(ExecState*, PreferredPrimitiveType) const;
-        virtual bool getPrimitiveNumber(ExecState*, double& number, JSValue& value);
-        virtual bool toBoolean(ExecState*) const;
-        virtual double toNumber(ExecState*) const;
-        virtual UString toString(ExecState*) const;
-        virtual JSObject* toObject(ExecState*) const;
 
         JSObject* m_getter;
         JSObject* m_setter;  

@@ -16,6 +16,10 @@
 
 package android.webkit;
 
+import android.net.http.EventHandler;
+
+import com.android.internal.R;
+
 import java.io.ByteArrayInputStream;
 
 import org.apache.harmony.luni.util.Base64;
@@ -49,29 +53,25 @@ class DataLoader extends StreamLoader {
         } else {
             data = url.getBytes();
         }
-        mDataStream = new ByteArrayInputStream(data);
-        mContentLength = data.length;
+        if (data != null) {
+            mDataStream = new ByteArrayInputStream(data);
+            mContentLength = data.length;
+        }
     }
 
     @Override
     protected boolean setupStreamAndSendStatus() {
-        mHandler.status(1, 1, 0, "OK");
-        return true;
+        if (mDataStream != null) {
+            mLoadListener.status(1, 1, 200, "OK");
+            return true;
+        } else {
+            mLoadListener.error(EventHandler.ERROR,
+                    mContext.getString(R.string.httpError));
+            return false;
+        }
     }
 
     @Override
     protected void buildHeaders(android.net.http.Headers h) {
     }
-
-    /**
-     * Construct a DataLoader and instruct it to start loading.
-     *
-     * @param url data: URL string optionally containing a mimetype
-     * @param loadListener LoadListener to pass the content to
-     */
-    public static void requestUrl(String url, LoadListener loadListener) {
-        DataLoader loader = new DataLoader(url, loadListener);
-        loader.load();
-    }
-
 }

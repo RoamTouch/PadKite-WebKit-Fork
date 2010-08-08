@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -38,6 +38,7 @@
 #include "FrameLoader.h"
 #include "FrameView.h"
 #include "Geolocation.h"
+#include "GraphicsLayerAndroid.h"
 #include "Page.h"
 #include "Screen.h"
 #include "ScriptController.h"
@@ -48,6 +49,55 @@
 #include "Settings.h"
 
 namespace android {
+
+#if ENABLE(DATABASE)
+static unsigned long long tryToReclaimDatabaseQuota(SecurityOrigin* originNeedingQuota);
+#endif
+
+#if USE(ACCELERATED_COMPOSITING)
+
+void ChromeClientAndroid::syncTimerFired(Timer<ChromeClientAndroid>* client)
+{
+    if (!m_rootGraphicsLayer)
+        return;
+
+    if (m_webFrame) {
+        FrameView* frameView = m_webFrame->page()->mainFrame()->view();
+        if (frameView && frameView->syncCompositingStateRecursive()) {
+            GraphicsLayerAndroid* androidGraphicsLayer =
+                    static_cast<GraphicsLayerAndroid*>(m_rootGraphicsLayer);
+            if (androidGraphicsLayer) {
+                androidGraphicsLayer->sendImmediateRepaint();
+                androidGraphicsLayer->notifyClientAnimationStarted();
+            }
+        }
+    }
+}
+
+void ChromeClientAndroid::scheduleCompositingLayerSync()
+{
+    if (!m_syncTimer.isActive())
+        m_syncTimer.startOneShot(0);
+}
+
+void ChromeClientAndroid::setNeedsOneShotDrawingSynchronization()
+{
+    // This should not be needed
+}
+
+void ChromeClientAndroid::attachRootGraphicsLayer(WebCore::Frame* frame, WebCore::GraphicsLayer* layer)
+{
+    m_rootGraphicsLayer = layer;
+    if (!layer) {
+        WebViewCore::getWebViewCore(frame->view())->setUIRootLayer(0);
+        return;
+    }
+    WebCore::GraphicsLayerAndroid* androidGraphicsLayer = static_cast<GraphicsLayerAndroid*>(layer);
+    androidGraphicsLayer->setFrame(frame);
+    scheduleCompositingLayerSync();
+}
+
+#endif
 
 void ChromeClientAndroid::setWebFrame(android::WebFrame* webframe)
 {
@@ -85,15 +135,26 @@ float ChromeClientAndroid::scaleFactor()
     return m_webFrame->density();
 }
 
+#ifdef ANDROID_USER_GESTURE
+void ChromeClientAndroid::focus(bool userGesture) {
+#else
 void ChromeClientAndroid::focus() {
+    // The old behavior was to always allow javascript to focus a window. If we
+    // turn off ANDROID_USER_GESTURE, go back to the old behavior by forcing
+    // userGesture to be true.
+    bool userGesture = true;
+#endif
     ASSERT(m_webFrame);
     // Ask the application to focus this WebView.
-    m_webFrame->requestFocus();
+    if (userGesture)
+        m_webFrame->requestFocus();
 }
 void ChromeClientAndroid::unfocus() { notImplemented(); }
 
 bool ChromeClientAndroid::canTakeFocus(FocusDirection) { notImplemented(); return false; }
 void ChromeClientAndroid::takeFocus(FocusDirection) { notImplemented(); }
+
+void ChromeClientAndroid::focusedNodeChanged(Node*) { notImplemented(); }
 
 Page* ChromeClientAndroid::createWindow(Frame* frame, const FrameLoadRequest&,
         const WindowFeatures& features)
@@ -116,7 +177,7 @@ Page* ChromeClientAndroid::createWindow(Frame* frame, const FrameLoadRequest&,
     if (features.fullscreen)
         dialog = false;
     WebCore::Frame* newFrame = m_webFrame->createWindow(dialog,
-            frame->script()->processingUserGesture());
+            frame->script()->processingUserGesture(mainThreadNormalWorld()));
     if (newFrame) {
         WebCore::Page* page = newFrame->page();
         page->setGroupName(frame->page()->groupName());
@@ -147,8 +208,8 @@ void ChromeClientAndroid::setResizable(bool) { notImplemented(); }
 // This function is called by the JavaScript bindings to print usually an error to
 // a message console. Pass the message to the java side so that the client can
 // handle it as it sees fit.
-void ChromeClientAndroid::addMessageToConsole(MessageSource, MessageType, MessageLevel, const String& message, unsigned int lineNumber, const String& sourceID) {
-    android::WebViewCore::getWebViewCore(m_webFrame->page()->mainFrame()->view())->addMessageToConsole(message, lineNumber, sourceID);
+void ChromeClientAndroid::addMessageToConsole(MessageSource, MessageType, MessageLevel msgLevel, const String& message, unsigned int lineNumber, const String& sourceID) {
+    android::WebViewCore::getWebViewCore(m_webFrame->page()->mainFrame()->view())->addMessageToConsole(message, lineNumber, sourceID, msgLevel);
 }
 
 bool ChromeClientAndroid::canRunBeforeUnloadConfirmPanel() { return true; }
@@ -165,7 +226,7 @@ void ChromeClientAndroid::closeWindowSoon()
     // This will prevent javascript cross-scripting during unload
     page->setGroupName(String());
     // Stop loading but do not send the unload event
-    mainFrame->loader()->stopLoading(false);
+    mainFrame->loader()->stopLoading(UnloadEventPolicyNone);
     // Cancel all pending loaders
     mainFrame->loader()->stopAllLoaders();
     // Remove all event listeners so that no javascript can execute as a result
@@ -241,9 +302,7 @@ IntRect ChromeClientAndroid::windowToScreen(const IntRect&) const {
     return IntRect();
 }
 
-// new to change 38068 (Nov 6, 2008)
-// in place of view()->containingWindow(), webkit now uses view()->hostWindow()->platformWindow()
-PlatformWidget ChromeClientAndroid::platformWindow() const {
+PlatformPageClient ChromeClientAndroid::platformPageClient() const {
     Page* page = m_webFrame->page();
     Frame* mainFrame = page->mainFrame();
     FrameView* view = mainFrame->view();
@@ -266,6 +325,11 @@ void ChromeClientAndroid::formStateDidChange(const Node*)
     notImplemented();
 }
 
+void ChromeClientAndroid::scrollbarsModeDidChange() const
+{
+    notImplemented();
+}
+
 void ChromeClientAndroid::mouseDidMoveOverElement(const HitTestResult&, unsigned int) {}
 void ChromeClientAndroid::setToolTip(const String&, TextDirection) {}
 void ChromeClientAndroid::print(Frame*) {}
@@ -281,6 +345,7 @@ void ChromeClientAndroid::print(Frame*) {}
 void ChromeClientAndroid::exceededDatabaseQuota(Frame* frame, const String& name)
 {
     SecurityOrigin* origin = frame->document()->securityOrigin();
+    DatabaseTracker& tracker = WebCore::DatabaseTracker::tracker();
 
     // We want to wait on a new quota from the UI thread. Reset the m_newQuota variable to represent we haven't received a new quota.
     m_newQuota = -1;
@@ -288,11 +353,14 @@ void ChromeClientAndroid::exceededDatabaseQuota(Frame* frame, const String& name
     // This origin is being tracked and has exceeded it's quota. Call into
     // the Java side of things to inform the user.
     unsigned long long currentQuota = 0;
-    if (WebCore::DatabaseTracker::tracker().hasEntryForOrigin(origin)) {
-        currentQuota = WebCore::DatabaseTracker::tracker().quotaForOrigin(origin);
-    }
+    if (tracker.hasEntryForOrigin(origin))
+        currentQuota = tracker.quotaForOrigin(origin);
 
-    unsigned long long estimatedSize = WebCore::DatabaseTracker::tracker().detailsForNameAndOrigin(name, origin).expectedUsage();
+    unsigned long long estimatedSize = 0;
+
+    // Only update estimatedSize if we are trying to create a a new database, i.e. the usage for the database is 0.
+    if (tracker.usageForDatabase(name, origin) == 0)
+        estimatedSize = tracker.detailsForNameAndOrigin(name, origin).expectedUsage();
 
     android::WebViewCore::getWebViewCore(frame->view())->exceededDatabaseQuota(frame->document()->documentURI(), name, currentQuota, estimatedSize);
 
@@ -303,11 +371,53 @@ void ChromeClientAndroid::exceededDatabaseQuota(Frame* frame, const String& name
     }
     m_quotaThreadLock.unlock();
 
+    // If new quota is unavailable, we may be able to resolve the situation by shrinking the quota of an origin that asked for a lot but is only using a little.
+    // If we find such a site, shrink it's quota and ask Java to try again.
+
+    if ((unsigned long long) m_newQuota == currentQuota && !m_triedToReclaimDBQuota) {
+        m_triedToReclaimDBQuota = true; // we should only try this once per quota overflow.
+        unsigned long long reclaimedQuotaBytes = tryToReclaimDatabaseQuota(origin);
+
+        // If we were able to free up enough space, try asking Java again.
+        // Otherwise, give up and deny the new database. :(
+        if (reclaimedQuotaBytes >= estimatedSize) {
+            exceededDatabaseQuota(frame, name);
+            return;
+        }
+    }
+
     // Update the DatabaseTracker with the new quota value (if the user declined
     // new quota, this may equal the old quota)
-    DatabaseTracker::tracker().setQuota(origin, m_newQuota);
+    tracker.setQuota(origin, m_newQuota);
+    m_triedToReclaimDBQuota = false;
+}
+
+static unsigned long long tryToReclaimDatabaseQuota(SecurityOrigin* originNeedingQuota) {
+    DatabaseTracker& tracker = WebCore::DatabaseTracker::tracker();
+    Vector<RefPtr<SecurityOrigin> > origins;
+    tracker.origins(origins);
+    unsigned long long reclaimedQuotaBytes = 0;
+    for (unsigned i = 0; i < origins.size(); i++) {
+        SecurityOrigin* originToReclaimFrom = origins[i].get();
+
+        // Don't try to reclaim from the origin that has exceeded its quota.
+        if (originToReclaimFrom->equal(originNeedingQuota))
+            continue;
+
+        unsigned long long originUsage = tracker.usageForOrigin(originToReclaimFrom);
+        unsigned long long originQuota = tracker.quotaForOrigin(originToReclaimFrom);
+        // If the origin has a quota that is more than it's current usage +1MB, shrink it.
+        static const int ONE_MB = 1 * 1024 * 1024;
+        if (originUsage + ONE_MB < originQuota) {
+            unsigned long long newQuota = originUsage + ONE_MB;
+            tracker.setQuota(originToReclaimFrom, newQuota);
+            reclaimedQuotaBytes += originQuota - newQuota;
+        }
+    }
+    return reclaimedQuotaBytes;
 }
 #endif
+
 #if ENABLE(OFFLINE_WEB_APPLICATIONS)
 void ChromeClientAndroid::reachedMaxAppCacheSize(int64_t spaceNeeded)
 {
@@ -351,6 +461,12 @@ void ChromeClientAndroid::requestGeolocationPermissionForFrame(Frame* frame, Geo
     m_geolocationPermissions->queryPermissionState(frame);
 }
 
+void ChromeClientAndroid::cancelGeolocationPermissionRequestForFrame(Frame* frame)
+{
+    if (m_geolocationPermissions)
+        m_geolocationPermissions->cancelPermissionStateQuery(frame);
+}
+
 void ChromeClientAndroid::provideGeolocationPermissions(const String &origin, bool allow, bool remember)
 {
     ASSERT(m_geolocationPermissions);
@@ -368,7 +484,14 @@ void ChromeClientAndroid::onMainFrameLoadStarted()
         m_geolocationPermissions->resetTemporaryPermissionStates();
 }
 
-void ChromeClientAndroid::runOpenPanel(Frame*, PassRefPtr<FileChooser>) { notImplemented(); }
+void ChromeClientAndroid::runOpenPanel(Frame* frame,
+        PassRefPtr<FileChooser> chooser)
+{
+    android::WebViewCore* core = android::WebViewCore::getWebViewCore(
+            frame->view());
+    core->openFileChooser(chooser);
+}
+
 bool ChromeClientAndroid::setCursor(PlatformCursorHandle)
 {
     notImplemented(); 
@@ -380,5 +503,15 @@ void ChromeClientAndroid::wakeUpMainThreadWithNewQuota(long newQuota) {
     m_newQuota = newQuota;
     m_quotaThreadCondition.signal();
 }
+
+#if ENABLE(TOUCH_EVENTS)
+void ChromeClientAndroid::needTouchEvents(bool needTouchEvents)
+{
+    FrameView* frameView = m_webFrame->page()->mainFrame()->view();
+    android::WebViewCore* core = android::WebViewCore::getWebViewCore(frameView);
+    if (core)
+        core->needTouchEvents(needTouchEvents);
+}
+#endif
 
 }

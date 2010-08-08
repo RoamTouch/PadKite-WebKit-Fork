@@ -1,58 +1,33 @@
 ##
+## Copyright 2009, The Android Open Source Project
 ##
-## Copyright 2007, The Android Open Source Project
+## Redistribution and use in source and binary forms, with or without
+## modification, are permitted provided that the following conditions
+## are met:
+##  * Redistributions of source code must retain the above copyright
+##    notice, this list of conditions and the following disclaimer.
+##  * Redistributions in binary form must reproduce the above copyright
+##    notice, this list of conditions and the following disclaimer in the
+##    documentation and/or other materials provided with the distribution.
 ##
-## Licensed under the Apache License, Version 2.0 (the "License");
-## you may not use this file except in compliance with the License.
-## You may obtain a copy of the License at
+## THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
+## EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+## IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+## PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+## CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+## EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+## PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+## PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+## OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+## (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+## OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ##
-##     http://www.apache.org/licenses/LICENSE-2.0
-##
-## Unless required by applicable law or agreed to in writing, software
-## distributed under the License is distributed on an "AS IS" BASIS,
-## WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-## See the License for the specific language governing permissions and
-## limitations under the License.
-##
-
-#LOCAL_CFLAGS += -E -v
-
-# This comment block is read by tools/webkitsync/diff.cpp
-# Don't remove it or move it. 
-#
-# The following files are intentionally not included
-# LOCAL_SRC_FILES_EXCLUDED := \
-#	AllInOneFile.cpp \
-#	jsc.cpp \
-#	parser/Grammar.y \
-#	pcre/ucptable.cpp \
-#	wtf/GOwnPtr.cpp \
-#	wtf/*Gtk.cpp \
-#	wtf/*Qt.cpp \
-#	wtf/*Win.cpp \
-
-# This comment block is read by tools/webkitsync/diff.cpp
-# Don't remove it or move it. 
-#
-# The following directory wildcard matches are intentionally not included
-# If an entry starts with '/', any subdirectory may match
-# If an entry starts with '^', the first directory must match
-# LOCAL_DIR_WILDCARD_EXCLUDED := \
-#	^API/* \
-#	/chromium/* \
-#	/gtk/* \
-#	^jit/* \
-#	/mac/* \
-#	/qt/* \
-#	/win/* \
-#	/wx/* \
 
 LOCAL_SRC_FILES := \
-  API/JSValueRef.cpp \
+	API/JSValueRef.cpp \
 	API/JSCallbackObject.cpp \
 	API/OpaqueJSString.cpp \
 	\
-	assembler/ARMAssembler.cpp \
 	bytecode/CodeBlock.cpp \
 	bytecode/JumpTable.cpp \
 	bytecode/Opcode.cpp \
@@ -60,6 +35,7 @@ LOCAL_SRC_FILES := \
 	bytecode/StructureStubInfo.cpp \
 	\
 	bytecompiler/BytecodeGenerator.cpp \
+	bytecompiler/NodesCodegen.cpp \
 	\
 	debugger/Debugger.cpp \
 	debugger/DebuggerActivation.cpp \
@@ -68,6 +44,16 @@ LOCAL_SRC_FILES := \
 	interpreter/CallFrame.cpp \
 	interpreter/Interpreter.cpp \
 	interpreter/RegisterFile.cpp \
+	\
+	jit/ExecutableAllocator.cpp\
+	jit/ExecutableAllocatorFixedVMPool.cpp \
+	jit/ExecutableAllocatorPosix.cpp \
+	jit/JIT.cpp \
+	jit/JITArithmetic.cpp \
+	jit/JITCall.cpp \
+	jit/JITOpcodes.cpp \
+	jit/JITPropertyAccess.cpp \
+	jit/JITStubs.cpp \
 	\
 	parser/Lexer.cpp \
 	parser/Nodes.cpp \
@@ -80,12 +66,10 @@ LOCAL_SRC_FILES := \
 	pcre/pcre_ucp_searchfuncs.cpp \
 	pcre/pcre_xclass.cpp \
 	\
-	profiler/HeavyProfile.cpp \
 	profiler/Profile.cpp \
 	profiler/ProfileGenerator.cpp \
 	profiler/ProfileNode.cpp \
 	profiler/Profiler.cpp \
-	profiler/TreeProfile.cpp \
 	\
 	runtime/ArgList.cpp \
 	runtime/Arguments.cpp \
@@ -108,6 +92,7 @@ LOCAL_SRC_FILES := \
 	runtime/ErrorInstance.cpp \
 	runtime/ErrorPrototype.cpp \
 	runtime/ExceptionHelpers.cpp \
+	runtime/Executable.cpp \
 	runtime/FunctionConstructor.cpp \
 	runtime/FunctionPrototype.cpp \
 	runtime/GetterSetter.cpp \
@@ -149,6 +134,7 @@ LOCAL_SRC_FILES := \
 	runtime/ObjectConstructor.cpp \
 	runtime/ObjectPrototype.cpp \
 	runtime/Operations.cpp \
+	runtime/PropertyDescriptor.cpp \
 	runtime/PropertyNameArray.cpp \
 	runtime/PropertySlot.cpp \
 	runtime/PrototypeFunction.cpp \
@@ -165,6 +151,7 @@ LOCAL_SRC_FILES := \
 	runtime/StructureChain.cpp \
 	runtime/TimeoutChecker.cpp \
 	runtime/UString.cpp \
+	runtime/UStringImpl.cpp \
 	\
 	wrec/CharacterClass.cpp \
 	wrec/CharacterClassConstructor.cpp \
@@ -183,6 +170,7 @@ LOCAL_SRC_FILES := \
 	wtf/RandomNumber.cpp \
 	wtf/RefCountedLeakCounter.cpp \
 	wtf/TCSystemAlloc.cpp \
+	wtf/ThreadIdentifierDataPthreads.cpp \
 	wtf/Threading.cpp \
 	wtf/ThreadingPthreads.cpp \
 	\
@@ -194,7 +182,11 @@ LOCAL_SRC_FILES := \
 	wtf/unicode/CollatorDefault.cpp \
 	wtf/unicode/UTF8.cpp \
 	\
-	wtf/unicode/icu/CollatorICU.cpp
+	wtf/unicode/icu/CollatorICU.cpp \
+	\
+	yarr/RegexCompiler.cpp \
+	yarr/RegexInterpreter.cpp \
+	yarr/RegexJIT.cpp
 
 # Rule to build grammar.y with our custom bison.
 GEN := $(intermediates)/parser/Grammar.cpp
@@ -236,6 +228,4 @@ $(CHARTABLES): $(LOCAL_PATH)/pcre/dftables
 $(CHARTABLES): $(LOCAL_PATH)/pcre/pcre_internal.h
 	$(transform-generated-source)
 
-$(intermediates)/pcre/pcre_tables.o : $(CHARTABLES)
-
-LOCAL_GENERATED_SOURCES += $(JSC_OBJECTS) $(LEXER_HEADER)
+LOCAL_GENERATED_SOURCES += $(JSC_OBJECTS) $(LEXER_HEADER) $(CHARTABLES)

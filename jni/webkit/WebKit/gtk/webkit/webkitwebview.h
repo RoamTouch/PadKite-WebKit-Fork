@@ -19,8 +19,8 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef WEBKIT_WEB_VIEW_H
-#define WEBKIT_WEB_VIEW_H
+#ifndef webkitwebview_h
+#define webkitwebview_h
 
 #include <gtk/gtk.h>
 #include <libsoup/soup.h>
@@ -49,10 +49,18 @@ typedef enum {
     WEBKIT_NAVIGATION_RESPONSE_DOWNLOAD
 } WebKitNavigationResponse;
 
+typedef enum {
+    WEBKIT_CACHE_MODEL_DOCUMENT_VIEWER = 1,
+    WEBKIT_CACHE_MODEL_WEB_BROWSER
+} WebKitCacheModel;
+
 typedef enum
 {
     WEBKIT_WEB_VIEW_TARGET_INFO_HTML,
-    WEBKIT_WEB_VIEW_TARGET_INFO_TEXT
+    WEBKIT_WEB_VIEW_TARGET_INFO_TEXT,
+    WEBKIT_WEB_VIEW_TARGET_INFO_IMAGE,
+    WEBKIT_WEB_VIEW_TARGET_INFO_URI_LIST,
+    WEBKIT_WEB_VIEW_TARGET_INFO_NETSCAPE_URL
 } WebKitWebViewTargetInfo;
 
 struct _WebKitWebView {
@@ -116,13 +124,15 @@ struct _WebKitWebViewClass {
     void                       (* set_scroll_adjustments) (WebKitWebView        *web_view,
                                                            GtkAdjustment        *hadjustment,
                                                            GtkAdjustment        *vadjustment);
+
+    void                       (* undo)                   (WebKitWebView        *web_view);
+    void                       (* redo)                   (WebKitWebView        *web_view);
+
     /* Padding for future expansion */
     void (*_webkit_reserved0) (void);
     void (*_webkit_reserved1) (void);
     void (*_webkit_reserved2) (void);
     void (*_webkit_reserved3) (void);
-    void (*_webkit_reserved4) (void);
-    void (*_webkit_reserved5) (void);
 };
 
 WEBKIT_API GType
@@ -338,6 +348,38 @@ webkit_web_view_get_load_status                 (WebKitWebView        *web_view)
 
 WEBKIT_API gdouble
 webkit_web_view_get_progress                    (WebKitWebView        *web_view);
+
+WEBKIT_API void
+webkit_web_view_undo                            (WebKitWebView        *webView);
+
+WEBKIT_API gboolean
+webkit_web_view_can_undo                        (WebKitWebView        *webView);
+
+WEBKIT_API void
+webkit_web_view_redo                            (WebKitWebView        *webView);
+
+WEBKIT_API gboolean
+webkit_web_view_can_redo                        (WebKitWebView        *webView);
+
+WEBKIT_API void
+webkit_web_view_set_view_source_mode            (WebKitWebView        *web_view,
+                                                 gboolean             view_source_mode);
+
+WEBKIT_API gboolean
+webkit_web_view_get_view_source_mode            (WebKitWebView        *web_view);
+
+WEBKIT_API WebKitHitTestResult*
+webkit_web_view_get_hit_test_result             (WebKitWebView        *webView,
+                                                 GdkEventButton       *event);
+
+WEBKIT_API G_CONST_RETURN gchar *
+webkit_web_view_get_icon_uri                    (WebKitWebView        *webView);
+
+WEBKIT_API void
+webkit_set_cache_model                          (WebKitCacheModel     cache_model);
+
+WEBKIT_API WebKitCacheModel
+webkit_get_cache_model                          (void);
 
 G_END_DECLS
 

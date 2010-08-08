@@ -21,6 +21,7 @@
 #include "config.h"
 #include "RenderFileUploadControl.h"
 
+#include "Chrome.h"
 #include "FileList.h"
 #include "Frame.h"
 #include "FrameView.h"
@@ -63,8 +64,13 @@ private:
 RenderFileUploadControl::RenderFileUploadControl(HTMLInputElement* input)
     : RenderBlock(input)
     , m_button(0)
-    , m_fileChooser(FileChooser::create(this, input->value()))
 {
+    FileList* list = input->files();
+    Vector<String> filenames;
+    unsigned length = list ? list->length() : 0;
+    for (unsigned i = 0; i < length; ++i)
+        filenames.append(list->item(i)->path());
+    m_fileChooser = FileChooser::create(this, filenames);
 }
 
 RenderFileUploadControl::~RenderFileUploadControl()
@@ -103,6 +109,11 @@ bool RenderFileUploadControl::allowsMultipleFiles()
     return !input->getAttribute(multipleAttr).isNull();
 }
 
+String RenderFileUploadControl::acceptTypes()
+{
+    return static_cast<HTMLInputElement*>(node())->accept();
+}
+
 void RenderFileUploadControl::click()
 {
     Frame* frame = node()->document()->frame();
@@ -134,11 +145,7 @@ void RenderFileUploadControl::updateFromElement()
         addChild(renderer);
     }
 
-#ifndef ANDROID_DISABLE_UPLOAD
     m_button->setDisabled(!theme()->isEnabled(this));
-#else
-    m_button->setDisabled(true);
-#endif
 
     // This only supports clearing out the files, but that's OK because for
     // security reasons that's the only change the DOM is allowed to make.
@@ -188,7 +195,7 @@ void RenderFileUploadControl::paintObject(PaintInfo& paintInfo, int tx, int ty)
     }
 
     if (paintInfo.phase == PaintPhaseForeground) {
-        const String& displayedFilename = m_fileChooser->basenameForWidth(style()->font(), maxFilenameWidth());        
+        const String& displayedFilename = fileTextValue();
         unsigned length = displayedFilename.length();
         const UChar* string = displayedFilename.characters();
         TextRun textRun(string, length, false, 0, 0, style()->direction() == RTL, style()->unicodeBidi() == Override);
@@ -208,7 +215,7 @@ void RenderFileUploadControl::paintObject(PaintInfo& paintInfo, int tx, int ty)
             + buttonRenderer->marginTop() + buttonRenderer->borderTop() + buttonRenderer->paddingTop()
             + buttonRenderer->baselinePosition(true, false);
 
-        paintInfo.context->setFillColor(style()->color());
+        paintInfo.context->setFillColor(style()->color(), style()->colorSpace());
         
         // Draw the filename
         paintInfo.context->drawBidiText(style()->font(), textRun, IntPoint(textX, textY));
@@ -288,7 +295,7 @@ String RenderFileUploadControl::buttonValue()
     return m_button->value();
 }
 
-String RenderFileUploadControl::fileTextValue()
+String RenderFileUploadControl::fileTextValue() const
 {
     return m_fileChooser->basenameForWidth(style()->font(), maxFilenameWidth());
 }

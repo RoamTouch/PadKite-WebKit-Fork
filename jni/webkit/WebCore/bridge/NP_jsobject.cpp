@@ -30,13 +30,12 @@
 #include "NP_jsobject.h"
 
 #include "PlatformString.h"
+#include "PluginView.h"
 #include "StringSourceProvider.h"
-#ifdef ANDROID_NPN_SETEXCEPTION
-#include "c_runtime.h"
-#endif  // ANDROID_NPN_SETEXCEPTION
 #include "c_utility.h"
 #include "c_instance.h"
 #include "IdentifierRep.h"
+#include "JSDOMBinding.h"
 #include "npruntime_impl.h"
 #include "npruntime_priv.h"
 #include "runtime_root.h"
@@ -126,7 +125,7 @@ bool _NPN_InvokeDefault(NPP, NPObject* o, const NPVariant* args, uint32_t argCou
         getListFromVariantArgs(exec, args, argCount, rootObject, argList);
         ProtectedPtr<JSGlobalObject> globalObject = rootObject->globalObject();
         globalObject->globalData()->timeoutChecker.start();
-        JSValue resultV = call(exec, function, callType, callData, function, argList);
+        JSValue resultV = JSC::call(exec, function, callType, callData, function, argList);
         globalObject->globalData()->timeoutChecker.stop();
 
         // Convert and return the result of the function call.
@@ -176,7 +175,7 @@ bool _NPN_Invoke(NPP npp, NPObject* o, NPIdentifier methodName, const NPVariant*
         getListFromVariantArgs(exec, args, argCount, rootObject, argList);
         ProtectedPtr<JSGlobalObject> globalObject = rootObject->globalObject();
         globalObject->globalData()->timeoutChecker.start();
-        JSValue resultV = call(exec, function, callType, callData, obj->imp, argList);
+        JSValue resultV = JSC::call(exec, function, callType, callData, obj->imp, argList);
         globalObject->globalData()->timeoutChecker.stop();
 
         // Convert and return the result of the function call.
@@ -192,7 +191,7 @@ bool _NPN_Invoke(NPP npp, NPObject* o, NPIdentifier methodName, const NPVariant*
     return true;
 }
 
-bool _NPN_Evaluate(NPP, NPObject* o, NPString* s, NPVariant* variant)
+bool _NPN_Evaluate(NPP instance, NPObject* o, NPString* s, NPVariant* variant)
 {
     if (o->_class == NPScriptObjectClass) {
         JavaScriptObject* obj = reinterpret_cast<JavaScriptObject*>(o); 
@@ -201,12 +200,16 @@ bool _NPN_Evaluate(NPP, NPObject* o, NPString* s, NPVariant* variant)
         if (!rootObject || !rootObject->isValid())
             return false;
 
+        // There is a crash in Flash when evaluating a script that destroys the
+        // PluginView, so we destroy it asynchronously.
+        PluginView::keepAlive(instance);
+
         ExecState* exec = rootObject->globalObject()->globalExec();
         JSLock lock(SilenceAssertionsOnly);
         String scriptString = convertNPStringToUTF16(s);
         ProtectedPtr<JSGlobalObject> globalObject = rootObject->globalObject();
         globalObject->globalData()->timeoutChecker.start();
-        Completion completion = JSC::evaluate(globalObject->globalExec(), globalObject->globalScopeChain(), makeSource(scriptString));
+        Completion completion = JSC::evaluate(globalObject->globalExec(), globalObject->globalScopeChain(), makeSource(scriptString), JSC::JSValue());
         globalObject->globalData()->timeoutChecker.stop();
         ComplType type = completion.complType();
         
@@ -379,21 +382,11 @@ bool _NPN_HasMethod(NPP, NPObject* o, NPIdentifier methodName)
     return false;
 }
 
-#ifdef ANDROID_NPN_SETEXCEPTION
-void _NPN_SetException(NPObject* o, const NPUTF8* message)
-#else
 void _NPN_SetException(NPObject*, const NPUTF8* message)
-#endif
 {
-#ifdef ANDROID_NPN_SETEXCEPTION
-    if (o->_class == NPScriptObjectClass) {
-        JSC::Bindings::SetGlobalException(message);
-    }
-#else
-    // Ignorning the NPObject param is consistent with the Mozilla implementation.
+    // Ignoring the NPObject param is consistent with the Mozilla implementation.
     UString exception(message);
     CInstance::setGlobalException(exception);
-#endif  // ANDROID_NPN_SETEXCEPTION
 }
 
 bool _NPN_Enumerate(NPP, NPObject* o, NPIdentifier** identifier, uint32_t* count)
@@ -456,7 +449,7 @@ bool _NPN_Construct(NPP, NPObject* o, const NPVariant* args, uint32_t argCount, 
         getListFromVariantArgs(exec, args, argCount, rootObject, argList);
         ProtectedPtr<JSGlobalObject> globalObject = rootObject->globalObject();
         globalObject->globalData()->timeoutChecker.start();
-        JSValue resultV = construct(exec, constructor, constructType, constructData, argList);
+        JSValue resultV = JSC::construct(exec, constructor, constructType, constructData, argList);
         globalObject->globalData()->timeoutChecker.stop();
         
         // Convert and return the result.

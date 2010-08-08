@@ -71,6 +71,19 @@ NPError __stdcall NP_Shutdown()
     return NPERR_NO_ERROR;
 }
 
+static void executeScript(const PluginObject* object, const char* script)
+{
+    NPObject *windowScriptObject;
+    browser->getvalue(object->npp, NPNVWindowNPObject, &windowScriptObject);
+
+    NPString npScript;
+    npScript.UTF8Characters = script;
+    npScript.UTF8Length = strlen(script);
+
+    NPVariant browserResult;
+    browser->evaluate(object->npp, windowScriptObject, &npScript, &browserResult);
+    browser->releasevariantvalue(&browserResult);
+}
 
 NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode, int16 argc, char *argn[], char *argv[], NPSavedData *saved)
 {
@@ -84,16 +97,21 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode, int16 argc, ch
                 obj->onStreamDestroy = _strdup(argv[i]);
             else if (_stricmp(argn[i], "onURLNotify") == 0 && !obj->onURLNotify)
                 obj->onURLNotify = _strdup(argv[i]);
+            else if (_stricmp(argn[i], "onDestroy") == 0 && !obj->onDestroy)
+                obj->onDestroy = _strdup(argv[i]);
             else if (_stricmp(argn[i], "logSrc") == 0) {
                 for (int i = 0; i < argc; i++)
                     if (_stricmp(argn[i], "src") == 0)
                         pluginLog(instance, "src: %s", argv[i]);
-            }
+            } else if (_stricmp(argn[i], "testdocumentopenindestroystream") == 0)
+                obj->testDocumentOpenInDestroyStream = TRUE;
+              else if (_stricmp(argn[i], "testwindowopen") == 0)
+                obj->testWindowOpen = TRUE;
         }
         
         instance->pdata = obj;
     }
-    
+
     return NPERR_NO_ERROR;
 }
 
@@ -110,6 +128,11 @@ NPError NPP_Destroy(NPP instance, NPSavedData **save)
         if (obj->onStreamDestroy)
             free(obj->onStreamDestroy);
 
+        if (obj->onDestroy) {
+            executeScript(obj, obj->onDestroy);
+            free(obj->onDestroy);
+        }
+
         if (obj->logDestroy)
             printf("PLUGIN: NPP_Destroy\n");
 
@@ -120,21 +143,16 @@ NPError NPP_Destroy(NPP instance, NPSavedData **save)
 
 NPError NPP_SetWindow(NPP instance, NPWindow *window)
 {
+    PluginObject* obj = static_cast<PluginObject*>(instance->pdata);
+
+    if (obj) {
+        if (obj->testWindowOpen) {
+            testWindowOpen(instance);
+            obj->testWindowOpen = FALSE;
+        }
+    }
+
     return NPERR_NO_ERROR;
-}
-
-static void executeScript(const PluginObject* obj, const char* script)
-{
-    NPObject *windowScriptObject;
-    browser->getvalue(obj->npp, NPNVWindowNPObject, &windowScriptObject);
-
-    NPString npScript;
-    npScript.UTF8Characters = script;
-    npScript.UTF8Length = strlen(script);
-
-    NPVariant browserResult;
-    browser->evaluate(obj->npp, windowScriptObject, &npScript, &browserResult);
-    browser->releasevariantvalue(&browserResult);
 }
 
 NPError NPP_NewStream(NPP instance, NPMIMEType type, NPStream *stream, NPBool seekable, uint16 *stype)
@@ -149,7 +167,7 @@ NPError NPP_NewStream(NPP instance, NPMIMEType type, NPStream *stream, NPBool se
 
     if (obj->onStreamLoad)
         executeScript(obj, obj->onStreamLoad);
-    
+
     return NPERR_NO_ERROR;
 }
 
@@ -159,6 +177,10 @@ NPError NPP_DestroyStream(NPP instance, NPStream *stream, NPReason reason)
 
     if (obj->onStreamDestroy)
         executeScript(obj, obj->onStreamDestroy);
+
+    if (obj->testDocumentOpenInDestroyStream) {
+        testDocumentOpen(instance);
+    }
 
     return NPERR_NO_ERROR;
 }

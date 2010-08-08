@@ -43,30 +43,29 @@ namespace Bindings {
 typedef QMultiHash<void*, QtInstance*> QObjectInstanceMap;
 static QObjectInstanceMap cachedInstances;
 
-// Cache JSObjects
-typedef QHash<QtInstance*, JSObject*> InstanceJSObjectMap;
-static InstanceJSObjectMap cachedObjects;
-
 // Derived RuntimeObject
 class QtRuntimeObjectImp : public RuntimeObjectImp {
 public:
     QtRuntimeObjectImp(ExecState*, PassRefPtr<Instance>);
-    ~QtRuntimeObjectImp();
-    virtual void invalidate();
 
     static const ClassInfo s_info;
 
-    virtual void mark()
+    virtual void markChildren(MarkStack& markStack)
     {
+        RuntimeObjectImp::markChildren(markStack);
         QtInstance* instance = static_cast<QtInstance*>(getInternalInstance());
         if (instance)
-            instance->mark();
-        RuntimeObjectImp::mark();
+            instance->markAggregate(markStack);
+    }
+
+    static PassRefPtr<Structure> createStructure(JSValue prototype)
+    {
+        return Structure::create(prototype, TypeInfo(ObjectType,  StructureFlags), AnonymousSlotCount);
     }
 
 protected:
-    void removeFromCache();
-        
+    static const unsigned StructureFlags = RuntimeObjectImp::StructureFlags | OverridesMarkChildren;
+
 private:
     virtual const ClassInfo* classInfo() const { return &s_info; }
 };
@@ -76,25 +75,6 @@ const ClassInfo QtRuntimeObjectImp::s_info = { "QtRuntimeObject", &RuntimeObject
 QtRuntimeObjectImp::QtRuntimeObjectImp(ExecState* exec, PassRefPtr<Instance> instance)
     : RuntimeObjectImp(exec, WebCore::deprecatedGetDOMStructure<QtRuntimeObjectImp>(exec), instance)
 {
-}
-
-QtRuntimeObjectImp::~QtRuntimeObjectImp()
-{
-    removeFromCache();
-}
-
-void QtRuntimeObjectImp::invalidate()
-{
-    removeFromCache();
-    RuntimeObjectImp::invalidate();
-}
-
-void QtRuntimeObjectImp::removeFromCache()
-{
-    JSLock lock(SilenceAssertionsOnly);
-    QtInstance* key = cachedObjects.key(this);
-    if (key)
-        cachedObjects.remove(key);
 }
 
 // QtInstance
@@ -112,7 +92,6 @@ QtInstance::~QtInstance()
 {
     JSLock lock(SilenceAssertionsOnly);
 
-    cachedObjects.remove(this);
     cachedInstances.remove(m_hashkey);
 
     // clean up (unprotect from gc) the JSValues we've created
@@ -140,10 +119,17 @@ PassRefPtr<QtInstance> QtInstance::getQtInstance(QObject* o, PassRefPtr<RootObje
 {
     JSLock lock(SilenceAssertionsOnly);
 
-    foreach(QtInstance* instance, cachedInstances.values(o)) {
-        if (instance->rootObject() == rootObject)
-            return instance;
-    }
+    foreach(QtInstance* instance, cachedInstances.values(o))
+        if (instance->rootObject() == rootObject) {
+            // The garbage collector removes instances, but it may happen that the wrapped
+            // QObject dies before the gc kicks in. To handle that case we have to do an additional
+            // check if to see if the instance's wrapped object is still alive. If it isn't, then
+            // we have to create a new wrapper.
+            if (!instance->getObject())
+                cachedInstances.remove(instance->hashKey());
+            else
+                return instance;
+        }
 
     RefPtr<QtInstance> ret = QtInstance::create(o, rootObject, ownership);
     cachedInstances.insert(o, ret.get());
@@ -190,25 +176,19 @@ Class* QtInstance::getClass() const
     return m_class;
 }
 
-RuntimeObjectImp* QtInstance::createRuntimeObject(ExecState* exec)
+RuntimeObjectImp* QtInstance::newRuntimeObject(ExecState* exec)
 {
     JSLock lock(SilenceAssertionsOnly);
-    RuntimeObjectImp* ret = static_cast<RuntimeObjectImp*>(cachedObjects.value(this));
-    if (!ret) {
-        ret = new (exec) QtRuntimeObjectImp(exec, this);
-        cachedObjects.insert(this, ret);
-        ret = static_cast<RuntimeObjectImp*>(cachedObjects.value(this));
-    }
-    return ret;
+    return new (exec) QtRuntimeObjectImp(exec, this);
 }
 
-void QtInstance::mark()
+void QtInstance::markAggregate(MarkStack& markStack)
 {
-    if (m_defaultMethod && !m_defaultMethod->marked())
-        m_defaultMethod->mark();
+    if (m_defaultMethod)
+        markStack.append(m_defaultMethod);
     foreach(JSObject* val, m_methods.values()) {
-        if (val && !val->marked())
-            val->mark();
+        if (val)
+            markStack.append(val);
     }
 }
 

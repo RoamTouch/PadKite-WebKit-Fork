@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -29,41 +29,38 @@
 #include "CachedFrame.h"
 #include "IntRect.h"
 #include "SkPicture.h"
+#include "SkRegion.h"
 #include "wtf/Vector.h"
 
 class SkRect;
+
+namespace WebCore {
+    class LayerAndroid;
+}
 
 namespace android {
 
 class CachedHistory;
 class CachedNode;
+class FindCanvas;
 
 class CachedRoot : public CachedFrame {
 public:
-    enum ImeAction {
-        FAILURE = -1,
-        NEXT    = 0,
-        GO      = 1,
-        DONE    = 2
-    };
     bool adjustForScroll(BestData* , Direction , WebCore::IntPoint* scrollPtr,
         bool findClosest);
+    const SkRegion& baseUncovered() const { return mBaseUncovered; }
     int checkForCenter(int x, int y) const;
     void checkForJiggle(int* ) const;
-    bool checkRings(const WTF::Vector<WebCore::IntRect>& rings,
+    bool checkRings(SkPicture* , const WTF::Vector<WebCore::IntRect>& rings,
         const WebCore::IntRect& bounds) const;
     WebCore::IntPoint cursorLocation() const;
-    // This method returns the desired ImeAction for the textfield where the
-    // mouse cursor currently is.  If the mouse cursor is not on a textfield,
-    // it will return FAILURE
-    ImeAction cursorTextFieldAction() const;
     int documentHeight() { return mContents.height(); }
     int documentWidth() { return mContents.width(); }
+    void draw(FindCanvas& ) const;
     const CachedNode* findAt(const WebCore::IntRect& , const CachedFrame** ,
         int* x, int* y, bool checkForHidden) const;
     const WebCore::IntRect& focusBounds() const { return mFocusBounds; }
     WebCore::IntPoint focusLocation() const;
-    SkPicture* getPicture() { return mPicture; }
     int getAndResetSelectionEnd();
     int getAndResetSelectionStart();
     int getBlockLeftEdge(int x, int y, float scale) const;
@@ -78,16 +75,28 @@ public:
     WebCore::String imageURI(int x, int y) const;
     bool maskIfHidden(BestData* ) const;
     const CachedNode* moveCursor(Direction , const CachedFrame** , WebCore::IntPoint* scroll);
+    /**
+     * Find the next textfield/textarea
+     * @param start         The textfield/textarea to search from.
+     * @param framePtr      If non-zero, returns CachedFrame* containing result.
+     * @return CachedNode*  Next textfield/textarea or null (0) if none.
+     */
+    const CachedNode* nextTextField(const CachedNode* start,
+        const CachedFrame** framePtr) const;
+    SkPicture* pictureAt(int x, int y) const;
     void reset();
     CachedHistory* rootHistory() const { return mHistory; }
+    const WebCore::LayerAndroid* rootLayer() const { return mRootLayer; }
     bool scrollDelta(WebCore::IntRect& cursorRingBounds, Direction , int* delta);
     const WebCore::IntRect& scrolledBounds() const { return mScrolledBounds; }
     void setCursor(CachedFrame* , CachedNode* );
+    void setCursorCache(int scrollX, int scrollY) const; // compute cached state used to find next cursor
     void setCachedFocus(CachedFrame* , CachedNode* );
     void setFocusBounds(const WebCore::IntRect& r) { mFocusBounds = r; }
     void setTextGeneration(int textGeneration) { mTextGeneration = textGeneration; }
     void setMaxScroll(int x, int y) { mMaxXScroll = x; mMaxYScroll = y; }
     void setPicture(SkPicture* picture) { mPicture = picture; }
+    void setRootLayer(WebCore::LayerAndroid* layer) { mRootLayer = layer; }
     void setScrollOnly(bool state) { mScrollOnly = state; }
     void setSelection(int start, int end) { mSelectionStart = start; mSelectionEnd = end; }
     void setupScrolledBounds() const { mScrolledBounds = mViewBounds; }
@@ -95,8 +104,10 @@ public:
     int textGeneration() const { return mTextGeneration; }
     int width() const { return mPicture ? mPicture->width() : 0; }
 private:
+    friend class CachedFrame;
     CachedHistory* mHistory;
     SkPicture* mPicture;
+    WebCore::LayerAndroid* mRootLayer;
     WebCore::IntRect mFocusBounds; // dom text input focus node bounds
     mutable WebCore::IntRect mScrolledBounds; // view bounds + amount visible as result of scroll
     int mTextGeneration;
@@ -105,6 +116,10 @@ private:
     // These two are ONLY used when the tree is rebuilt and the focus is a textfield/area
     int mSelectionStart;
     int mSelectionEnd;
+    // these four set up as cache for use by frameDown/Up/Left/Right etc
+    mutable WebCore::IntRect mCursorBounds;
+    mutable const CachedNode* mCursor;
+    mutable SkRegion mBaseUncovered;
     bool mScrollOnly;
 #if DUMP_NAV_CACHE
 public:

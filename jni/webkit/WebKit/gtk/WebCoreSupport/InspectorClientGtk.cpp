@@ -44,13 +44,8 @@ InspectorClient::InspectorClient(WebKitWebView* webView)
 
 void InspectorClient::inspectorDestroyed()
 {
-    if (m_webView) {
-        gboolean handled = FALSE;
-        g_signal_emit_by_name(m_webInspector, "destroy", &handled);
-
-        /* we can now dispose our own reference */
+    if (m_webInspector)
         g_object_unref(m_webInspector);
-    }
 
     delete this;
 }
@@ -64,12 +59,18 @@ void InspectorClient::webViewDestroyed()
     // something else, and the inspector will be referenced again,
     // there.
     g_object_unref(m_webInspector);
+    m_webInspector = 0;
 }
 
 Page* InspectorClient::createPage()
 {
-    if (m_webView)
-      return core(m_webView);
+    if (m_webView) {
+        gboolean handled = FALSE;
+        g_signal_emit_by_name(m_webInspector, "destroy", &handled);
+
+        /* we can now dispose our own reference */
+        g_object_unref(m_webInspector);
+    }
 
     // This g_object_get will ref the inspector. We're not doing an
     // unref if this method succeeds because the inspector object must
@@ -92,9 +93,17 @@ Page* InspectorClient::createPage()
     g_signal_connect(m_webView, "destroy",
                      G_CALLBACK(notifyWebViewDestroyed), (gpointer)this);
 
-    gchar* inspectorURI = g_filename_to_uri(DATA_DIR"/webkit-1.0/webinspector/inspector.html", NULL, NULL);
-    webkit_web_view_load_uri(m_webView, inspectorURI);
-    g_free(inspectorURI);
+    GOwnPtr<gchar> inspectorURI;
+
+    // Make the Web Inspector work when running tests
+    if (g_file_test("WebCore/inspector/front-end/inspector.html", G_FILE_TEST_EXISTS)) {
+        GOwnPtr<gchar> currentDirectory(g_get_current_dir());
+        GOwnPtr<gchar> fullPath(g_strdup_printf("%s/WebCore/inspector/front-end/inspector.html", currentDirectory.get()));
+        inspectorURI.set(g_filename_to_uri(fullPath.get(), NULL, NULL));
+    } else
+        inspectorURI.set(g_filename_to_uri(DATA_DIR"/webkit-1.0/webinspector/inspector.html", NULL, NULL));
+
+    webkit_web_view_load_uri(m_webView, inspectorURI.get());
 
     gtk_widget_show(GTK_WIDGET(m_webView));
 
@@ -103,8 +112,18 @@ Page* InspectorClient::createPage()
 
 String InspectorClient::localizedStringsURL()
 {
+    GOwnPtr<gchar> URL;
+
+    // Make the Web Inspector work when running tests
+    if (g_file_test("WebCore/English.lproj/localizedStrings.js", G_FILE_TEST_EXISTS)) {
+        GOwnPtr<gchar> currentDirectory(g_get_current_dir());
+        GOwnPtr<gchar> fullPath(g_strdup_printf("%s/WebCore/English.lproj/localizedStrings.js", currentDirectory.get()));
+        URL.set(g_filename_to_uri(fullPath.get(), NULL, NULL));
+    } else
+        URL.set(g_filename_to_uri(DATA_DIR"/webkit-1.0/webinspector/localizedStrings.js", NULL, NULL));
+
     // FIXME: support l10n of localizedStrings.js
-    return String::fromUTF8(g_filename_to_uri(DATA_DIR"/webkit-1.0/webinspector/localizedStrings.js", NULL, NULL));
+    return String::fromUTF8(URL.get());
 }
 
 String InspectorClient::hiddenPanels()
@@ -181,18 +200,12 @@ void InspectorClient::inspectorWindowObjectCleared()
     notImplemented();
 }
 
-
-void InspectorClient::populateSetting(const String& key, InspectorController::Setting& setting)
+void InspectorClient::populateSetting(const String& key, String* value)
 {
     notImplemented();
 }
 
-void InspectorClient::storeSetting(const String& key, const InspectorController::Setting& setting)
-{
-    notImplemented();
-}
-
-void InspectorClient::removeSetting(const String& key)
+void InspectorClient::storeSetting(const String& key, const String& value)
 {
     notImplemented();
 }

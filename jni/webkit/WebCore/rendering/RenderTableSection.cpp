@@ -46,6 +46,14 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
+static inline void setRowHeightToRowStyleHeightIfNotRelative(RenderTableSection::RowStruct* row)
+{
+    ASSERT(row && row->rowRenderer);
+    row->height = row->rowRenderer->style()->height();
+    if (row->height.isRelative())
+        row->height = Length();
+}
+
 RenderTableSection::RenderTableSection(Node* node)
     : RenderBox(node)
     , m_gridRows(0)
@@ -55,10 +63,6 @@ RenderTableSection::RenderTableSection(Node* node)
     , m_outerBorderRight(0)
     , m_outerBorderTop(0)
     , m_outerBorderBottom(0)
-    , m_overflowLeft(0)
-    , m_overflowWidth(0)
-    , m_overflowTop(0)
-    , m_overflowHeight(0)
     , m_needsCellRecalc(false)
     , m_hasOverflowingCell(false)
 {
@@ -130,11 +134,8 @@ void RenderTableSection::addChild(RenderObject* child, RenderObject* beforeChild
 
     m_grid[m_cRow].rowRenderer = toRenderTableRow(child);
 
-    if (!beforeChild) {
-        m_grid[m_cRow].height = child->style()->height();
-        if (m_grid[m_cRow].height.isRelative())
-            m_grid[m_cRow].height = Length();
-    }
+    if (!beforeChild)
+        setRowHeightToRowStyleHeightIfNotRelative(&m_grid[m_cRow]);
 
     // If the next renderer is actually wrapped in an anonymous table row, we need to go up and find that.
     while (beforeChild && beforeChild->parent() != this)
@@ -266,12 +267,11 @@ void RenderTableSection::setCellWidths()
     if (view()->frameView()) {
         const Settings* settings = document()->settings();
         ASSERT(settings);
-        if (settings->layoutAlgorithm() == Settings::kLayoutFitColumnToScreen) {
+        if (settings->layoutAlgorithm() == Settings::kLayoutFitColumnToScreen)
             visibleWidth = view()->frameView()->screenWidth();
-        }
     }
 #endif
-    
+
     for (int i = 0; i < m_gridRows; i++) {
         Row& row = *m_grid[i].row;
         int cols = row.size();
@@ -288,12 +288,13 @@ void RenderTableSection::setCellWidths()
                 endCol++;
             }
             int w = columnPos[endCol] - columnPos[j] - table()->hBorderSpacing();
-#ifdef ANDROID_LAYOUT          
-            if (table()->isSingleColumn())
-                w = table()->width()-(table()->borderLeft()+table()->borderRight()+
-                    (table()->collapseBorders()?0:(table()->paddingLeft()+table()->paddingRight()+
-                    2*table()->hBorderSpacing())));
-#endif          
+#ifdef ANDROID_LAYOUT
+            if (table()->isSingleColumn()) {
+                int b = table()->collapseBorders() ?
+                    0 : table()->paddingLeft() + table()->paddingRight() + 2 * table()->hBorderSpacing();
+                w = table()->width() - (table()->borderLeft() + table()->borderRight() + b);
+            }
+#endif
             int oldWidth = cell->width();
 #ifdef ANDROID_LAYOUT
             if (w != oldWidth || (visibleWidth > 0 && visibleWidth != cell->getVisibleWidth())) {
@@ -328,9 +329,14 @@ int RenderTableSection::calcRowHeight()
 
     ASSERT(!needsLayout());
 #ifdef ANDROID_LAYOUT
-    if (table()->isSingleColumn())
-        return m_rowPos[m_gridRows];
-#endif    
+    if (table()->isSingleColumn()) {
+        int height = 0;
+        int spacing = table()->vBorderSpacing();
+        for (int r = 0; r < m_gridRows; r++)
+            height += m_grid[r].height.calcMinValue(0) + (m_grid[r].rowRenderer ? spacing : 0);
+        return height;
+    }
+#endif
 
     RenderTableCell* cell;
 
@@ -450,26 +456,26 @@ int RenderTableSection::layoutRows(int toAdd)
         int hspacing = table()->hBorderSpacing();
         int vspacing = table()->vBorderSpacing();
         int rHeight = vspacing;
-    
+
         int leftOffset = hspacing;
-    
+
         int nEffCols = table()->numEffCols();
         for (int r = 0; r < totalRows; r++) {
             for (int c = 0; c < nEffCols; c++) {
                 CellStruct current = cellAt(r, c);
                 RenderTableCell* cell = current.cell;
-                
+
                 if (!cell || current.inColSpan)
                     continue;
                 if (r > 0 && (cellAt(r-1, c).cell == cell))
                     continue;
-                   
+
 //                cell->setCellTopExtra(0);
 //                cell->setCellBottomExtra(0);
-                
+
                 int oldCellX = cell->x();
                 int oldCellY = cell->y();
-            
+
                 if (style()->direction() == RTL) {
                     cell->setX(table()->width());
                     cell->setY(rHeight);
@@ -489,7 +495,7 @@ int RenderTableSection::layoutRows(int toAdd)
                 rHeight += cell->height() + vspacing;
             }
         }
-    
+
         setHeight(rHeight);
         return height();
     }
@@ -501,10 +507,7 @@ int RenderTableSection::layoutRows(int toAdd)
     
     // Set the width of our section now.  The rows will also be this width.
     setWidth(table()->contentWidth());
-    m_overflowLeft = 0;
-    m_overflowWidth = width();
-    m_overflowTop = 0;
-    m_overflowHeight = 0;
+    m_overflow.clear();
     m_hasOverflowingCell = false;
 
     if (toAdd && totalRows && (m_rowPos[totalRows] || !nextSibling())) {
@@ -705,12 +708,6 @@ int RenderTableSection::layoutRows(int toAdd)
             } else
                 cell->setLocation(table()->columnPositions()[c] + hspacing, m_rowPos[rindx]);
 
-            m_overflowLeft = min(m_overflowLeft, cell->x() + cell->overflowLeft(false));
-            m_overflowWidth = max(m_overflowWidth, cell->x() + cell->overflowWidth(false));
-            m_overflowTop = min(m_overflowTop, cell->y() + cell->overflowTop(false));
-            m_overflowHeight = max(m_overflowHeight, cell->y() + cell->overflowHeight(false));
-            m_hasOverflowingCell |= cell->overflowLeft(false) || cell->overflowWidth(false) > cell->width() || cell->overflowTop(false) || cell->overflowHeight(false) > cell->height();
-
             // If the cell moved, we have to repaint it as well as any floating/positioned
             // descendants.  An exception is if we need a layout.  In this case, we know we're going to
             // repaint ourselves (and the cell) anyway.
@@ -725,10 +722,22 @@ int RenderTableSection::layoutRows(int toAdd)
 
     ASSERT(!needsLayout());
 
-    statePusher.pop();
-
     setHeight(m_rowPos[totalRows]);
-    m_overflowHeight = max(m_overflowHeight, height());
+
+    // Now that our height has been determined, add in overflow from cells.
+    for (int r = 0; r < totalRows; r++) {
+        for (int c = 0; c < nEffCols; c++) {
+            RenderTableCell* cell = cellAt(r, c).cell;
+            if (!cell)
+                continue;
+            if (r < totalRows - 1 && cell == cellAt(r + 1, c).cell)
+                continue;
+            addOverflowFromChild(cell);
+            m_hasOverflowingCell |= cell->hasVisibleOverflow();
+        }
+    }
+
+    statePusher.pop();
     return height();
 }
 
@@ -1058,7 +1067,7 @@ void RenderTableSection::paintObject(PaintInfo& paintInfo, int tx, int ty)
     unsigned int startcol = 0;
     unsigned int endcol = totalCols;
     if (table()->isSingleColumn()) {
-        // FIXME: should we be smarter too?        
+        // FIXME: should we be smarter too?
     } else {
     // FIXME: possible to rollback to the common tree.
     // rowPos size is set in calcRowHeight(), which is called from table layout().
@@ -1155,6 +1164,7 @@ void RenderTableSection::paintObject(PaintInfo& paintInfo, int tx, int ty)
                     if (!row->hasSelfPaintingLayer())
                         cell->paintBackgroundsBehindCell(paintInfo, tx, ty, row);
                 }
+
                 if ((!cell->hasSelfPaintingLayer() && !row->hasSelfPaintingLayer()) || paintInfo.phase == PaintPhaseCollapsedTableBorders)
                     cell->paint(paintInfo, tx, ty);
             }
@@ -1184,6 +1194,7 @@ void RenderTableSection::recalcCells()
             
             RenderTableRow* tableRow = toRenderTableRow(row);
             m_grid[m_cRow].rowRenderer = tableRow;
+            setRowHeightToRowStyleHeightIfNotRelative(&m_grid[m_cRow]);
 
             for (RenderObject* cell = row->firstChild(); cell; cell = cell->nextSibling()) {
                 if (cell->isTableCell())

@@ -57,6 +57,8 @@ namespace WebCore {
         bool canTakeFocus(FocusDirection);
         void takeFocus(FocusDirection);
 
+        void focusedNodeChanged(Node*);
+
         Page* createWindow(Frame*, const FrameLoadRequest&, const WebCore::WindowFeatures&);
         Page* createModalDialog(Frame*, const FrameLoadRequest&);
         void show();
@@ -104,7 +106,7 @@ namespace WebCore {
         void scroll(const IntSize& scrollDelta, const IntRect& rectToScroll, const IntRect& clipRect);
         IntPoint screenToWindow(const IntPoint&) const;
         IntRect windowToScreen(const IntRect&) const;
-        PlatformWidget platformWindow() const;
+        PlatformPageClient platformPageClient() const;
         void contentsSizeChanged(Frame*, const IntSize&) const;
         void scrollRectIntoView(const IntRect&, const ScrollView*) const;
 
@@ -112,6 +114,7 @@ namespace WebCore {
         void scrollBackingStore(int, int, const IntRect&, const IntRect&);
         void updateBackingStore();
 
+        void scrollbarsModeDidChange() const { }
         void mouseDidMoveOverElement(const HitTestResult&, unsigned modifierFlags);
 
         void setToolTip(const String&);

@@ -30,10 +30,27 @@
 
 using namespace WebCore;
 
+void QWEBKIT_EXPORT qt_drt_whiteListAccessFromOrigin(const QString& sourceOrigin, const QString& destinationProtocol, const QString& destinationHost, bool allowDestinationSubdomains)
+{
+    SecurityOrigin::whiteListAccessFromOrigin(*SecurityOrigin::createFromString(sourceOrigin), destinationProtocol, destinationHost, allowDestinationSubdomains);
+}
+
+void QWEBKIT_EXPORT qt_drt_resetOriginAccessWhiteLists()
+{
+    SecurityOrigin::resetOriginAccessWhiteLists();
+}
+
+void QWEBKIT_EXPORT qt_drt_setDomainRelaxationForbiddenForURLScheme(bool forbidden, const QString& scheme)
+{
+    SecurityOrigin::setDomainRelaxationForbiddenForURLScheme(forbidden, scheme);
+}
+
 /*!
     \class QWebSecurityOrigin
     \since 4.5
     \brief The QWebSecurityOrigin class defines a security boundary for web sites.
+
+    \inmodule QtWebKit
 
     QWebSecurityOrigin provides access to the security domains defined by web sites.
     An origin consists of a host name, a scheme, and a port number. Web sites
@@ -198,3 +215,42 @@ QList<QWebDatabase> QWebSecurityOrigin::databases() const
     return databases;
 }
 
+/*!
+    \since 4.6
+
+    Adds the given \a scheme to the list of schemes that are considered equivalent
+    to the \c file: scheme. They are not subject to cross domain restrictions.
+*/
+void QWebSecurityOrigin::addLocalScheme(const QString& scheme)
+{
+    SecurityOrigin::registerURLSchemeAsLocal(scheme);
+}
+
+/*!
+    \since 4.6
+
+    Removes the given \a scheme from the list of local schemes.
+
+    \sa addLocalScheme()
+*/
+void QWebSecurityOrigin::removeLocalScheme(const QString& scheme)
+{
+    SecurityOrigin::removeURLSchemeRegisteredAsLocal(scheme);
+}
+
+/*!
+    \since 4.6
+    Returns a list of all the schemes that were set by the application as local schemes,
+    \sa addLocalScheme(), removeLocalScheme()
+*/
+QStringList QWebSecurityOrigin::localSchemes()
+{
+    QStringList list;
+    const URLSchemesMap& map = SecurityOrigin::localURLSchemes();
+    URLSchemesMap::const_iterator end = map.end();
+    for (URLSchemesMap::const_iterator i = map.begin(); i != end; ++i) {
+        const QString scheme = *i;
+        list.append(scheme);
+    }
+    return list;
+}

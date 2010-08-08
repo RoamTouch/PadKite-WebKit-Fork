@@ -24,6 +24,7 @@
  */
 
 #include "config.h"
+#include "BackForwardList.h"
 #include "CString.h"
 #include "Document.h"
 #include "Editor.h"
@@ -33,6 +34,7 @@
 #include "FrameLoader.h"
 #include "FrameView.h"
 #include "HitTestResult.h"
+#include "HostWindow.h"
 #include "HTMLFrameOwnerElement.h"
 #include "markup.h"
 #include "Page.h"
@@ -42,6 +44,7 @@
 #include "RenderView.h"
 #include "ScriptController.h"
 #include "ScriptValue.h"
+#include "SubstituteData.h"
 #include "TextEncoding.h"
 
 #include "JSDOMBinding.h"
@@ -73,8 +76,7 @@ wxWebFrame::wxWebFrame(wxWebView* container, wxWebFrame* parent, WebViewFrameDat
     m_textMagnifier(1.0),
     m_isEditable(false),
     m_isInitialized(false),
-    m_beingDestroyed(false),
-    m_title(wxEmptyString)
+    m_beingDestroyed(false)
 {
 
     m_impl = new WebFramePrivate();
@@ -86,13 +88,23 @@ wxWebFrame::wxWebFrame(wxWebView* container, wxWebFrame* parent, WebViewFrameDat
     }
     
     WebCore::FrameLoaderClientWx* loaderClient = new WebCore::FrameLoaderClientWx();
-    
-    m_impl->frame = WebCore::Frame::create(container->m_impl->page, parentFrame, loaderClient);
-    m_impl->frame->deref();
+    RefPtr<WebCore::Frame> newFrame = WebCore::Frame::create(container->m_impl->page, parentFrame, loaderClient);
 
-    loaderClient->setFrame(m_impl->frame.get());
+    m_impl->frame = newFrame.get();
+
+    if (data)
+        newFrame->tree()->setName(data->name);
+
+    // Subframes expect to be added to the FrameTree before init is called.
+    if (parentFrame)
+        parentFrame->document()->frame()->tree()->appendChild(newFrame.get());
+    
+    loaderClient->setFrame(this);
     loaderClient->setWebView(container);
     
+    if (data && data->ownerElement)
+        m_impl->frame->ref();
+
     m_impl->frame->init();
         
     m_isInitialized = true;
@@ -100,13 +112,14 @@ wxWebFrame::wxWebFrame(wxWebView* container, wxWebFrame* parent, WebViewFrameDat
 
 wxWebFrame::~wxWebFrame()
 {
-    m_impl->frame->loader()->detachFromParent();
+    if (m_impl)
+        delete m_impl;
 }
 
 WebCore::Frame* wxWebFrame::GetFrame()
 {
     if (m_impl)
-        return m_impl->frame.get();
+        return m_impl->frame;
         
     return 0;
 }
@@ -142,10 +155,16 @@ wxString wxWebFrame::GetPageSource()
 void wxWebFrame::SetPageSource(const wxString& source, const wxString& baseUrl)
 {
     if (m_impl->frame && m_impl->frame->loader()) {
-        WebCore::FrameLoader* loader = m_impl->frame->loader();
-        loader->begin(WebCore::KURL(WebCore::KURL(), static_cast<const char*>(baseUrl.mb_str(wxConvUTF8)), WebCore::UTF8Encoding()));
-        loader->write(static_cast<const WebCore::String>(source));
-        loader->end();
+        WebCore::KURL url(WebCore::KURL(), baseUrl);
+
+        const wxCharBuffer charBuffer(source.utf8_str());
+        const char* contents = charBuffer;
+
+        WTF::PassRefPtr<WebCore::SharedBuffer> sharedBuffer = WebCore::SharedBuffer::create(contents, strlen(contents));
+        WebCore::SubstituteData substituteData(sharedBuffer, WebCore::String("text/html"), WebCore::String("UTF-8"), WebCore::blankURL(), url);
+
+        m_impl->frame->loader()->stop();
+        m_impl->frame->loader()->load(WebCore::ResourceRequest(url), substituteData, false);
     }
 }
 
@@ -171,16 +190,25 @@ wxString wxWebFrame::GetExternalRepresentation()
     if (m_impl->frame->view() && m_impl->frame->view()->layoutPending())
         m_impl->frame->view()->layout();
 
-    return externalRepresentation(m_impl->frame->contentRenderer());
+    return externalRepresentation(m_impl->frame);
 }
 
 wxString wxWebFrame::RunScript(const wxString& javascript)
 {
     wxString returnValue = wxEmptyString;
-    if (m_impl->frame) {
-        JSC::JSValue result = m_impl->frame->loader()->executeScript(javascript, true).jsValue();
-        if (result)
-            returnValue = wxString(result.toString(m_impl->frame->script()->globalObject()->globalExec()).UTF8String().c_str(), wxConvUTF8);        
+    if (m_impl->frame && m_impl->frame->loader()) {
+        bool hasLoaded = m_impl->frame->loader()->frameHasLoaded();
+        wxASSERT_MSG(hasLoaded, wxT("Document must be loaded before calling RunScript."));
+        if (hasLoaded) {
+            WebCore::ScriptController* controller = m_impl->frame->script();
+            bool jsEnabled = controller->canExecuteScripts(); 
+            wxASSERT_MSG(jsEnabled, wxT("RunScript requires JavaScript to be enabled."));
+            if (jsEnabled) {
+                JSC::JSValue result = controller->executeScript(javascript, true).jsValue();
+                if (result)
+                    returnValue = wxString(result.toString(m_impl->frame->script()->globalObject(WebCore::mainThreadNormalWorld())->globalExec()).UTF8String().c_str(), wxConvUTF8);        
+            }
+        }
     }
     return returnValue;
 }
@@ -196,7 +224,7 @@ bool wxWebFrame::FindString(const wxString& string, bool forward, bool caseSensi
 void wxWebFrame::LoadURL(const wxString& url)
 {
     if (m_impl->frame && m_impl->frame->loader()) {
-        WebCore::KURL kurl = WebCore::KURL(WebCore::KURL(), static_cast<const char*>(url.mb_str(wxConvUTF8)), WebCore::UTF8Encoding());
+        WebCore::KURL kurl = WebCore::KURL(WebCore::KURL(), url, WebCore::UTF8Encoding());
         // NB: This is an ugly fix, but CURL won't load sub-resources if the
         // protocol is omitted; sadly, it will not emit an error, either, so
         // there's no way for us to catch this problem the correct way yet.
@@ -383,3 +411,18 @@ wxWebViewDOMElementInfo wxWebFrame::HitTest(const wxPoint& pos) const
     return domInfo;
 }
 
+bool wxWebFrame::ShouldClose() const
+{
+    if (m_impl->frame)
+        return m_impl->frame->shouldClose();
+
+    return true;
+}
+
+wxWebKitParseMode wxWebFrame::GetParseMode() const
+{
+    if (m_impl->frame && m_impl->frame->document())
+        return (wxWebKitParseMode)m_impl->frame->document()->parseMode();
+
+    return NoDocument;
+}

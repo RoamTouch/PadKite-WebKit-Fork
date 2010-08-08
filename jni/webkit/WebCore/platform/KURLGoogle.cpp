@@ -38,16 +38,22 @@
 #include <stdio.h>
 #endif
 
+#include <algorithm>
+
 #include "CString.h"
+#include "StringHash.h"
 #include "NotImplemented.h"
 #include "TextEncoding.h"
+#include <wtf/HashMap.h>
 #include <wtf/Vector.h>
+#include <wtf/StdLibExtras.h>
 
 #include <googleurl/src/url_canon_internal.h>
 #include <googleurl/src/url_util.h>
 
 using WTF::isASCIILower;
 using WTF::toASCIILower;
+using std::binary_search;
 
 namespace WebCore {
 
@@ -106,7 +112,7 @@ static inline bool isUnicodeEncoding(const TextEncoding* encoding)
 static bool lowerCaseEqualsASCII(const char* begin, const char* end, const char* str)
 {
     while (begin != end && *str) {
-        ASSERT(isASCIILower(*str));
+        ASSERT(toASCIILower(*str) == *str);
         if (toASCIILower(*begin++) != *str++)
             return false;
     }
@@ -114,6 +120,16 @@ static bool lowerCaseEqualsASCII(const char* begin, const char* end, const char*
     // Both strings are equal (ignoring case) if and only if all of the characters were equal,
     // and the end of both has been reached.
     return begin == end && !*str;
+}
+
+static inline bool isSchemeFirstChar(char c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+static inline bool isSchemeChar(char c)
+{
+    return isSchemeFirstChar(c) || (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '*';
 }
 
 
@@ -331,7 +347,7 @@ const String& KURLGooglePrivate::string() const
 // Creates with NULL-terminated string input representing an absolute URL.
 // WebCore generally calls this only with hardcoded strings, so the input is
 // ASCII. We treat is as UTF-8 just in case.
-KURL::KURL(const char *url)
+KURL::KURL(ParsedURLStringTag, const char *url)
 {
     // FIXME The Mac code checks for beginning with a slash and converting to a
     // file: URL. We will want to add this as well once we can compile on a
@@ -349,7 +365,7 @@ KURL::KURL(const char *url)
 // to a string and then converted back. In this case, the URL is already
 // canonical and in proper escaped form so needs no encoding. We treat it was
 // UTF-8 just in case.
-KURL::KURL(const String& url)
+KURL::KURL(ParsedURLStringTag, const String& url)
 {
     if (!url.isNull())
         m_url.init(KURL(), url, 0);
@@ -424,6 +440,11 @@ bool KURL::isEmpty() const
 bool KURL::isValid() const
 {
     return m_url.m_isValid;
+}
+
+bool KURL::hasPort() const
+{
+    return hostEnd() < pathStart();
 }
 
 bool KURL::protocolInHTTPFamily() const
@@ -537,7 +558,10 @@ String KURL::query() const
     // Bug: https://bugs.webkit.org/show_bug.cgi?id=21015 this function returns
     // an empty string when the query is empty rather than a null (not sure
     // which is right).
-    return String("", 0);
+    // Returns a null if the query is not specified, instead of empty.
+    if (m_url.m_parsed.query.is_valid())
+        return String("", 0);
+    return String();
 }
 
 String KURL::path() const
@@ -546,12 +570,13 @@ String KURL::path() const
     return m_url.componentString(m_url.m_parsed.path);
 }
 
-void KURL::setProtocol(const String& protocol)
+bool KURL::setProtocol(const String& protocol)
 {
     KURLGooglePrivate::Replacements replacements;
     replacements.SetScheme(CharactersOrEmpty(protocol),
                            url_parse::Component(0, protocol.length()));
     m_url.replaceComponents(replacements);
+    return true;
 }
 
 void KURL::setHost(const String& host)
@@ -562,22 +587,34 @@ void KURL::setHost(const String& host)
     m_url.replaceComponents(replacements);
 }
 
-// This function is used only in the JSC build.
 void KURL::setHostAndPort(const String& s)
 {
-    String newhost = s.left(s.find(":"));
-    String newport = s.substring(s.find(":") + 1);
+    String host = s;
+    String port;
+    int hostEnd = s.find(":");
+    if (hostEnd != -1) {
+        host = s.left(hostEnd);
+        port = s.substring(hostEnd + 1);
+    }
 
     KURLGooglePrivate::Replacements replacements;
     // Host can't be removed, so we always set.
-    replacements.SetHost(CharactersOrEmpty(newhost),
-                         url_parse::Component(0, newhost.length()));
+    replacements.SetHost(CharactersOrEmpty(host),
+                         url_parse::Component(0, host.length()));
 
-    if (newport.isEmpty())  // Port may be removed, so we support clearing.
+    if (port.isEmpty())  // Port may be removed, so we support clearing.
         replacements.ClearPort();
     else
-        replacements.SetPort(CharactersOrEmpty(newport), url_parse::Component(0, newport.length()));
+        replacements.SetPort(CharactersOrEmpty(port), url_parse::Component(0, port.length()));
     m_url.replaceComponents(replacements);
+}
+
+void KURL::removePort()
+{
+    if (hasPort()) {
+        String urlWithoutPort = m_url.string().left(hostEnd()) + m_url.string().substring(pathStart());
+        m_url.setUtf8(urlWithoutPort.utf8());
+    }
 }
 
 void KURL::setPort(unsigned short i)
@@ -698,6 +735,130 @@ bool protocolIsJavaScript(const String& url)
     return protocolIs(url, "javascript");
 }
 
+// We copied the KURL version here on Dec 4, 2009 while doing a WebKit
+// merge.
+//
+// FIXME Somehow share this with KURL? Like we'd theoretically merge with
+// decodeURLEscapeSequences below?
+bool isDefaultPortForProtocol(unsigned short port, const String& protocol)
+{
+    if (protocol.isEmpty())
+        return false;
+
+    typedef HashMap<String, unsigned, CaseFoldingHash> DefaultPortsMap;
+    DEFINE_STATIC_LOCAL(DefaultPortsMap, defaultPorts, ());
+    if (defaultPorts.isEmpty()) {
+        defaultPorts.set("http", 80);
+        defaultPorts.set("https", 443);
+        defaultPorts.set("ftp", 21);
+        defaultPorts.set("ftps", 990);
+    }
+    return defaultPorts.get(protocol) == port;
+}
+
+// We copied the KURL version here on Dec 4, 2009 while doing a WebKit
+// merge.
+//
+// FIXME Somehow share this with KURL? Like we'd theoretically merge with
+// decodeURLEscapeSequences below?
+bool portAllowed(const KURL& url)
+{
+    unsigned short port = url.port();
+
+    // Since most URLs don't have a port, return early for the "no port" case.
+    if (!port)
+        return true;
+
+    // This blocked port list matches the port blocking that Mozilla implements.
+    // See http://www.mozilla.org/projects/netlib/PortBanning.html for more information.
+    static const unsigned short blockedPortList[] = {
+        1,    // tcpmux
+        7,    // echo
+        9,    // discard
+        11,   // systat
+        13,   // daytime
+        15,   // netstat
+        17,   // qotd
+        19,   // chargen
+        20,   // FTP-data
+        21,   // FTP-control
+        22,   // SSH
+        23,   // telnet
+        25,   // SMTP
+        37,   // time
+        42,   // name
+        43,   // nicname
+        53,   // domain
+        77,   // priv-rjs
+        79,   // finger
+        87,   // ttylink
+        95,   // supdup
+        101,  // hostriame
+        102,  // iso-tsap
+        103,  // gppitnp
+        104,  // acr-nema
+        109,  // POP2
+        110,  // POP3
+        111,  // sunrpc
+        113,  // auth
+        115,  // SFTP
+        117,  // uucp-path
+        119,  // nntp
+        123,  // NTP
+        135,  // loc-srv / epmap
+        139,  // netbios
+        143,  // IMAP2
+        179,  // BGP
+        389,  // LDAP
+        465,  // SMTP+SSL
+        512,  // print / exec
+        513,  // login
+        514,  // shell
+        515,  // printer
+        526,  // tempo
+        530,  // courier
+        531,  // Chat
+        532,  // netnews
+        540,  // UUCP
+        556,  // remotefs
+        563,  // NNTP+SSL
+        587,  // ESMTP
+        601,  // syslog-conn
+        636,  // LDAP+SSL
+        993,  // IMAP+SSL
+        995,  // POP3+SSL
+        2049, // NFS
+        3659, // apple-sasl / PasswordServer [Apple addition]
+        4045, // lockd
+        6000, // X11
+    };
+    const unsigned short* const blockedPortListEnd = blockedPortList + sizeof(blockedPortList) / sizeof(blockedPortList[0]);
+
+#ifndef NDEBUG
+    // The port list must be sorted for binary_search to work.
+    static bool checkedPortList = false;
+    if (!checkedPortList) {
+        for (const unsigned short* p = blockedPortList; p != blockedPortListEnd - 1; ++p)
+            ASSERT(*p < *(p + 1));
+        checkedPortList = true;
+    }
+#endif
+
+    // If the port is not in the blocked port list, allow it.
+    if (!binary_search(blockedPortList, blockedPortListEnd, port))
+        return true;
+
+    // Allow ports 21 and 22 for FTP URLs, as Mozilla does.
+    if ((port == 21 || port == 22) && url.protocolIs("ftp"))
+        return true;
+
+    // Allow any port number in a file URL, since the port number is ignored.
+    if (url.protocolIs("file"))
+        return true;
+
+    return false;
+}
+
 // We copied the KURL version here on Sept 12, 2008 while doing a WebKit
 // merge.
 // 
@@ -728,13 +889,8 @@ String decodeURLEscapeSequences(const String& str)
 // cause security holes. We never call this function for components, and
 // just return the ASCII versions instead.
 //
-// However, this static function is called directly in some cases. It appears
-// that this only happens for javascript: URLs, so this is essentially the
-// JavaScript URL decoder. It assumes UTF-8 encoding.
-//
-// IE doesn't unescape %00, forcing you to use \x00 in JS strings, so we do
-// the same. This also eliminates NULL-related problems should a consumer
-// incorrectly call this function for non-JavaScript.
+// This function is also used to decode javascript: URLs and as a general
+// purpose unescaping function.
 //
 // FIXME These should be merged to the KURL.cpp implementation.
 String decodeURLEscapeSequences(const String& str, const TextEncoding& encoding)
@@ -757,15 +913,9 @@ String decodeURLEscapeSequences(const String& str, const TextEncoding& encoding)
     for (int i = 0; i < inputLength; i++) {
         if (input[i] == '%') {
             unsigned char ch;
-            if (url_canon::DecodeEscaped(input, &i, inputLength, &ch)) {
-                if (!ch) {
-                    // Never unescape NULLs.
-                    unescaped.push_back('%');
-                    unescaped.push_back('0');
-                    unescaped.push_back('0');
-                } else
-                    unescaped.push_back(ch);
-            } else {
+            if (url_canon::DecodeEscaped(input, &i, inputLength, &ch))
+                unescaped.push_back(ch);
+            else {
                 // Invalid escape sequence, copy the percent literal.
                 unescaped.push_back('%');
             }
@@ -936,7 +1086,7 @@ unsigned KURL::pathAfterLastSlash() const
 
 const KURL& blankURL()
 {
-    static KURL staticBlankURL("about:blank");
+    static KURL staticBlankURL(ParsedURLString, "about:blank");
     return staticBlankURL;
 }
 

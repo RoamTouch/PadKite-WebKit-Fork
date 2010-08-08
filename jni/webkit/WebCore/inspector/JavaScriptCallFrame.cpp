@@ -25,8 +25,9 @@
 
 #include "config.h"
 #include "JavaScriptCallFrame.h"
+#include "JSDOMBinding.h"
 
-#if ENABLE(JAVASCRIPT_DEBUGGER)
+#if ENABLE(JAVASCRIPT_DEBUGGER) && USE(JSC)
 
 #include "PlatformString.h"
 #include <debugger/DebuggerCallFrame.h>

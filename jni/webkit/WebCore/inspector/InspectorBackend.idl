@@ -31,49 +31,29 @@
  */
 
 module core {
-    interface [
-        GenerateConstructor
-    ] InspectorBackend {
-        void hideDOMNodeHighlight();
-        [Custom] void highlightDOMNode(in Node node);
-        void loaded(in boolean enableDOMAgent);
-        void windowUnloading();
-        void attach();
-        void detach();
+    interface [Conditional=INSPECTOR] InspectorBackend {
+        void storeLastActivePanel(in DOMString panelName);
 
-        void closeWindow();
-        void clearMessages();
+        void saveFrontendSettings(in DOMString settings);
+
         void toggleNodeSearch();
-
-        boolean isWindowVisible();
         boolean searchingForNode();
 
-        void addResourceSourceToFrame(in long identifier, in Node frame);
-        boolean addSourceToFrame(in DOMString mimeType, in DOMString sourceValue, in Node frame);
-        [Custom] void search(in Node node, in DOMString query);
-#if defined(ENABLE_DATABASE) && ENABLE_DATABASE
-        [Custom] DOMObject databaseTableNames(in Database database);
-#endif
-        [Custom] DOMObject setting(in DOMString key);
-        [Custom] void setSetting(in DOMString key, in DOMObject  value);
-        [Custom] DOMWindow inspectedWindow();
-        DOMString localizedStringsURL();
-        DOMString hiddenPanels();
-        DOMString platform();
-        [ImplementationFunction=moveWindowBy] void moveByUnrestricted(in float x, in float y);
-        void setAttachedWindowHeight(in unsigned long height);
-        [Custom] DOMObject wrapCallback(in DOMObject callback);
         boolean resourceTrackingEnabled();
         void enableResourceTracking(in boolean always);
         void disableResourceTracking(in boolean always);
-        void storeLastActivePanel(in DOMString panelName);
+        void getResourceContent(in long callId, in unsigned long identifier);
 
-#if defined(ENABLE_JAVASCRIPT_DEBUGGER) && ENABLE_JAVASCRIPT_DEBUGGER
+        void startTimelineProfiler();
+        void stopTimelineProfiler();
+
+#if defined(ENABLE_JAVASCRIPT_DEBUGGER) && ENABLE_JAVASCRIPT_DEBUGGER && !(defined(V8_BINDING) && V8_BINDING)
         boolean debuggerEnabled();
         void enableDebugger(in boolean always);
         void disableDebugger(in boolean always);
 
-        void addBreakpoint(in DOMString sourceID, in unsigned long lineNumber);
+        void addBreakpoint(in DOMString sourceID, in unsigned long lineNumber, in DOMString condition);
+        void updateBreakpoint(in DOMString sourceID, in unsigned long lineNumber, in DOMString condition);
         void removeBreakpoint(in DOMString sourceID, in unsigned long lineNumber);
 
         void pauseInDebugger();
@@ -83,11 +63,10 @@ module core {
         void stepIntoStatementInDebugger();
         void stepOutOfFunctionInDebugger();
 
-        [Custom] DOMObject currentCallFrame();
-
-        boolean pauseOnExceptions();
-        void setPauseOnExceptions(in boolean pauseOnExceptions);
-
+        long pauseOnExceptionsState();
+        void setPauseOnExceptionsState(in long pauseOnExceptionsState);
+#endif
+#if defined(ENABLE_JAVASCRIPT_DEBUGGER) && ENABLE_JAVASCRIPT_DEBUGGER
         boolean profilerEnabled();
         void enableProfiler(in boolean always);
         void disableProfiler(in boolean always);
@@ -95,11 +74,36 @@ module core {
         void startProfiling();
         void stopProfiling();
 
-        [Custom] Array profiles();
+        void getProfileHeaders(in long callId);
+        void getProfile(in long callId, in unsigned long uid);
 #endif
-        void getChildNodes(in long callId, in long elementId);
+        void setInjectedScriptSource(in DOMString scriptSource);
+        void dispatchOnInjectedScript(in long callId, in long injectedScriptId, in DOMString methodName, in DOMString arguments, in boolean async);
+
+        void getChildNodes(in long callId, in long nodeId);
         void setAttribute(in long callId, in long elementId, in DOMString name, in DOMString value);
         void removeAttribute(in long callId, in long elementId, in DOMString name);
-        void setTextNodeValue(in long callId, in long elementId, in DOMString value);
+        void setTextNodeValue(in long callId, in long nodeId, in DOMString value);
+        void getEventListenersForNode(in long callId, in long nodeId);
+        void copyNode(in long nodeId);
+        void removeNode(in long callId, in long nodeId);
+        void highlightDOMNode(in long nodeId);
+        void hideDOMNodeHighlight();
+
+        void getCookies(in long callId);
+        void deleteCookie(in DOMString cookieName, in DOMString domain);
+
+        void releaseWrapperObjectGroup(in long injectedScriptId, in DOMString objectGroup);
+        void didEvaluateForTestInFrontend(in long callId, in DOMString jsonResult);
+
+#if defined(ENABLE_DATABASE) && ENABLE_DATABASE
+        void getDatabaseTableNames(in long callId, in long databaseId);
+#endif
+
+#if defined(ENABLE_DOM_STORAGE) && ENABLE_DOM_STORAGE
+        void getDOMStorageEntries(in long callId, in long storageId);
+        void setDOMStorageItem(in long callId, in long storageId, in DOMString key, in DOMString value);
+        void removeDOMStorageItem(in long callId, in long storageId, in DOMString key);
+#endif
     };
- }
+}

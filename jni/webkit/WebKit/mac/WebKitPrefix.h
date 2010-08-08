@@ -74,10 +74,6 @@ typedef float CGFloat;
 
 #include "EmptyProtocolDefinitions.h"
 
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_TIGER) && defined(__x86_64__)
-#define WTF_USE_PLUGIN_HOST_PROCESS 1
-#endif
-
 /* WebKit has no way to pull settings from WebCore/config.h for now */
 /* so we assume WebKit is always being compiled on top of JavaScriptCore */
 #define WTF_USE_JSC 1
@@ -94,4 +90,5 @@ typedef float CGFloat;
 #undef catch
 
 #define JS_EXPORTDATA
+#define JS_EXPORTCLASS
 #define WEBKIT_EXPORTDATA

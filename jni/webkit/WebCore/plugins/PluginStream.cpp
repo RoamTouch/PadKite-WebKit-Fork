@@ -84,7 +84,7 @@ PluginStream::~PluginStream()
     ASSERT(m_streamState != StreamStarted);
     ASSERT(!m_loader);
 
-    free((char*)m_stream.url);
+    fastFree((char*)m_stream.url);
 
     streams().remove(&m_stream);
 }
@@ -120,6 +120,8 @@ void PluginStream::stop()
         m_loader->cancel();
         m_loader = 0;
     }
+
+    m_client = 0;
 }
 
 void PluginStream::startStream()
@@ -131,9 +133,9 @@ void PluginStream::startStream()
     // Some plugins (Flash) expect that javascript URLs are passed back decoded as this is the
     // format used when requesting the URL.
     if (protocolIsJavaScript(responseURL))
-        m_stream.url = strdup(decodeURLEscapeSequences(responseURL.string()).utf8().data());
+        m_stream.url = fastStrDup(decodeURLEscapeSequences(responseURL.string()).utf8().data());
     else
-        m_stream.url = strdup(responseURL.string().utf8().data());
+        m_stream.url = fastStrDup(responseURL.string().utf8().data());
 
     CString mimeTypeStr = m_resourceResponse.mimeType().utf8();
 
@@ -305,7 +307,7 @@ void PluginStream::destroyStream()
 
     m_streamState = StreamStopped;
 
-    if (!m_loadManually)
+    if (!m_loadManually && m_client)
         m_client->streamDidFinishLoading(this);
 
     if (!m_path.isNull()) {
@@ -343,7 +345,17 @@ void PluginStream::deliverData()
         int32 deliveryBytes = m_pluginFuncs->writeready(m_instance, &m_stream);
 
         if (deliveryBytes <= 0) {
+#if PLATFORM(ANDROID)
+// TODO: This needs to be upstreamed.
+            if (m_loader)
+                m_loader->pauseLoad(true);
+
+            // ask the plugin for a delay value.
+            int delay = deliveryDelay();
+            m_delayDeliveryTimer.startOneShot(delay * 0.001);
+#else
             m_delayDeliveryTimer.startOneShot(0);
+#endif
             break;
         } else {
             deliveryBytes = min(deliveryBytes, totalBytes - totalBytesDelivered);
@@ -371,6 +383,11 @@ void PluginStream::deliverData()
             memmove(m_deliveryData->data(), m_deliveryData->data() + totalBytesDelivered, remainingBytes);
             m_deliveryData->resize(remainingBytes);
         } else {
+#if PLATFORM(ANDROID)
+//TODO: This needs to be upstreamed to WebKit.
+            if (m_loader)
+                m_loader->pauseLoad(false);
+#endif
             m_deliveryData->resize(0);
             if (m_reason != WebReasonNone)
                 destroyStream();
@@ -424,6 +441,10 @@ void PluginStream::didReceiveData(NetscapePlugInStreamLoader* loader, const char
         m_deliveryData->resize(oldSize + length);
         memcpy(m_deliveryData->data() + oldSize, data, length);
 
+#if PLATFORM(ANDROID)
+//TODO: This needs to be upstreamed to WebKit.
+        if (!m_delayDeliveryTimer.isActive())
+#endif
         deliverData();
     }
 
@@ -472,5 +493,19 @@ bool PluginStream::wantsAllStreams() const
 
     return result != 0;
 }
+
+#if PLATFORM(ANDROID)
+int PluginStream::deliveryDelay() const
+{
+    if (!m_pluginFuncs->getvalue)
+        return 0;
+
+    int delay = 0;
+    if (m_pluginFuncs->getvalue(m_instance, NPPDataDeliveryDelayMs, &delay) != NPERR_NO_ERROR)
+        return 0;
+
+    return delay;
+}
+#endif
 
 }

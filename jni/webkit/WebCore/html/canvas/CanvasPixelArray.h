@@ -42,9 +42,15 @@ namespace WebCore {
         static PassRefPtr<CanvasPixelArray> create(unsigned length);
         
         WTF::ByteArray* data() { return m_data.get(); }
+        const WTF::ByteArray* data() const { return m_data.get(); }
         unsigned length() const { return m_data->length(); }
         
         void set(unsigned index, double value)
+        {
+            m_data->set(index, value);
+        }
+
+        void set(unsigned index, unsigned char value)
         {
             m_data->set(index, value);
         }
@@ -52,6 +58,11 @@ namespace WebCore {
         bool get(unsigned index, unsigned char& result) const
         {
             return m_data->get(index, result);
+        }
+
+        unsigned char get(unsigned index) const
+        {
+            return m_data->get(index);
         }
 
     private:

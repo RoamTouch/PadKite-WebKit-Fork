@@ -140,10 +140,10 @@ static inline void addTypesFromClass(NSMutableDictionary *allTypes, Class objCCl
     }
 }
 
-+ (Class)_representationClassForMIMEType:(NSString *)MIMEType
++ (Class)_representationClassForMIMEType:(NSString *)MIMEType allowingPlugins:(BOOL)allowPlugins
 {
     Class repClass;
-    return [WebView _viewClass:nil andRepresentationClass:&repClass forMIMEType:MIMEType] ? repClass : nil;
+    return [WebView _viewClass:nil andRepresentationClass:&repClass forMIMEType:MIMEType allowingPlugins:allowPlugins] ? repClass : nil;
 }
 @end
 
@@ -194,6 +194,7 @@ static inline void addTypesFromClass(NSMutableDictionary *allTypes, Class objCCl
 
 - (BOOL)_transferApplicationCache:(NSString*)destinationBundleIdentifier
 {
+#if ENABLE(OFFLINE_WEB_APPLICATIONS)
     DocumentLoader* loader = [self _documentLoader];
     
     if (!loader)
@@ -202,6 +203,9 @@ static inline void addTypesFromClass(NSMutableDictionary *allTypes, Class objCCl
     NSString *cacheDir = [NSString _webkit_localCacheDirectoryWithBundleIdentifier:destinationBundleIdentifier];
     
     return ApplicationCacheStorage::storeCopyOfCache(cacheDir, loader->applicationCacheHost());
+#else
+    return NO;
+#endif
 }
 
 @end
@@ -340,7 +344,7 @@ static inline void addTypesFromClass(NSMutableDictionary *allTypes, Class objCCl
 
 - (void)_makeRepresentation
 {
-    Class repClass = [[self class] _representationClassForMIMEType:[self _responseMIMEType]];
+    Class repClass = [[self class] _representationClassForMIMEType:[self _responseMIMEType] allowingPlugins:[[[self _webView] preferences] arePlugInsEnabled]];
     
     // Check if the data source was already bound?
     if (![[self representation] isKindOfClass:repClass]) {

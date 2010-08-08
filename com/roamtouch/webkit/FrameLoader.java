@@ -102,15 +102,21 @@ class FrameLoader {
                                 com.android.internal.R.string.httpErrorBadUrl));
                 return false;
             }
-            // Make sure it is correctly URL encoded before sending the request
-            if (!URLUtil.verifyURLEncoding(url)) {
+            // Make sure the host part of the url is correctly
+            // encoded before sending the request
+            if (!URLUtil.verifyURLEncoding(mListener.host())) {
                 mListener.error(EventHandler.ERROR_BAD_URL,
                         mListener.getContext().getString(
                         com.android.internal.R.string.httpErrorBadUrl));
                 return false;
             }
             mNetwork = Network.getInstance(mListener.getContext());
-            return handleHTTPLoad();
+            if (mListener.isSynchronous()) {
+                return handleHTTPLoad();
+            }
+            WebViewWorker.getHandler().obtainMessage(
+                    WebViewWorker.MSG_ADD_HTTPLOADER, this).sendToTarget();
+            return true;
         } else if (handleLocalFile(url, mListener, mSettings)) {
             return true;
         }
@@ -141,21 +147,57 @@ class FrameLoader {
             return true;
         }
         if (URLUtil.isAssetUrl(url)) {
-            FileLoader.requestUrl(url, loadListener, loadListener.getContext(),
-                    true, settings.getAllowFileAccess());
+            if (loadListener.isSynchronous()) {
+                new FileLoader(url, loadListener, FileLoader.TYPE_ASSET,
+                        true).load();
+            } else {
+                // load asset in a separate thread as it involves IO
+                WebViewWorker.getHandler().obtainMessage(
+                        WebViewWorker.MSG_ADD_STREAMLOADER,
+                        new FileLoader(url, loadListener, FileLoader.TYPE_ASSET,
+                                true)).sendToTarget();
+            }
+            return true;
+        } else if (URLUtil.isResourceUrl(url)) {
+            if (loadListener.isSynchronous()) {
+                new FileLoader(url, loadListener, FileLoader.TYPE_RES,
+                        true).load();
+            } else {
+                // load resource in a separate thread as it involves IO
+                WebViewWorker.getHandler().obtainMessage(
+                        WebViewWorker.MSG_ADD_STREAMLOADER,
+                        new FileLoader(url, loadListener, FileLoader.TYPE_RES,
+                                true)).sendToTarget();
+            }
             return true;
         } else if (URLUtil.isFileUrl(url)) {
-            FileLoader.requestUrl(url, loadListener, loadListener.getContext(),
-                    false, settings.getAllowFileAccess());
+            if (loadListener.isSynchronous()) {
+                new FileLoader(url, loadListener, FileLoader.TYPE_FILE,
+                        settings.getAllowFileAccess()).load();
+            } else {
+                // load file in a separate thread as it involves IO
+                WebViewWorker.getHandler().obtainMessage(
+                        WebViewWorker.MSG_ADD_STREAMLOADER,
+                        new FileLoader(url, loadListener, FileLoader.TYPE_FILE,
+                                settings.getAllowFileAccess())).sendToTarget();
+            }
             return true;
         } else if (URLUtil.isContentUrl(url)) {
             // Send the raw url to the ContentLoader because it will do a
-            // permission check and the url has to match..
-            ContentLoader.requestUrl(loadListener.url(), loadListener,
-                                     loadListener.getContext());
+            // permission check and the url has to match.
+            if (loadListener.isSynchronous()) {
+                new ContentLoader(loadListener.url(), loadListener).load();
+            } else {
+                // load content in a separate thread as it involves IO
+                WebViewWorker.getHandler().obtainMessage(
+                        WebViewWorker.MSG_ADD_STREAMLOADER,
+                        new ContentLoader(loadListener.url(), loadListener))
+                        .sendToTarget();
+            }
             return true;
         } else if (URLUtil.isDataUrl(url)) {
-            DataLoader.requestUrl(url, loadListener);
+            // load data in the current thread to reduce the latency
+            new DataLoader(url, loadListener).load();
             return true;
         } else if (URLUtil.isAboutUrl(url)) {
             loadListener.data(mAboutBlank.getBytes(), mAboutBlank.length());
@@ -164,8 +206,8 @@ class FrameLoader {
         }
         return false;
     }
-    
-    private boolean handleHTTPLoad() {
+
+    boolean handleHTTPLoad() {
         if (mHeaders == null) {
             mHeaders = new HashMap<String, String>();
         }
@@ -221,7 +263,13 @@ class FrameLoader {
         CacheLoader cacheLoader =
                 new CacheLoader(mListener, result);
         mListener.setCacheLoader(cacheLoader);
-        cacheLoader.load();
+        if (mListener.isSynchronous()) {
+            cacheLoader.load();
+        } else {
+            // Load the cached file in a separate thread
+            WebViewWorker.getHandler().obtainMessage(
+                    WebViewWorker.MSG_ADD_STREAMLOADER, cacheLoader).sendToTarget();
+        }
     }
 
     /*
@@ -242,7 +290,7 @@ class FrameLoader {
             // to load POST content in a history navigation.
             case WebSettings.LOAD_CACHE_ONLY: {
                 CacheResult result = CacheManager.getCacheFile(mListener.url(),
-                        null);
+                        mListener.postIdentifier(), null);
                 if (result != null) {
                     startCacheLoad(result);
                 } else {
@@ -270,7 +318,7 @@ class FrameLoader {
                 // Get the cache file name for the current URL, passing null for
                 // the validation headers causes no validation to occur
                 CacheResult result = CacheManager.getCacheFile(mListener.url(),
-                        null);
+                        mListener.postIdentifier(), null);
                 if (result != null) {
                     startCacheLoad(result);
                     return true;

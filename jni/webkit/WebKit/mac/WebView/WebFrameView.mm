@@ -55,6 +55,7 @@
 #import "WebViewInternal.h"
 #import "WebViewPrivate.h"
 #import <Foundation/NSURLRequest.h>
+#import <WebCore/BackForwardList.h>
 #import <WebCore/DragController.h>
 #import <WebCore/EventHandler.h>
 #import <WebCore/Frame.h>
@@ -156,7 +157,7 @@ enum {
     NSString* MIMEType = [dataSource _responseMIMEType];
     if (!MIMEType)
         MIMEType = @"text/html";
-    Class viewClass = [[self class] _viewClassForMIMEType:MIMEType];
+    Class viewClass = [self _viewClassForMIMEType:MIMEType];
     NSView <WebDocumentView> *documentView;
     if (viewClass) {
         // If the dataSource's representation has already been created, and it is also the
@@ -199,9 +200,8 @@ enum {
 
 - (float)_verticalPageScrollDistance
 {
-    float overlap = [self _verticalKeyboardScrollDistance];
     float height = [[self _contentView] bounds].size.height;
-    return (height < overlap) ? height / 2 : height - overlap;
+    return max<float>(height * Scrollbar::minFractionToStepWhenPaging(), height - Scrollbar::maxOverlapBetweenPages());
 }
 
 static inline void addTypesFromClass(NSMutableDictionary *allTypes, Class objCClass, NSArray *supportTypes)
@@ -244,10 +244,15 @@ static inline void addTypesFromClass(NSMutableDictionary *allTypes, Class objCCl
     return [[[self _viewTypesAllowImageTypeOmission:YES] _webkit_objectForMIMEType:MIMEType] isSubclassOfClass:[WebHTMLView class]];
 }
 
-+ (Class)_viewClassForMIMEType:(NSString *)MIMEType
++ (Class)_viewClassForMIMEType:(NSString *)MIMEType allowingPlugins:(BOOL)allowPlugins
 {
     Class viewClass;
-    return [WebView _viewClass:&viewClass andRepresentationClass:nil forMIMEType:MIMEType] ? viewClass : nil;
+    return [WebView _viewClass:&viewClass andRepresentationClass:nil forMIMEType:MIMEType allowingPlugins:allowPlugins] ? viewClass : nil;
+}
+
+- (Class)_viewClassForMIMEType:(NSString *)MIMEType
+{
+    return [[self class] _viewClassForMIMEType:MIMEType allowingPlugins:[[[self _webView] preferences] arePlugInsEnabled]];
 }
 
 - (void)_install
@@ -274,7 +279,7 @@ static inline void addTypesFromClass(NSMutableDictionary *allTypes, Class objCCl
         // Now the render part owns the view, so we don't any more.
     }
 
-    view->initScrollbars();
+    view->updateCanHaveScrollbars();
 }
 
 @end
@@ -337,7 +342,7 @@ static inline void addTypesFromClass(NSMutableDictionary *allTypes, Class objCCl
     [scrollView setHasVerticalScroller:NO];
     [scrollView setHasHorizontalScroller:NO];
     [scrollView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-    [scrollView setLineScroll:40.0f];
+    [scrollView setLineScroll:Scrollbar::pixelsPerLineStep()];
     [self addSubview:scrollView];
 
     // Don't call our overridden version of setNextKeyView here; we need to make the standard NSView
@@ -607,9 +612,8 @@ static inline void addTypesFromClass(NSMutableDictionary *allTypes, Class objCCl
 
 - (float)_horizontalPageScrollDistance
 {
-    float overlap = [self _horizontalKeyboardScrollDistance];
     float width = [[self _contentView] bounds].size.width;
-    return (width < overlap) ? width / 2 : width - overlap;
+    return max<float>(width * Scrollbar::minFractionToStepWhenPaging(), width - Scrollbar::maxOverlapBetweenPages());
 }
 
 - (BOOL)_pageVertically:(BOOL)up

@@ -24,8 +24,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ClipboardGdk_h
-#define ClipboardGdk_h
+#ifndef ClipboardGtk_h
+#define ClipboardGtk_h
 
 #include "Clipboard.h"
 
@@ -60,6 +60,7 @@ namespace WebCore {
         virtual void declareAndWriteDragImage(Element*, const KURL&, const String&, Frame*);
         virtual void writeURL(const KURL&, const String&, Frame*);
         virtual void writeRange(Range*, Frame*);
+        virtual void writePlainText(const String&);
 
         virtual bool hasData();
 

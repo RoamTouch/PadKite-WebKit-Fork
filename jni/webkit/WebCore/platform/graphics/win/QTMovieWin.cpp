@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2008, 2009 Apple, Inc.  All rights reserved.
+ * Copyright (C) 2007, 2008, 2009, 2010 Apple, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,18 +24,15 @@
  */
 #include "config.h"
 
-#include <windows.h>
-
 #include "QTMovieWin.h"
 
 // Put Movies.h first so build failures here point clearly to QuickTime
 #include <Movies.h>
-#include <QuickTimeComponents.h>
-#include <GXMath.h>
-#include <QTML.h>
 
 #include "QTMovieWinTimer.h"
-
+#include <GXMath.h>
+#include <QTML.h>
+#include <QuickTimeComponents.h>
 #include <wtf/Assertions.h>
 #include <wtf/HashSet.h>
 #include <wtf/Noncopyable.h>
@@ -44,6 +41,13 @@
 using namespace std;
 
 static const long minimumQuickTimeVersion = 0x07300000; // 7.3
+
+static const long closedCaptionTrackType = 'clcp';
+static const long subTitleTrackType = 'sbtl';
+static const long mpeg4ObjectDescriptionTrackType = 'odsm';
+static const long mpeg4SceneDescriptionTrackType = 'sdsm';
+static const long closedCaptionDisplayPropertyID = 'disp';
+static LPCTSTR fullscreenQTMovieWinPointerProp = TEXT("fullscreenQTMovieWinPointer");
 
 // Resizing GWorlds is slow, give them a minimum size so size of small 
 // videos can be animated smoothly
@@ -62,10 +66,13 @@ static HashSet<QTMovieWinPrivate*>* gTaskList;
 static Vector<CFStringRef>* gSupportedTypes = 0;
 static SInt32 quickTimeVersion = 0;
 
+static QTMovieWin::SetTaskTimerDelayFunc gSetTaskTimerDelay = 0;
+static QTMovieWin::StopTaskTimerFunc gStopTaskTimer = 0;
+
 static void updateTaskTimer(int maxInterval = 1000)
 {
     if (!gTaskList->size()) {
-        stopSharedTimer();
+        gStopTaskTimer();
         return;    
     }
     
@@ -73,7 +80,7 @@ static void updateTaskTimer(int maxInterval = 1000)
     QTGetTimeUntilNextTask(&intervalInMS, 1000);
     if (intervalInMS > maxInterval)
         intervalInMS = maxInterval;
-    setSharedTimerFireDelay(static_cast<float>(intervalInMS) / 1000);
+    gSetTaskTimerDelay(static_cast<float>(intervalInMS) / 1000);
 }
 
 class QTMovieWinPrivate : public Noncopyable {
@@ -92,6 +99,7 @@ public:
     void deleteGWorld();
     void clearGWorld();
     void cacheMovieScale();
+    void updateMovieSize();
 
     void setSize(int, int);
 
@@ -121,6 +129,11 @@ public:
 #if !ASSERT_DISABLED
     bool m_scaleCached;
 #endif
+    WindowPtr m_fullscreenWindow;
+    GWorldPtr m_fullscreenOrigGWorld;
+    Rect m_fullscreenRect;
+    QTMovieWinFullscreenClient* m_fullscreenClient;
+    char* m_fullscreenRestoreState;
 };
 
 QTMovieWinPrivate::QTMovieWinPrivate()
@@ -150,11 +163,19 @@ QTMovieWinPrivate::QTMovieWinPrivate()
 #if !ASSERT_DISABLED
     , m_scaleCached(false)
 #endif
+    , m_fullscreenWindow(0)
+    , m_fullscreenOrigGWorld(0)
+    , m_fullscreenClient(0)
+    , m_fullscreenRestoreState(0)
 {
+    Rect rect = { 0, 0, 0, 0 };
+    m_fullscreenRect = rect;
 }
 
 QTMovieWinPrivate::~QTMovieWinPrivate()
 {
+    ASSERT(!m_fullscreenWindow);
+
     endTask();
     if (m_gWorld)
         deleteGWorld();
@@ -166,7 +187,7 @@ QTMovieWinPrivate::~QTMovieWinPrivate()
         CFRelease(m_currentURL);
 }
 
-static void taskTimerFired()
+void QTMovieWin::taskTimerFired()
 {
     // The hash content might change during task()
     Vector<QTMovieWinPrivate*> tasks;
@@ -206,8 +227,8 @@ void QTMovieWinPrivate::cacheMovieScale()
     GetMovieNaturalBoundsRect(m_movie, &naturalRect);
     GetMovieBox(m_movie, &initialRect);
 
-    int naturalWidth = naturalRect.right - naturalRect.left;
-    int naturalHeight = naturalRect.bottom - naturalRect.top;
+    float naturalWidth = naturalRect.right - naturalRect.left;
+    float naturalHeight = naturalRect.bottom - naturalRect.top;
 
     if (naturalWidth)
         m_widthScaleFactor = (initialRect.right - initialRect.left) / naturalWidth;
@@ -239,14 +260,16 @@ void QTMovieWinPrivate::task()
             // we only need to erase the movie gworld when the load state changes to loaded while it
             //  is visible as the gworld is destroyed/created when visibility changes
             bool shouldRestorePlaybackState = false;
-            if (loadState >= QTMovieLoadStateLoaded && m_loadState < QTMovieLoadStateLoaded) {
+            bool movieNewlyPlayable = loadState >= QTMovieLoadStateLoaded && m_loadState < QTMovieLoadStateLoaded;
+            m_loadState = loadState;
+            if (movieNewlyPlayable) {
+                cacheMovieScale();
+                updateMovieSize();
                 if (m_visible)
                     clearGWorld();
-                cacheMovieScale();
                 shouldRestorePlaybackState = true;
             }
 
-            m_loadState = loadState;
             if (!m_movieController && m_loadState >= QTMovieLoadStateLoaded)
                 createMovieController();
             m_client->movieLoadStateChanged(m_movieWin);
@@ -350,7 +373,7 @@ void QTMovieWinPrivate::createGWorld()
     bounds.left = 0; 
     bounds.right = m_gWorldWidth;
     bounds.bottom = m_gWorldHeight;
-    OSErr err = QTNewGWorld(&m_gWorld, k32BGRAPixelFormat, &bounds, NULL, NULL, NULL); 
+    OSErr err = QTNewGWorld(&m_gWorld, k32BGRAPixelFormat, &bounds, 0, 0, 0); 
     if (err) 
         return;
     GetMovieGWorld(m_movie, &m_savedGWorld, 0);
@@ -383,7 +406,6 @@ void QTMovieWinPrivate::clearGWorld()
     MacSetPort(savePort);
 }
 
-
 void QTMovieWinPrivate::setSize(int width, int height)
 {
     if (m_width == width && m_height == height)
@@ -401,16 +423,25 @@ void QTMovieWinPrivate::setSize(int width, int height)
     ASSERT(m_scaleCached);
 #endif
 
+    updateMovieSize();
+}
+
+void QTMovieWinPrivate::updateMovieSize()
+{
+    if (!m_movie || m_loadState < QTMovieLoadStateLoaded)
+        return;
+
     Rect bounds; 
     bounds.top = 0;
     bounds.left = 0; 
-    bounds.right = width;
-    bounds.bottom = height;
+    bounds.right = m_width;
+    bounds.bottom = m_height;
     if (m_movieController)
         MCSetControllerBoundsRect(m_movieController, &bounds);
     SetMovieBox(m_movie, &bounds);
     updateGWorld();
 }
+
 
 void QTMovieWinPrivate::deleteGWorld()
 {
@@ -588,6 +619,24 @@ void QTMovieWin::setVisible(bool b)
     m_private->updateGWorld();
 }
 
+void QTMovieWin::getCurrentFrameInfo(void*& buffer, unsigned& bitsPerPixel, unsigned& rowBytes, unsigned& width, unsigned& height)
+{
+    if (!m_private->m_gWorld) {
+        buffer = 0;
+        bitsPerPixel = 0;
+        rowBytes = 0;
+        width = 0;
+        height = 0;
+        return;
+    }
+    PixMapHandle offscreenPixMap = GetGWorldPixMap(m_private->m_gWorld);
+    buffer = (*offscreenPixMap)->baseAddr;
+    bitsPerPixel = (*offscreenPixMap)->pixelSize;
+    rowBytes = (*offscreenPixMap)->rowBytes & 0x3FFF;
+    width = m_private->m_width;
+    height = m_private->m_height;
+}
+
 void QTMovieWin::paint(HDC hdc, int x, int y)
 {
     if (!m_private->m_gWorld)
@@ -720,7 +769,7 @@ void QTMovieWin::load(CFURLRef url, bool preservesPitch)
     moviePropCount++; 
 
     ASSERT(moviePropCount <= sizeof(movieProps)/sizeof(movieProps[0]));
-    m_private->m_loadError = NewMovieFromProperties(moviePropCount, movieProps, 0, NULL, &m_private->m_movie);
+    m_private->m_loadError = NewMovieFromProperties(moviePropCount, movieProps, 0, 0, &m_private->m_movie);
 
 end:
     m_private->startTask();
@@ -754,10 +803,10 @@ void QTMovieWin::disableUnsupportedTracks(unsigned& enabledTrackCount, unsigned&
         allowedTrackTypes->add(SoundMediaType);
         allowedTrackTypes->add(TextMediaType);
         allowedTrackTypes->add(BaseMediaType);
-        allowedTrackTypes->add('clcp'); // Closed caption
-        allowedTrackTypes->add('sbtl'); // Subtitle
-        allowedTrackTypes->add('odsm'); // MPEG-4 object descriptor stream
-        allowedTrackTypes->add('sdsm'); // MPEG-4 scene description stream
+        allowedTrackTypes->add(closedCaptionTrackType);
+        allowedTrackTypes->add(subTitleTrackType);
+        allowedTrackTypes->add(mpeg4ObjectDescriptionTrackType);
+        allowedTrackTypes->add(mpeg4SceneDescriptionTrackType);
         allowedTrackTypes->add(TimeCodeMediaType);
         allowedTrackTypes->add(TimeCode64MediaType);
     }
@@ -867,6 +916,34 @@ bool QTMovieWin::hasVideo() const
     return (GetMovieIndTrackType(m_private->m_movie, 1, VisualMediaCharacteristic, movieTrackCharacteristic | movieTrackEnabledOnly));
 }
 
+bool QTMovieWin::hasAudio() const
+{
+    if (!m_private->m_movie)
+        return false;
+    return (GetMovieIndTrackType(m_private->m_movie, 1, AudioMediaCharacteristic, movieTrackCharacteristic | movieTrackEnabledOnly));
+}
+
+
+bool QTMovieWin::hasClosedCaptions() const 
+{
+    if (!m_private->m_movie)
+        return false;
+    return GetMovieIndTrackType(m_private->m_movie, 1, closedCaptionTrackType, movieTrackMediaType);
+}
+
+void QTMovieWin::setClosedCaptionsVisible(bool visible)
+{
+    if (!m_private->m_movie)
+        return;
+
+    Track ccTrack = GetMovieIndTrackType(m_private->m_movie, 1, closedCaptionTrackType, movieTrackMediaType);
+    if (!ccTrack)
+        return;
+
+    Boolean doDisplay = visible;
+    QTSetTrackProperty(ccTrack, closedCaptionTrackType, closedCaptionDisplayPropertyID, sizeof(doDisplay), &doDisplay);
+}
+
 pascal OSErr movieDrawingCompleteProc(Movie movie, long data)
 {
     UppParam param;
@@ -916,7 +993,7 @@ static void initializeSupportedTypes()
                 continue;
             if (!(infoCD.componentFlags & hasMovieImportMIMEList))
                 continue;
-            QTAtomContainer mimeList = NULL;
+            QTAtomContainer mimeList = 0;
             err = MovieImportGetMIMETypeList((ComponentInstance)comp, &mimeList);
             if (err || !mimeList)
                 continue;
@@ -925,7 +1002,7 @@ static void initializeSupportedTypes()
             QTLockContainer(mimeList);
             int typeCount = QTCountChildrenOfType(mimeList, kParentAtomIsContainer, kMimeInfoMimeTypeTag);
             for (int typeIndex = 1; typeIndex <= typeCount; typeIndex++) {
-                QTAtom mimeTag = QTFindChildByIndex(mimeList, 0, kMimeInfoMimeTypeTag, typeIndex, NULL);
+                QTAtom mimeTag = QTFindChildByIndex(mimeList, 0, kMimeInfoMimeTypeTag, typeIndex, 0);
                 if (!mimeTag)
                     continue;
                 char* atomData;
@@ -943,7 +1020,7 @@ static void initializeSupportedTypes()
                 if (strncmp(typeBuffer, "audio/", 6) && strncmp(typeBuffer, "video/", 6))
                     continue;
 
-                CFStringRef cfMimeType = CFStringCreateWithCString(NULL, typeBuffer, kCFStringEncodingUTF8);
+                CFStringRef cfMimeType = CFStringCreateWithCString(0, typeBuffer, kCFStringEncodingUTF8);
                 if (!cfMimeType)
                     continue;
 
@@ -990,6 +1067,12 @@ void QTMovieWin::getSupportedType(unsigned index, const UChar*& str, unsigned& l
     
 }
 
+void QTMovieWin::setTaskTimerFuncs(SetTaskTimerDelayFunc setTaskTimerDelay, StopTaskTimerFunc stopTaskTimer)
+{
+    gSetTaskTimerDelay = setTaskTimerDelay;
+    gStopTaskTimer = stopTaskTimer;
+}
+
 bool QTMovieWin::initializeQuickTime() 
 {
     static bool initialized = false;
@@ -997,7 +1080,7 @@ bool QTMovieWin::initializeQuickTime()
     if (!initialized) {
         initialized = true;
         // Initialize and check QuickTime version
-        OSErr result = InitializeQTML(0);
+        OSErr result = InitializeQTML(kInitializeQTMLEnableDoubleBufferedSurface);
         if (result == noErr)
             result = Gestalt(gestaltQuickTime, &quickTimeVersion);
         if (result != noErr) {
@@ -1009,23 +1092,86 @@ bool QTMovieWin::initializeQuickTime()
             return false;
         }
         EnterMovies();
-        setSharedTimerFiredFunction(taskTimerFired);
         gMovieDrawingCompleteUPP = NewMovieDrawingCompleteUPP(movieDrawingCompleteProc);
         initializationSucceeded = true;
     }
     return initializationSucceeded;
 }
 
+LRESULT QTMovieWin::fullscreenWndProc(HWND wnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    QTMovieWin* movie = static_cast<QTMovieWin*>(GetProp(wnd, fullscreenQTMovieWinPointerProp));
+
+    if (message == WM_DESTROY)
+        RemoveProp(wnd, fullscreenQTMovieWinPointerProp);
+
+    if (!movie)
+        return DefWindowProc(wnd, message, wParam, lParam);
+
+    return movie->m_private->m_fullscreenClient->fullscreenClientWndProc(wnd, message, wParam, lParam);
+}
+
+HWND QTMovieWin::enterFullscreen(QTMovieWinFullscreenClient* client)
+{
+    m_private->m_fullscreenClient = client;
+    
+    BeginFullScreen(&m_private->m_fullscreenRestoreState, 0, 0, 0, &m_private->m_fullscreenWindow, 0, fullScreenAllowEvents); 
+    QTMLSetWindowWndProc(m_private->m_fullscreenWindow, fullscreenWndProc);
+    CreatePortAssociation(GetPortNativeWindow(m_private->m_fullscreenWindow), 0, 0);
+
+    GetMovieBox(m_private->m_movie, &m_private->m_fullscreenRect);
+    GetMovieGWorld(m_private->m_movie, &m_private->m_fullscreenOrigGWorld, 0);
+    SetMovieGWorld(m_private->m_movie, reinterpret_cast<CGrafPtr>(m_private->m_fullscreenWindow), GetGWorldDevice(reinterpret_cast<CGrafPtr>(m_private->m_fullscreenWindow)));
+
+    // Set the size of the box to preserve aspect ratio
+    Rect rect = m_private->m_fullscreenWindow->portRect;
+
+    float movieRatio = static_cast<float>(m_private->m_width) / m_private->m_height;
+    int windowWidth =  rect.right - rect.left;
+    int windowHeight = rect.bottom - rect.top;
+    float windowRatio = static_cast<float>(windowWidth) / windowHeight;
+    int actualWidth = (windowRatio > movieRatio) ? (windowHeight * movieRatio) : windowWidth;
+    int actualHeight = (windowRatio < movieRatio) ? (windowWidth / movieRatio) : windowHeight;
+    int offsetX = (windowWidth - actualWidth) / 2;
+    int offsetY = (windowHeight - actualHeight) / 2;
+
+    rect.left = offsetX;
+    rect.right = offsetX + actualWidth;
+    rect.top = offsetY;
+    rect.bottom = offsetY + actualHeight;
+
+    SetMovieBox(m_private->m_movie, &rect);
+    ShowHideTaskBar(true);
+
+    // Set the 'this' pointer on the HWND
+    HWND wnd = static_cast<HWND>(GetPortNativeWindow(m_private->m_fullscreenWindow));
+    SetProp(wnd, fullscreenQTMovieWinPointerProp, static_cast<HANDLE>(this));
+
+    return wnd;
+}
+
+void QTMovieWin::exitFullscreen()
+{
+    if (!m_private->m_fullscreenWindow)
+        return;
+
+    HWND wnd = static_cast<HWND>(GetPortNativeWindow(m_private->m_fullscreenWindow));
+    DestroyPortAssociation(reinterpret_cast<CGrafPtr>(m_private->m_fullscreenWindow));
+    SetMovieGWorld(m_private->m_movie, m_private->m_fullscreenOrigGWorld, 0);
+    EndFullScreen(m_private->m_fullscreenRestoreState, 0L);
+    SetMovieBox(m_private->m_movie, &m_private->m_fullscreenRect);
+    m_private->m_fullscreenWindow = 0;
+}
+
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
     switch (fdwReason) {
-        case DLL_PROCESS_ATTACH:
-            setSharedTimerInstanceHandle(hinstDLL);
-            return TRUE;
-        case DLL_PROCESS_DETACH:
-        case DLL_THREAD_ATTACH:
-        case DLL_THREAD_DETACH:
-            return FALSE;
+    case DLL_PROCESS_ATTACH:
+        return TRUE;
+    case DLL_PROCESS_DETACH:
+    case DLL_THREAD_ATTACH:
+    case DLL_THREAD_DETACH:
+        return FALSE;
     }
     ASSERT_NOT_REACHED();
     return FALSE;

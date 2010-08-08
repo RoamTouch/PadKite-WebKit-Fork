@@ -28,6 +28,7 @@
 
 #import "WebCoreStatistics.h"
 
+#import "DOMElementInternal.h"
 #import "WebCache.h"
 #import "WebFrameInternal.h"
 #import <runtime/JSLock.h>
@@ -39,6 +40,7 @@
 #import <WebCore/IconDatabase.h>
 #import <WebCore/JSDOMWindow.h>
 #import <WebCore/PageCache.h>
+#import <WebCore/PrintContext.h>
 #import <WebCore/RenderTreeAsText.h>
 #import <WebCore/RenderView.h>
 
@@ -83,6 +85,21 @@ using namespace WebCore;
     NSCountedSet *result = [NSCountedSet set];
 
     OwnPtr<HashCountedSet<const char*> > counts(JSDOMWindow::commonJSGlobalData()->heap.protectedObjectTypeCounts());
+    HashCountedSet<const char*>::iterator end = counts->end();
+    for (HashCountedSet<const char*>::iterator it = counts->begin(); it != end; ++it)
+        for (unsigned i = 0; i < it->second; ++i)
+            [result addObject:[NSString stringWithUTF8String:it->first]];
+    
+    return result;
+}
+
++ (NSCountedSet *)javaScriptObjectTypeCounts
+{
+    JSLock lock(SilenceAssertionsOnly);
+    
+    NSCountedSet *result = [NSCountedSet set];
+
+    OwnPtr<HashCountedSet<const char*> > counts(JSDOMWindow::commonJSGlobalData()->heap.objectTypeCounts());
     HashCountedSet<const char*>::iterator end = counts->end();
     for (HashCountedSet<const char*>::iterator it = counts->begin(); it != end; ++it)
         for (unsigned i = 0; i < it->second; ++i)
@@ -241,7 +258,22 @@ using namespace WebCore;
 
 - (NSString *)renderTreeAsExternalRepresentation
 {
-    return externalRepresentation(_private->coreFrame->contentRenderer());
+    return externalRepresentation(_private->coreFrame);
+}
+
+- (NSString *)counterValueForElement:(DOMElement*)element
+{
+    return counterValueForElement(core(element));
+}
+
+- (int)pageNumberForElement:(DOMElement*)element:(float)pageWidthInPixels:(float)pageHeightInPixels
+{
+    return PrintContext::pageNumberForElement(core(element), FloatSize(pageWidthInPixels, pageHeightInPixels));
+}
+
+- (int)numberOfPages:(float)pageWidthInPixels:(float)pageHeightInPixels
+{
+    return PrintContext::numberOfPages(_private->coreFrame, FloatSize(pageWidthInPixels, pageHeightInPixels));
 }
 
 @end

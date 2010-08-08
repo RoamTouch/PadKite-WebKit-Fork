@@ -27,7 +27,9 @@
  */
 
 #import "WebInspector.h"
+
 #import "WebFrameInternal.h"
+#import "WebInspectorPrivate.h"
 
 #include <WebCore/Document.h>
 #include <WebCore/Frame.h>
@@ -146,6 +148,25 @@ using namespace WebCore;
         page->inspectorController()->disableProfiler();
 }
 
+- (BOOL)isTimelineProfilingEnabled
+{
+    if (Page* page = core(_webView))
+        return page->inspectorController()->timelineAgent() ? YES : NO;
+    return NO;
+}
+
+- (void)setTimelineProfilingEnabled:(BOOL)enabled
+{
+    Page* page = core(_webView);
+    if (!page)
+        return;
+
+    if (enabled)
+        page->inspectorController()->startTimelineProfiler();
+    else
+        page->inspectorController()->stopTimelineProfiler();
+}
+
 - (void)close:(id)sender 
 {
     if (Page* page = core(_webView))
@@ -162,6 +183,12 @@ using namespace WebCore;
 {
     if (Page* page = core(_webView))
         page->inspectorController()->detachWindow();
+}
+
+- (void)evaluateInFrontend:(id)sender callId:(long)callId script:(NSString *)script
+{
+    if (Page* page = core(_webView))
+        page->inspectorController()->evaluateForTestInFrontend(callId, script);
 }
 @end
 

@@ -28,18 +28,44 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-WebInspector.ObjectProxy = function(objectId, path, protoDepth)
+WebInspector.ObjectProxy = function(injectedScriptId, objectId, path, protoDepth, description, hasChildren)
 {
     this.objectId = objectId;
+    this.injectedScriptId = injectedScriptId;
     this.path = path || [];
     this.protoDepth = protoDepth || 0;
+    this.description = description;
+    this.hasChildren = hasChildren;
 }
 
-WebInspector.ObjectPropertyProxy = function(name, object)
+WebInspector.ObjectProxy.wrapPrimitiveValue = function(value)
+{
+    var proxy = new WebInspector.ObjectProxy();
+    proxy.type = typeof value;
+    proxy.description = value;
+    return proxy;
+}
+
+WebInspector.ObjectProxy.getPropertiesAsync = function(objectProxy, propertiesToQueryFor, callback)
+{
+    function createPropertiesMapThenCallback(propertiesPayload)
+    {
+        if (!propertiesPayload) {
+            callback();
+            return;
+        }
+
+        var result = [];
+        for (var i = 0; i < propertiesPayload.length; ++i)
+            if (propertiesToQueryFor.indexOf(propertiesPayload[i].name) !== -1)
+                result[propertiesPayload[i].name] = propertiesPayload[i].value.description;
+        callback(result);
+    };
+    InjectedScriptAccess.get(objectProxy.injectedScriptId).getProperties(objectProxy, true, false, createPropertiesMapThenCallback);
+}
+
+WebInspector.ObjectPropertyProxy = function(name, value)
 {
     this.name = name;
-    this.type = "object";
-    this.hasChildren = true;
-    this.textContent = Object.describe(object, true);
-    this.childObjectProxy = new WebInspector.ObjectProxy(object);
+    this.value = value;
 }

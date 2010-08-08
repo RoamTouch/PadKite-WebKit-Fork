@@ -1,5 +1,5 @@
 /*
- * Copyright 2007, The Android Open Source Project
+ * Copyright 2009, The Android Open Source Project
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -22,29 +22,26 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#define LOG_TAG "WebCore"
 
 #include "config.h"
+
 #include "ResourceHandle.h"
 
+#include "CString.h"
 #include "DocLoader.h"
+#include "DocumentLoader.h"
 #include "Frame.h"
 #include "FrameLoader.h"
-#include "FrameLoaderClientAndroid.h"
+#include "MainResourceLoader.h"
 #include "NotImplemented.h"
 #include "ResourceHandleClient.h"
 #include "ResourceHandleInternal.h"
-#include "WebCoreFrameBridge.h"
-#include "WebCoreResourceLoader.h"
-#include "CString.h"
-
-using namespace android;
+#include "ResourceLoaderAndroid.h"
 
 namespace WebCore {
 
 ResourceHandleInternal::~ResourceHandleInternal()
 {
-    Release(m_loader);
 }
 
 ResourceHandle::~ResourceHandle()
@@ -53,16 +50,19 @@ ResourceHandle::~ResourceHandle()
 
 bool ResourceHandle::start(Frame* frame)
 {
-    WebCoreResourceLoader* loader;
-    FrameLoaderClientAndroid* client = static_cast<FrameLoaderClientAndroid*> (frame->loader()->client());
-    loader = client->webFrame()->startLoadingResource(this, d->m_request, false);
+    DocumentLoader* docLoader = frame->loader()->activeDocumentLoader();
+    MainResourceLoader* mainLoader = docLoader->mainResourceLoader();
+    bool isMainResource =
+            static_cast<void*>(mainLoader) == static_cast<void*>(client());
+
+    PassRefPtr<ResourceLoaderAndroid> loader = ResourceLoaderAndroid::start(this, d->m_request, frame->loader()->client(), isMainResource, false);
 
     if (loader) {
-        Release(d->m_loader);
         d->m_loader = loader;
+        return true;
     }
 
-    return loader != NULL;
+    return false;
 }
 
 void ResourceHandle::cancel()
@@ -73,32 +73,42 @@ void ResourceHandle::cancel()
 
 PassRefPtr<SharedBuffer> ResourceHandle::bufferedData()
 {
+    notImplemented();
     return 0;
 }
 
 bool ResourceHandle::supportsBufferedData()
 {
     // We don't support buffering data on the native side.
+    notImplemented();
     return false;
 }
+
+#if PLATFORM(ANDROID)
+// TODO: this needs upstreaming.
+void ResourceHandle::pauseLoad(bool pause)
+{
+    if (d->m_loader)
+        d->m_loader->pauseLoad(pause);
+}
+#endif
 
 void ResourceHandle::setDefersLoading(bool defers)
 {
     notImplemented();
 }
 
-/*
-* This static method is called to check to see if a POST response is in
-* the cache. The JNI call through to the HTTP cache stored on the Java
-* side may be slow, but is only used during a navigation to
-* a POST response.
-*/
+// This static method is called to check to see if a POST response is in
+// the cache. The JNI call through to the HTTP cache stored on the Java
+// side may be slow, but is only used during a navigation to
+// a POST response.
 bool ResourceHandle::willLoadFromCache(ResourceRequest& request, Frame*)
 {
     // set the cache policy correctly, copied from
     // network/mac/ResourceHandleMac.mm
     request.setCachePolicy(ReturnCacheDataDontLoad);
-    return WebCoreResourceLoader::willLoadFromCache(request.url());
+    FormData* formData = request.httpBody();
+    return ResourceLoaderAndroid::willLoadFromCache(request.url(), formData ? formData->identifier() : 0);
 }
 
 bool ResourceHandle::loadsBlocked() 
@@ -111,29 +121,33 @@ bool ResourceHandle::loadsBlocked()
 // Class to handle synchronized loading of resources.
 class SyncLoader : public ResourceHandleClient {
 public:
-    SyncLoader(ResourceError& error, ResourceResponse& response, WTF::Vector<char>& data) {
+    SyncLoader(ResourceError& error, ResourceResponse& response, WTF::Vector<char>& data)
+    {
         m_error = &error;
         m_response = &response;
         m_data = &data;
     }
     ~SyncLoader() {}
 
-    virtual void didReceiveResponse(ResourceHandle*, const ResourceResponse& response) {
+    virtual void didReceiveResponse(ResourceHandle*, const ResourceResponse& response)
+    {
         *m_response = response;
     }
 
-    virtual void didReceiveData(ResourceHandle*, const char* data, int len, int lengthReceived) {
+    virtual void didReceiveData(ResourceHandle*, const char* data, int len, int lengthReceived)
+    {
         m_data->append(data, len);
     }
 
-    virtual void didFail(ResourceHandle*, const ResourceError& error) {
+    virtual void didFail(ResourceHandle*, const ResourceError& error)
+    {
         *m_error = error;
     }
 
 private:
-    ResourceError*    m_error;
+    ResourceError* m_error;
     ResourceResponse* m_response;
-    WTF::Vector<char>*     m_data;
+    WTF::Vector<char>* m_data;
 };
 
 void ResourceHandle::loadResourceSynchronously(const ResourceRequest& request,
@@ -144,16 +158,11 @@ void ResourceHandle::loadResourceSynchronously(const ResourceRequest& request,
     SyncLoader s(error, response, data);
     ResourceHandle h(request, &s, false, false, false);
     // This blocks until the load is finished.
-    FrameLoaderClientAndroid* client = static_cast<FrameLoaderClientAndroid*> (frame->loader()->client());
-    client->webFrame()->startLoadingResource(&h, request, true);
-}
-
-unsigned initializeMaximumHTTPConnectionCountPerHost()
-{
-    // This is used by the loader to control the number of parallel load
-    // requests. Our java framework has 4 threads that can each pipeline up to
-    // 5 requests. Use 20 as a maximum number.
-    return 20;
+    // Use the request owned by the ResourceHandle. This has had the username
+    // and password (if present) stripped from the URL in
+    // ResourceHandleInternal::ResourceHandleInternal(). This matches the
+    // behaviour in the asynchronous case.
+    ResourceLoaderAndroid::start(&h, h.getInternal()->m_request, frame->loader()->client(), false, true);
 }
 
 } // namespace WebCore

@@ -31,29 +31,35 @@
 #ifndef V8Utilities_h
 #define V8Utilities_h
 
-#if ENABLE(V8_LOCKERS)
-// TODO(benm): Need to re-add in locking for V8. We lost some of the lock points during the merge. Define it to void here so we don't lock some of the time.
-#define LOCK_V8 ((void) 0)
-#else
-#define LOCK_V8 ((void) 0)
-#endif
-
 #include <v8.h>
 
 namespace WebCore {
 
+    class EventListener;
     class Frame;
     class KURL;
+    class ScriptExecutionContext;
+    class ScriptState;
     class String;
 
     // Use an array to hold dependents. It works like a ref-counted scheme. A value can be added more than once to the DOM object.
-    void createHiddenDependency(v8::Local<v8::Object>, v8::Local<v8::Value>, int cacheIndex);
-    void removeHiddenDependency(v8::Local<v8::Object>, v8::Local<v8::Value>, int cacheIndex);
-
+    void createHiddenDependency(v8::Handle<v8::Object>, v8::Local<v8::Value>, int cacheIndex);
+    void removeHiddenDependency(v8::Handle<v8::Object>, v8::Local<v8::Value>, int cacheIndex);
+    
+    // Combo create/remove, for generated event-handler-setter bindings:
+    void transferHiddenDependency(v8::Handle<v8::Object>, EventListener* oldValue, v8::Local<v8::Value> newValue, int cacheIndex);
+    
     bool processingUserGesture();
     bool shouldAllowNavigation(Frame*);
     KURL completeURL(const String& relativeURL);
     void navigateIfAllowed(Frame*, const KURL&, bool lockHistory, bool lockBackForwardList);
+
+    ScriptExecutionContext* getScriptExecutionContext(ScriptState*);
+    inline ScriptExecutionContext* getScriptExecutionContext() {
+        return getScriptExecutionContext(0);
+    }
+
+    void reportException(ScriptState*, v8::TryCatch&);
 
     class AllowAllocation {
     public:

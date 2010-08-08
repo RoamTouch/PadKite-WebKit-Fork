@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -48,6 +48,7 @@ public:
 
     virtual IntSize naturalSize() const;
 
+    virtual bool hasAudio() const;
     virtual bool hasVideo() const;
 
     virtual void setVisible(bool);
@@ -69,7 +70,7 @@ public:
     virtual MediaPlayer::ReadyState readyState() const;
 
     virtual float maxTimeSeekable() const;
-    virtual float maxTimeBuffered() const;
+    virtual PassRefPtr<TimeRanges> buffered() const;
 
     virtual int dataRate() const;
 
@@ -88,6 +89,7 @@ public:
     void onPrepared(int duration, int width, int height);
     void onEnded();
     void onPosterFetched(SkBitmap*);
+    void onTimeupdate(int position);
 private:
     // Android-specific methods and fields.
     static MediaPlayerPrivateInterface* create(MediaPlayer* player);
@@ -106,6 +108,7 @@ private:
     float m_currentTime;
 
     bool m_paused;
+    bool m_hasVideo;
     MediaPlayer::ReadyState m_readyState;
     MediaPlayer::NetworkState m_networkState;
 

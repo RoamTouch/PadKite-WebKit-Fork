@@ -87,9 +87,9 @@ IntRect Chrome::windowToScreen(const IntRect& rect) const
     return m_client->windowToScreen(rect);
 }
 
-PlatformWidget Chrome::platformWindow() const
+PlatformPageClient Chrome::platformPageClient() const
 {
-    return m_client->platformWindow();
+    return m_client->platformPageClient();
 }
 
 void Chrome::contentsSizeChanged(Frame* frame, const IntSize& size) const
@@ -100,6 +100,11 @@ void Chrome::contentsSizeChanged(Frame* frame, const IntSize& size) const
 void Chrome::scrollRectIntoView(const IntRect& rect, const ScrollView* scrollView) const
 {
     m_client->scrollRectIntoView(rect, scrollView);
+}
+
+void Chrome::scrollbarsModeDidChange() const
+{
+    m_client->scrollbarsModeDidChange();
 }
 
 void Chrome::setWindowRect(const FloatRect& rect) const
@@ -122,10 +127,17 @@ float Chrome::scaleFactor()
     return m_client->scaleFactor();
 }
 
+#ifdef ANDROID_USER_GESTURE
+void Chrome::focus(bool userGesture) const
+{
+    m_client->focus(userGesture);
+}
+#else
 void Chrome::focus() const
 {
     m_client->focus();
 }
+#endif
 
 void Chrome::unfocus() const
 {
@@ -140,6 +152,11 @@ bool Chrome::canTakeFocus(FocusDirection direction) const
 void Chrome::takeFocus(FocusDirection direction) const
 {
     m_client->takeFocus(direction);
+}
+
+void Chrome::focusedNodeChanged(Node* node) const
+{
+    m_client->focusedNodeChanged(node);
 }
 
 Page* Chrome::createWindow(Frame* frame, const FrameLoadRequest& request, const WindowFeatures& features) const
@@ -297,6 +314,16 @@ bool Chrome::shouldInterruptJavaScript()
     return m_client->shouldInterruptJavaScript();
 }
 
+void Chrome::registerProtocolHandler(const String& scheme, const String& baseURL, const String& url, const String& title)
+{
+    m_client->registerProtocolHandler(scheme, baseURL, url, title);
+}
+
+void Chrome::registerContentHandler(const String& mimeType, const String& baseURL, const String& url, const String& title)
+{
+    m_client->registerContentHandler(mimeType,  baseURL, url,  title);
+}
+
 IntRect Chrome::windowResizerRect() const
 {
     return m_client->windowResizerRect();
@@ -311,8 +338,10 @@ void Chrome::mouseDidMoveOverElement(const HitTestResult& result, unsigned modif
     }
     m_client->mouseDidMoveOverElement(result, modifierFlags);
 
+#if ENABLE(INSPECTOR)
     if (InspectorController* inspector = m_page->inspectorController())
         inspector->mouseDidMoveOverElement(result, modifierFlags);
+#endif
 }
 
 void Chrome::setToolTip(const HitTestResult& result)
@@ -385,12 +414,12 @@ void Chrome::print(Frame* frame)
 
 void Chrome::requestGeolocationPermissionForFrame(Frame* frame, Geolocation* geolocation)
 {
-    // Defer loads in case the client method runs a new event loop that would
-    // otherwise cause the load to continue while we're in the middle of executing JavaScript.
-    PageGroupLoadDeferrer deferrer(m_page, true);
-
-    ASSERT(frame);
     m_client->requestGeolocationPermissionForFrame(frame, geolocation);
+}
+
+void Chrome::cancelGeolocationPermissionRequestForFrame(Frame* frame)
+{
+    m_client->cancelGeolocationPermissionRequestForFrame(frame);
 }
 
 void Chrome::runOpenPanel(Frame* frame, PassRefPtr<FileChooser> fileChooser)
@@ -402,6 +431,13 @@ bool Chrome::setCursor(PlatformCursorHandle cursor)
 {
     return m_client->setCursor(cursor);
 }
+
+#if ENABLE(NOTIFICATIONS)
+NotificationPresenter* Chrome::notificationPresenter() const
+{
+    return m_client->notificationPresenter();
+}
+#endif
 
 // --------
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2008 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2004, 2008, 2009 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,9 +28,10 @@
 
 #import "FoundationExtras.h"
 #import "WebScriptObject.h"
-#include <runtime/Error.h>
-#include <runtime/JSLock.h>
-#include <wtf/Assertions.h>
+#import <objc/objc-auto.h>
+#import <runtime/Error.h>
+#import <runtime/JSLock.h>
+#import <wtf/Assertions.h>
 
 #ifdef NDEBUG
 #define OBJC_LOG(formatAndArgs...) ((void)0)
@@ -44,8 +45,21 @@
 using namespace JSC::Bindings;
 using namespace JSC;
 
-static NSString* s_exception;
+static NSString *s_exception;
 static JSGlobalObject* s_exceptionEnvironment; // No need to protect this value, since we just use it for a pointer comparison.
+static NSMapTable *s_instanceWrapperCache;
+
+static NSMapTable *createInstanceWrapperCache()
+{
+#ifdef BUILDING_ON_TIGER
+    return NSCreateMapTable(NSNonRetainedObjectMapKeyCallBacks, NSNonOwnedPointerMapValueCallBacks, 0);
+#else
+    // NSMapTable with zeroing weak pointers is the recommended way to build caches like this under garbage collection.
+    NSPointerFunctionsOptions keyOptions = NSPointerFunctionsZeroingWeakMemory | NSPointerFunctionsObjectPersonality;
+    NSPointerFunctionsOptions valueOptions = NSPointerFunctionsOpaqueMemory | NSPointerFunctionsOpaquePersonality;
+    return [[NSMapTable alloc] initWithKeyOptions:keyOptions valueOptions:valueOptions capacity:0];
+#endif
+}
 
 void ObjcInstance::setGlobalException(NSString* exception, JSGlobalObject* exceptionEnvironment)
 {
@@ -74,7 +88,7 @@ void ObjcInstance::moveGlobalExceptionToExecState(ExecState* exec)
     s_exceptionEnvironment = 0;
 }
 
-ObjcInstance::ObjcInstance(ObjectStructPtr instance, PassRefPtr<RootObject> rootObject) 
+ObjcInstance::ObjcInstance(id instance, PassRefPtr<RootObject> rootObject) 
     : Instance(rootObject)
     , _instance(instance)
     , _class(0)
@@ -83,20 +97,49 @@ ObjcInstance::ObjcInstance(ObjectStructPtr instance, PassRefPtr<RootObject> root
 {
 }
 
+PassRefPtr<ObjcInstance> ObjcInstance::create(id instance, PassRefPtr<RootObject> rootObject)
+{
+    if (!s_instanceWrapperCache)
+        s_instanceWrapperCache = createInstanceWrapperCache();
+    if (void* existingWrapper = NSMapGet(s_instanceWrapperCache, instance))
+        return static_cast<ObjcInstance*>(existingWrapper);
+    RefPtr<ObjcInstance> wrapper = adoptRef(new ObjcInstance(instance, rootObject));
+    NSMapInsert(s_instanceWrapperCache, instance, wrapper.get());
+    return wrapper.release();
+}
+
 ObjcInstance::~ObjcInstance() 
 {
-    // -finalizeForWebScript and -dealloc/-finalize may require autorelease pools.
+    // Both -finalizeForWebScript and -dealloc/-finalize of _instance may require autorelease pools.
     NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+
+    ASSERT(s_instanceWrapperCache);
+    ASSERT(_instance);
+    NSMapRemove(s_instanceWrapperCache, _instance.get());
+
     if ([_instance.get() respondsToSelector:@selector(finalizeForWebScript)])
         [_instance.get() performSelector:@selector(finalizeForWebScript)];
     _instance = 0;
+
     [pool drain];
+}
+
+static NSAutoreleasePool* allocateAutoReleasePool()
+{
+#if defined(OBJC_API_VERSION) && OBJC_API_VERSION >= 2
+    // If GC is enabled an autorelease pool is unnecessary, and the
+    // pool cannot be protected from GC so may be collected leading
+    // to a crash when we try to drain the release pool.
+    if (objc_collectingEnabled())
+        return nil;
+#endif
+    return [[NSAutoreleasePool alloc] init];
 }
 
 void ObjcInstance::virtualBegin()
 {
     if (!_pool)
-        _pool = [[NSAutoreleasePool alloc] init];
+        _pool = allocateAutoReleasePool();
     _beginCount++;
 }
 
@@ -234,7 +277,7 @@ JSValue ObjcInstance::invokeMethod(ExecState* exec, const MethodList &methodList
 
     if (*type != 'v') {
         [invocation getReturnValue:buffer];
-        result = convertObjcValueToValue(exec, buffer, objcValueType, _rootObject.get());
+        result = convertObjcValueToValue(exec, buffer, objcValueType, m_rootObject.get());
     }
 } @catch(NSException* localException) {
 }
@@ -286,7 +329,7 @@ JSValue ObjcInstance::invokeDefaultMethod(ExecState* exec, const ArgList &args)
     // OK with 32 here.
     char buffer[32];
     [invocation getReturnValue:buffer];
-    result = convertObjcValueToValue(exec, buffer, objcValueType, _rootObject.get());
+    result = convertObjcValueToValue(exec, buffer, objcValueType, m_rootObject.get());
 } @catch(NSException* localException) {
 }
     moveGlobalExceptionToExecState(exec);
@@ -305,7 +348,7 @@ bool ObjcInstance::setValueOfUndefinedField(ExecState* exec, const Identifier& p
     JSLock::DropAllLocks dropAllLocks(SilenceAssertionsOnly); // Can't put this inside the @try scope because it unwinds incorrectly.
 
     // This check is not really necessary because NSObject implements
-    // setValue:forUndefinedKey:, and unfortnately the default implementation
+    // setValue:forUndefinedKey:, and unfortunately the default implementation
     // throws an exception.
     if ([targetObject respondsToSelector:@selector(setValue:forUndefinedKey:)]){
         setGlobalException(nil);
@@ -333,14 +376,14 @@ JSValue ObjcInstance::getValueOfUndefinedField(ExecState* exec, const Identifier
     JSLock::DropAllLocks dropAllLocks(SilenceAssertionsOnly); // Can't put this inside the @try scope because it unwinds incorrectly.
 
     // This check is not really necessary because NSObject implements
-    // valueForUndefinedKey:, and unfortnately the default implementation
+    // valueForUndefinedKey:, and unfortunately the default implementation
     // throws an exception.
     if ([targetObject respondsToSelector:@selector(valueForUndefinedKey:)]){
         setGlobalException(nil);
     
         @try {
             id objcValue = [targetObject valueForUndefinedKey:[NSString stringWithCString:property.ascii() encoding:NSASCIIStringEncoding]];
-            result = convertObjcValueToValue(exec, &objcValue, ObjcObjectType, _rootObject.get());
+            result = convertObjcValueToValue(exec, &objcValue, ObjcObjectType, m_rootObject.get());
         } @catch(NSException* localException) {
             // Do nothing.  Class did not override valueForUndefinedKey:.
         }

@@ -34,6 +34,7 @@ import org.apache.http.HttpHost;
 import org.apache.http.HttpRequest;
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
+import org.apache.http.HttpVersion;
 import org.apache.http.ParseException;
 import org.apache.http.ProtocolVersion;
 
@@ -72,6 +73,10 @@ class Request {
 
     int mFailCount = 0;
 
+    // This will be used to set the Range field if we retry a connection. This
+    // is http/1.1 feature.
+    private int mReceivedBytes = 0;
+
     private InputStream mBodyProvider;
     private int mBodyLength;
 
@@ -81,6 +86,9 @@ class Request {
 
     /* Used to synchronize waitUntilComplete() requests */
     private final Object mClientResource = new Object();
+
+    /** True if loading should be paused **/
+    private boolean mLoadingPaused = false;
 
     /**
      * Processor used to set content-length and transfer-encoding
@@ -130,6 +138,18 @@ class Request {
            high priority reqs (saving the trouble for images, etc) */
         addHeader(ACCEPT_ENCODING_HEADER, "gzip");
         addHeaders(headers);
+    }
+
+    /**
+     * @param pause True if the load should be paused.
+     */
+    synchronized void setLoadingPaused(boolean pause) {
+        mLoadingPaused = pause;
+
+        // Wake up the paused thread if we're unpausing the load.
+        if (!mLoadingPaused) {
+            notify();
+        }
     }
 
     /**
@@ -226,7 +246,6 @@ class Request {
 
         StatusLine statusLine = null;
         boolean hasBody = false;
-        boolean reuse = false;
         httpClientConnection.flush();
         int statusCode = 0;
 
@@ -248,6 +267,11 @@ class Request {
 
         if (hasBody)
             entity = httpClientConnection.receiveResponseEntity(header);
+
+        // restrict the range request to the servers claiming that they are
+        // accepting ranges in bytes
+        boolean supportPartialContent = "bytes".equalsIgnoreCase(header
+                .getAcceptRanges());
 
         if (entity != null) {
             InputStream is = entity.getContent();
@@ -271,9 +295,27 @@ class Request {
                 int len = 0;
                 int lowWater = buf.length / 2;
                 while (len != -1) {
+                    synchronized(this) {
+                        while (mLoadingPaused) {
+                            // Put this (network loading) thread to sleep if WebCore
+                            // has asked us to. This can happen with plugins for
+                            // example, if we are streaming data but the plugin has
+                            // filled its internal buffers.
+                            try {
+                                wait();
+                            } catch (InterruptedException e) {
+                                HttpLog.e("Interrupted exception whilst "
+                                    + "network thread paused at WebCore's request."
+                                    + " " + e.getMessage());
+                            }
+                        }
+                    }
+
                     len = nis.read(buf, count, buf.length - count);
+
                     if (len != -1) {
                         count += len;
+                        if (supportPartialContent) mReceivedBytes += len;
                     }
                     if (len == -1 || count >= lowWater) {
                         if (HttpLog.LOGV) HttpLog.v("Request.readResponse() " + count);
@@ -292,7 +334,13 @@ class Request {
                 if (HttpLog.LOGV) HttpLog.v( "readResponse() handling " + e);
             } catch(IOException e) {
                 // don't throw if we have a non-OK status code
-                if (statusCode == HttpStatus.SC_OK) {
+                if (statusCode == HttpStatus.SC_OK
+                        || statusCode == HttpStatus.SC_PARTIAL_CONTENT) {
+                    if (supportPartialContent && count > 0) {
+                        // if there is uncommited content, we should commit them
+                        // as we will continue the request
+                        mEventHandler.data(buf, count);
+                    }
                     throw e;
                 }
             } finally {
@@ -316,10 +364,16 @@ class Request {
      *
      * Called by RequestHandle from non-network thread
      */
-    void cancel() {
+    synchronized void cancel() {
         if (HttpLog.LOGV) {
             HttpLog.v("Request.cancel(): " + getUri());
         }
+
+        // Ensure that the network thread is not blocked by a hanging request from WebCore to
+        // pause the load.
+        mLoadingPaused = false;
+        notify();
+
         mCancelled = true;
         if (mConnection != null) {
             mConnection.cancel();
@@ -372,6 +426,15 @@ class Request {
                         getUri());
             }
             setBodyProvider(mBodyProvider, mBodyLength);
+        }
+
+        if (mReceivedBytes > 0) {
+            // reset the fail count as we continue the request
+            mFailCount = 0;
+            // set the "Range" header to indicate that the retry will continue
+            // instead of restarting the request
+            HttpLog.v("*** Request.reset() to range:" + mReceivedBytes);
+            mHttpRequest.setHeader("Range", "bytes=" + mReceivedBytes + "-");
         }
     }
 

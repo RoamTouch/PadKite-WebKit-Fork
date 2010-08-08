@@ -32,10 +32,11 @@
 
 #if ENABLE(DATABASE)
 
+#include "V8SQLTransaction.h"
+
 #include "Database.h"
 #include "SQLValue.h"
 #include "V8Binding.h"
-#include "V8CustomBinding.h"
 #include "V8CustomSQLStatementCallback.h"
 #include "V8CustomSQLStatementErrorCallback.h"
 #include "V8Proxy.h"
@@ -45,7 +46,7 @@ using namespace WTF;
 
 namespace WebCore {
 
-CALLBACK_FUNC_DECL(SQLTransactionExecuteSql)
+v8::Handle<v8::Value> V8SQLTransaction::executeSqlCallback(const v8::Arguments& args)
 {
     INC_STATS("DOM.SQLTransaction.executeSql()");
 
@@ -94,7 +95,7 @@ CALLBACK_FUNC_DECL(SQLTransactionExecuteSql)
             return throwError("sqlArgs should be array or object!", V8Proxy::TypeError);
     }
 
-    SQLTransaction* transaction = V8DOMWrapper::convertToNativeObject<SQLTransaction>(V8ClassIndex::SQLTRANSACTION, args.Holder());
+    SQLTransaction* transaction = V8SQLTransaction::toNative(args.Holder());
 
     Frame* frame = V8Proxy::retrieveFrameForCurrentContext();
 

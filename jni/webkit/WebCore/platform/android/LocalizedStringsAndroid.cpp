@@ -31,9 +31,26 @@
 #include "LocalizedStrings.h"
 
 #include "NotImplemented.h"
+#include "PlatformBridge.h"
 #include "PlatformString.h"
 
 namespace WebCore {
+
+// The following two strings are used for File Upload form control, ie
+// <input type="file">. The first is the text that appears on the button
+// that when pressed, the user can browse for and select a file. The
+// second string is rendered on the screen when no file has been selected.
+String fileButtonChooseFileLabel()
+{
+    return *(PlatformBridge::globalLocalizedName(
+            PlatformBridge::FileUploadLabel));
+}
+
+String fileButtonNoFileSelectedLabel()
+{
+    notImplemented();
+    return String();
+}
 
 String contextMenuItemTagInspectElement()
 {
@@ -279,6 +296,24 @@ String mediaElementLiveBroadcastStateText()
     return String();
 }
 
+String localizedMediaControlElementString(const String& controlName)
+{
+    notImplemented();
+    return String();
+}
+
+String localizedMediaControlElementHelpText(const String& controlName)
+{
+    notImplemented();
+    return String();
+}
+
+String localizedMediaTimeDescription(const String& controlName)
+{
+    notImplemented();
+    return String();
+}
+
 String searchableIndexIntroduction()
 {
     notImplemented();
@@ -287,15 +322,59 @@ String searchableIndexIntroduction()
 
 String resetButtonDefaultLabel()
 {
-    return String("Reset");
+    return *(PlatformBridge::globalLocalizedName(
+            PlatformBridge::ResetLabel));
 }
 
 String submitButtonDefaultLabel()
 {
-    return String("Submit");
+    return *(PlatformBridge::globalLocalizedName(
+            PlatformBridge::SubmitLabel));
 }
 
 String inputElementAltText()
+{
+    notImplemented();
+    return String();
+}
+
+String validationMessageValueMissingText()
+{
+    notImplemented();
+    return String();
+}
+
+String validationMessageTypeMismatchText()
+{
+    notImplemented();
+    return String();
+}
+
+String validationMessagePatternMismatchText()
+{
+    notImplemented();
+    return String();
+}
+
+String validationMessageTooLongText()
+{
+    notImplemented();
+    return String();
+}
+
+String validationMessageRangeUnderflowText()
+{
+    notImplemented();
+    return String();
+}
+
+String validationMessageRangeOverflowText()
+{
+    notImplemented();
+    return String();
+}
+
+String validationMessageStepMismatchText()
 {
     notImplemented();
     return String();

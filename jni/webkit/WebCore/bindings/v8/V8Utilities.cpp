@@ -33,8 +33,14 @@
 
 #include <v8.h>
 
-#include "V8CustomBinding.h"
+#include "Document.h"
+#include "Frame.h"
+#include "ScriptExecutionContext.h"
+#include "ScriptState.h"
+#include "V8Binding.h"
 #include "V8Proxy.h"
+#include "WorkerContext.h"
+#include "WorkerContextExecutionProxy.h"
 
 #include <wtf/Assertions.h>
 #include "Frame.h"
@@ -43,7 +49,7 @@ namespace WebCore {
 
 // Use an array to hold dependents. It works like a ref-counted scheme.
 // A value can be added more than once to the DOM object.
-void createHiddenDependency(v8::Local<v8::Object> object, v8::Local<v8::Value> value, int cacheIndex)
+void createHiddenDependency(v8::Handle<v8::Object> object, v8::Local<v8::Value> value, int cacheIndex)
 {
     v8::Local<v8::Value> cache = object->GetInternalField(cacheIndex);
     if (cache->IsNull() || cache->IsUndefined()) {
@@ -55,7 +61,7 @@ void createHiddenDependency(v8::Local<v8::Object> object, v8::Local<v8::Value> v
     cacheArray->Set(v8::Integer::New(cacheArray->Length()), value);
 }
 
-void removeHiddenDependency(v8::Local<v8::Object> object, v8::Local<v8::Value> value, int cacheIndex)
+void removeHiddenDependency(v8::Handle<v8::Object> object, v8::Local<v8::Value> value, int cacheIndex)
 {
     v8::Local<v8::Value> cache = object->GetInternalField(cacheIndex);
     if (!cache->IsArray())
@@ -69,6 +75,24 @@ void removeHiddenDependency(v8::Local<v8::Object> object, v8::Local<v8::Value> v
         }
     }
 }
+    
+void transferHiddenDependency(v8::Handle<v8::Object> object,
+                              EventListener* oldValue, 
+                              v8::Local<v8::Value> newValue, 
+                              int cacheIndex)
+{
+    if (oldValue) {
+        V8AbstractEventListener* oldListener = V8AbstractEventListener::cast(oldValue);
+        if (oldListener) {
+            v8::Local<v8::Object> oldListenerObject = oldListener->getExistingListenerObject();
+            if (!oldListenerObject.IsEmpty())
+                removeHiddenDependency(object, oldListenerObject, cacheIndex);
+        }
+    }
+    if (!newValue->IsNull() && !newValue->IsUndefined())
+        createHiddenDependency(object, newValue, cacheIndex);
+}
+    
 
 bool processingUserGesture()
 {
@@ -98,7 +122,57 @@ void navigateIfAllowed(Frame* frame, const KURL& url, bool lockHistory, bool loc
         return;
 
     if (!protocolIsJavaScript(url) || ScriptController::isSafeScript(frame))
-        frame->loader()->scheduleLocationChange(url.string(), callingFrame->loader()->outgoingReferrer(), lockHistory, lockBackForwardList, processingUserGesture());
+        frame->redirectScheduler()->scheduleLocationChange(url.string(), callingFrame->loader()->outgoingReferrer(), lockHistory, lockBackForwardList, processingUserGesture());
+}
+
+ScriptExecutionContext* getScriptExecutionContext(ScriptState* scriptState)
+{
+#if ENABLE(WORKERS)
+    WorkerContextExecutionProxy* proxy = WorkerContextExecutionProxy::retrieve();
+    if (proxy)
+        return proxy->workerContext()->scriptExecutionContext();
+#endif
+
+    Frame* frame;
+    if (scriptState) {
+        v8::HandleScope handleScope;
+        frame = V8Proxy::retrieveFrame(scriptState->context());
+    } else
+        frame = V8Proxy::retrieveFrameForCurrentContext();
+
+    if (frame)
+        return frame->document()->scriptExecutionContext();
+
+    return 0;
+}
+
+void reportException(ScriptState* scriptState, v8::TryCatch& exceptionCatcher)
+{
+    String errorMessage;
+    int lineNumber = 0;
+    String sourceURL;
+
+    // There can be a situation that an exception is thrown without setting a message.
+    v8::Local<v8::Message> message = exceptionCatcher.Message();
+    if (message.IsEmpty()) {
+        v8::Local<v8::String> exceptionString = exceptionCatcher.Exception()->ToString();
+        // Conversion of the exception object to string can fail if an
+        // exception is thrown during conversion.
+        if (!exceptionString.IsEmpty())
+            errorMessage = toWebCoreString(exceptionString);
+    } else {
+        errorMessage = toWebCoreString(message->Get());
+        lineNumber = message->GetLineNumber();
+        sourceURL = toWebCoreString(message->GetScriptResourceName());
+    }
+
+    // Do not report the exception if the current execution context is Document because we do not want to lead to duplicate error messages in the console.
+    // FIXME (31171): need better design to solve the duplicate error message reporting problem.
+    ScriptExecutionContext* context = getScriptExecutionContext(scriptState);
+    // During the frame teardown, there may not be a valid context.
+    if (context && !context->isDocument())
+        context->reportException(errorMessage, lineNumber, sourceURL);
+    exceptionCatcher.Reset();
 }
 
 } // namespace WebCore

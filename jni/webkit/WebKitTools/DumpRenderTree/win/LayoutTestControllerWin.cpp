@@ -34,21 +34,22 @@
 #include "PolicyDelegate.h"
 #include "WorkQueue.h"
 #include "WorkQueueItem.h"
-#include <WebCore/COMPtr.h>
-#include <wtf/Platform.h>
-#include <wtf/RetainPtr.h>
-#include <wtf/Vector.h>
+#include <CoreFoundation/CoreFoundation.h>
 #include <JavaScriptCore/Assertions.h>
-#include <JavaScriptCore/JavaScriptCore.h>
 #include <JavaScriptCore/JSRetainPtr.h>
 #include <JavaScriptCore/JSStringRefBSTR.h>
+#include <JavaScriptCore/JavaScriptCore.h>
+#include <WebCore/COMPtr.h>
 #include <WebKit/WebKit.h>
 #include <WebKit/WebKitCOMAPI.h>
-#include <string>
-#include <CoreFoundation/CoreFoundation.h>
+#include <comutil.h>
 #include <shlwapi.h>
 #include <shlguid.h>
 #include <shobjidl.h>
+#include <string>
+#include <wtf/Platform.h>
+#include <wtf/RetainPtr.h>
+#include <wtf/Vector.h>
 
 using std::string;
 using std::wstring;
@@ -183,6 +184,17 @@ size_t LayoutTestController::webHistoryItemCount()
     return count;
 }
 
+unsigned LayoutTestController::workerThreadCount() const
+{
+    COMPtr<IWebWorkersPrivate> workers;
+    if (FAILED(WebKitCreateInstance(CLSID_WebWorkersPrivate, 0, __uuidof(workers), reinterpret_cast<void**>(&workers))))
+        return 0;
+    unsigned count;
+    if (FAILED(workers->workerThreadCount(&count)))
+        return 0;
+    return count;
+}
+
 void LayoutTestController::notifyDone()
 {
     // Same as on mac.  This can be shared.
@@ -260,6 +272,16 @@ void LayoutTestController::setAcceptsEditing(bool acceptsEditing)
     editingDelegate->setAcceptsEditing(acceptsEditing);
 }
 
+void LayoutTestController::setAlwaysAcceptCookies(bool alwaysAcceptCookies)
+{
+    if (alwaysAcceptCookies == m_alwaysAcceptCookies)
+        return;
+
+    if (!::setAlwaysAcceptCookies(alwaysAcceptCookies))
+        return;
+    m_alwaysAcceptCookies = alwaysAcceptCookies;
+}
+
 void LayoutTestController::setAuthorAndUserStylesEnabled(bool flag)
 {
     COMPtr<IWebView> webView;
@@ -288,6 +310,18 @@ void LayoutTestController::setCustomPolicyDelegate(bool setDelegate, bool permis
         webView->setPolicyDelegate(policyDelegate);
     } else
         webView->setPolicyDelegate(0);
+}
+
+void LayoutTestController::setMockGeolocationPosition(double latitude, double longitude, double accuracy)
+{
+    // FIXME: Implement for Geolocation layout tests.
+    // See https://bugs.webkit.org/show_bug.cgi?id=28264.
+}
+
+void LayoutTestController::setMockGeolocationError(int code, JSStringRef message)
+{
+    // FIXME: Implement for Geolocation layout tests.
+    // See https://bugs.webkit.org/show_bug.cgi?id=28264.
 }
 
 void LayoutTestController::setIconDatabaseEnabled(bool iconDatabaseEnabled)
@@ -338,6 +372,40 @@ void LayoutTestController::setXSSAuditorEnabled(bool enabled)
     prefsPrivate->setXSSAuditorEnabled(enabled);
 }
 
+void LayoutTestController::setFrameSetFlatteningEnabled(bool enabled)
+{
+    COMPtr<IWebView> webView;
+    if (FAILED(frame->webView(&webView)))
+        return;
+
+    COMPtr<IWebPreferences> preferences;
+    if (FAILED(webView->preferences(&preferences)))
+        return;
+
+    COMPtr<IWebPreferencesPrivate> prefsPrivate(Query, preferences);
+    if (!prefsPrivate)
+        return;
+
+    prefsPrivate->setFrameSetFlatteningEnabled(enabled);
+}
+
+void LayoutTestController::setAllowUniversalAccessFromFileURLs(bool enabled)
+{
+    COMPtr<IWebView> webView;
+    if (FAILED(frame->webView(&webView)))
+        return;
+
+    COMPtr<IWebPreferences> preferences;
+    if (FAILED(webView->preferences(&preferences)))
+        return;
+
+    COMPtr<IWebPreferencesPrivate> prefsPrivate(Query, preferences);
+    if (!prefsPrivate)
+        return;
+
+    prefsPrivate->setAllowUniversalAccessFromFileURLs(enabled);
+}
+
 void LayoutTestController::setPopupBlockingEnabled(bool enabled)
 {
     COMPtr<IWebView> webView;
@@ -362,6 +430,23 @@ void LayoutTestController::setTabKeyCyclesThroughElements(bool shouldCycle)
         return;
 
     viewPrivate->setTabKeyCyclesThroughElements(shouldCycle ? TRUE : FALSE);
+}
+
+void LayoutTestController::setTimelineProfilingEnabled(bool flag)
+{
+    COMPtr<IWebView> webView;
+    if (FAILED(frame->webView(&webView)))
+        return;
+
+    COMPtr<IWebViewPrivate> viewPrivate;
+    if (FAILED(webView->QueryInterface(&viewPrivate)))
+        return;
+
+    COMPtr<IWebInspector> inspector;
+    if (FAILED(viewPrivate->inspector(&inspector)))
+        return;
+
+    inspector->setTimelineProfilingEnabled(flag);
 }
 
 void LayoutTestController::setUseDashboardCompatibilityMode(bool flag)
@@ -615,14 +700,11 @@ void LayoutTestController::setSelectTrailingWhitespaceEnabled(bool flag)
     viewEditing->setSelectTrailingWhitespaceEnabled(flag ? TRUE : FALSE);
 }
 
-static const CFTimeInterval waitToDumpWatchdogInterval = 10.0;
+static const CFTimeInterval waitToDumpWatchdogInterval = 15.0;
 
 static void CALLBACK waitUntilDoneWatchdogFired(HWND, UINT, UINT_PTR, DWORD)
 {
-    const char* message = "FAIL: Timed out waiting for notifyDone to be called\n";
-    fprintf(stderr, message);
-    fprintf(stdout, message);
-    dump();
+    gLayoutTestController->waitToDumpWatchdogTimerFired();
 }
 
 void LayoutTestController::setWaitToDump(bool waitUntilDone)
@@ -707,9 +789,49 @@ void LayoutTestController::clearAllDatabases()
     databaseManager->deleteAllDatabases();
 }
 
+void LayoutTestController::overridePreference(JSStringRef key, JSStringRef value)
+{
+    COMPtr<IWebView> webView;
+    if (FAILED(frame->webView(&webView)))
+        return;
+
+    COMPtr<IWebPreferences> preferences;
+    if (FAILED(webView->preferences(&preferences)))
+        return;
+
+    COMPtr<IWebPreferencesPrivate> prefsPrivate(Query, preferences);
+    if (!prefsPrivate)
+        return;
+
+    BSTR keyBSTR = JSStringCopyBSTR(key);
+    BSTR valueBSTR = JSStringCopyBSTR(value);
+    prefsPrivate->setPreferenceForTest(keyBSTR, valueBSTR);
+    SysFreeString(keyBSTR);
+    SysFreeString(valueBSTR);
+}
+
 void LayoutTestController::setDatabaseQuota(unsigned long long quota)
 {
-    printf("ERROR: LayoutTestController::setDatabaseQuota() not implemented\n");
+    COMPtr<IWebDatabaseManager> databaseManager;
+    COMPtr<IWebDatabaseManager> tmpDatabaseManager;
+
+    if (FAILED(WebKitCreateInstance(CLSID_WebDatabaseManager, 0, IID_IWebDatabaseManager, (void**)&tmpDatabaseManager)))
+        return;
+    if (FAILED(tmpDatabaseManager->sharedWebDatabaseManager(&databaseManager)))
+        return;
+
+    databaseManager->setQuota(TEXT("file:///"), quota);
+}
+
+void LayoutTestController::setDomainRelaxationForbiddenForURLScheme(bool forbidden, JSStringRef scheme)
+{
+    COMPtr<IWebViewPrivate> webView;
+    if (FAILED(WebKitCreateInstance(__uuidof(WebView), 0, __uuidof(webView), reinterpret_cast<void**>(&webView))))
+        return;
+
+    BSTR schemeBSTR = JSStringCopyBSTR(scheme);
+    webView->setDomainRelaxationForbiddenForURLScheme(forbidden, schemeBSTR);
+    SysFreeString(schemeBSTR);
 }
 
 void LayoutTestController::setAppCacheMaximumSize(unsigned long long size)
@@ -767,6 +889,31 @@ bool LayoutTestController::pauseTransitionAtTimeOnElementWithId(JSStringRef prop
     return SUCCEEDED(hr) && wasRunning;
 }
 
+bool LayoutTestController::sampleSVGAnimationForElementAtTime(JSStringRef animationId, double time, JSStringRef elementId)
+{
+    COMPtr<IDOMDocument> document;
+    if (FAILED(frame->DOMDocument(&document)))
+        return false;
+
+    BSTR idBSTR = JSStringCopyBSTR(animationId);
+    COMPtr<IDOMElement> element;
+    HRESULT hr = document->getElementById(idBSTR, &element);
+    SysFreeString(idBSTR);
+    if (FAILED(hr))
+        return false;
+
+    COMPtr<IWebFramePrivate> framePrivate(Query, frame);
+    if (!framePrivate)
+        return false;
+
+    BSTR elementIdBSTR = JSStringCopyBSTR(elementId);
+    BOOL wasRunning = FALSE;
+    hr = framePrivate->pauseSVGAnimation(elementIdBSTR, element.get(), time, &wasRunning);
+    SysFreeString(elementIdBSTR);
+
+    return SUCCEEDED(hr) && wasRunning;
+}
+
 unsigned LayoutTestController::numberOfActiveAnimations() const
 {
     COMPtr<IWebFramePrivate> framePrivate(Query, frame);
@@ -778,4 +925,210 @@ unsigned LayoutTestController::numberOfActiveAnimations() const
         return 0;
 
     return number;
+}
+
+static _bstr_t bstrT(JSStringRef jsString)
+{
+    // The false parameter tells the _bstr_t constructor to adopt the BSTR we pass it.
+    return _bstr_t(JSStringCopyBSTR(jsString), false);
+}
+
+void LayoutTestController::whiteListAccessFromOrigin(JSStringRef sourceOrigin, JSStringRef destinationProtocol, JSStringRef destinationHost, bool allowDestinationSubdomains)
+{
+    COMPtr<IWebViewPrivate> webView;
+    if (FAILED(WebKitCreateInstance(__uuidof(WebView), 0, __uuidof(webView), reinterpret_cast<void**>(&webView))))
+        return;
+
+    webView->whiteListAccessFromOrigin(bstrT(sourceOrigin).GetBSTR(), bstrT(destinationProtocol).GetBSTR(), bstrT(destinationHost).GetBSTR(), allowDestinationSubdomains);
+}
+
+void LayoutTestController::addUserScript(JSStringRef source, bool runAtStart)
+{
+    COMPtr<IWebViewPrivate> webView;
+    if (FAILED(WebKitCreateInstance(__uuidof(WebView), 0, __uuidof(webView), reinterpret_cast<void**>(&webView))))
+        return;
+
+    COMPtr<IWebScriptWorld> world;
+    if (FAILED(WebKitCreateInstance(__uuidof(WebScriptWorld), 0, __uuidof(world), reinterpret_cast<void**>(&world))))
+        return;
+
+    webView->addUserScriptToGroup(_bstr_t(L"org.webkit.DumpRenderTree").GetBSTR(), world.get(), bstrT(source).GetBSTR(), 0, 0, 0, 0, 0, runAtStart ? WebInjectAtDocumentStart : WebInjectAtDocumentEnd);
+}
+
+
+void LayoutTestController::addUserStyleSheet(JSStringRef source)
+{
+    COMPtr<IWebViewPrivate> webView;
+    if (FAILED(WebKitCreateInstance(__uuidof(WebView), 0, __uuidof(webView), reinterpret_cast<void**>(&webView))))
+        return;
+
+    COMPtr<IWebScriptWorld> world;
+    if (FAILED(WebKitCreateInstance(__uuidof(WebScriptWorld), 0, __uuidof(world), reinterpret_cast<void**>(&world))))
+        return;
+
+    webView->addUserStyleSheetToGroup(_bstr_t(L"org.webkit.DumpRenderTree").GetBSTR(), world.get(), bstrT(source).GetBSTR(), 0, 0, 0, 0, 0);
+}
+
+void LayoutTestController::showWebInspector()
+{
+    COMPtr<IWebView> webView;
+    if (FAILED(frame->webView(&webView)))
+        return;
+
+    COMPtr<IWebPreferences> preferences;
+    if (FAILED(webView->preferences(&preferences)))
+        return;
+
+    COMPtr<IWebPreferencesPrivate> prefsPrivate(Query, preferences);
+    if (!prefsPrivate)
+        return;
+
+    prefsPrivate->setDeveloperExtrasEnabled(true);
+
+    COMPtr<IWebViewPrivate> viewPrivate(Query, webView);
+    if (!viewPrivate)
+        return;
+
+    COMPtr<IWebInspector> inspector;
+    if (SUCCEEDED(viewPrivate->inspector(&inspector)))
+        inspector->show();
+}
+
+void LayoutTestController::closeWebInspector()
+{
+    COMPtr<IWebView> webView;
+    if (FAILED(frame->webView(&webView)))
+        return;
+
+    COMPtr<IWebViewPrivate> viewPrivate(Query, webView);
+    if (!viewPrivate)
+        return;
+
+    COMPtr<IWebInspector> inspector;
+    if (FAILED(viewPrivate->inspector(&inspector)))
+        return;
+
+    inspector->close();
+
+    COMPtr<IWebPreferences> preferences;
+    if (FAILED(webView->preferences(&preferences)))
+        return;
+
+    COMPtr<IWebPreferencesPrivate> prefsPrivate(Query, preferences);
+    if (!prefsPrivate)
+        return;
+
+    prefsPrivate->setDeveloperExtrasEnabled(false);
+}
+
+void LayoutTestController::evaluateInWebInspector(long callId, JSStringRef script)
+{
+    COMPtr<IWebView> webView;
+    if (FAILED(frame->webView(&webView)))
+        return;
+
+    COMPtr<IWebViewPrivate> viewPrivate(Query, webView);
+    if (!viewPrivate)
+        return;
+
+    COMPtr<IWebInspector> inspector;
+    if (FAILED(viewPrivate->inspector(&inspector)))
+        return;
+
+    COMPtr<IWebInspectorPrivate> inspectorPrivate(Query, inspector);
+    if (!inspectorPrivate)
+        return;
+
+    inspectorPrivate->evaluateInFrontend(callId, bstrT(script).GetBSTR());
+}
+
+typedef HashMap<unsigned, COMPtr<IWebScriptWorld> > WorldMap;
+static WorldMap& worldMap()
+{
+    static WorldMap& map = *new WorldMap;
+    return map;
+}
+
+unsigned worldIDForWorld(IWebScriptWorld* world)
+{
+    WorldMap::const_iterator end = worldMap().end();
+    for (WorldMap::const_iterator it = worldMap().begin(); it != end; ++it) {
+        if (it->second == world)
+            return it->first;
+    }
+
+    return 0;
+}
+
+void LayoutTestController::evaluateScriptInIsolatedWorld(unsigned worldID, JSObjectRef globalObject, JSStringRef script)
+{
+    COMPtr<IWebFramePrivate> framePrivate(Query, frame);
+    if (!framePrivate)
+        return;
+
+    // A worldID of 0 always corresponds to a new world. Any other worldID corresponds to a world
+    // that is created once and cached forever.
+    COMPtr<IWebScriptWorld> world;
+    if (!worldID) {
+        if (FAILED(WebKitCreateInstance(__uuidof(WebScriptWorld), 0, __uuidof(world), reinterpret_cast<void**>(&world))))
+            return;
+    } else {
+        COMPtr<IWebScriptWorld>& worldSlot = worldMap().add(worldID, 0).first->second;
+        if (!worldSlot && FAILED(WebKitCreateInstance(__uuidof(WebScriptWorld), 0, __uuidof(worldSlot), reinterpret_cast<void**>(&worldSlot))))
+            return;
+        world = worldSlot;
+    }
+
+    BSTR result;
+    if (FAILED(framePrivate->stringByEvaluatingJavaScriptInScriptWorld(world.get(), globalObject, bstrT(script).GetBSTR(), &result)))
+        return;
+    SysFreeString(result);
+}
+
+void LayoutTestController::removeAllVisitedLinks()
+{
+    COMPtr<IWebHistory> history;
+    if (FAILED(WebKitCreateInstance(CLSID_WebHistory, 0, __uuidof(history), reinterpret_cast<void**>(&history))))
+        return;
+
+    COMPtr<IWebHistory> sharedHistory;
+    if (FAILED(history->optionalSharedHistory(&sharedHistory)) || !sharedHistory)
+        return;
+
+    COMPtr<IWebHistoryPrivate> sharedHistoryPrivate;
+    if (FAILED(sharedHistory->QueryInterface(&sharedHistoryPrivate)))
+        return;
+
+    sharedHistoryPrivate->removeAllVisitedLinks();
+}
+
+JSRetainPtr<JSStringRef> LayoutTestController::counterValueForElementById(JSStringRef id)
+{
+    COMPtr<IWebFramePrivate> framePrivate(Query, frame);
+    if (!framePrivate)
+        return 0;
+
+    wstring idWstring = jsStringRefToWString(id);
+    BSTR idBSTR = SysAllocStringLen((OLECHAR*)idWstring.c_str(), idWstring.length());
+    BSTR counterValueBSTR;
+    if (FAILED(framePrivate->counterValueForElementById(idBSTR, &counterValueBSTR)))
+        return 0;
+
+    wstring counterValue(counterValueBSTR, SysStringLen(counterValueBSTR));
+    SysFreeString(idBSTR);
+    SysFreeString(counterValueBSTR);
+    JSRetainPtr<JSStringRef> counterValueJS(Adopt, JSStringCreateWithCharacters(counterValue.data(), counterValue.length()));
+    return counterValueJS;
+}
+
+int LayoutTestController::pageNumberForElementById(JSStringRef, float, float)
+{
+    // FIXME: implement
+    return -1;
+}
+
+int LayoutTestController::numberOfPages(float, float)
+{
+    // FIXME: implement
+    return -1;
 }

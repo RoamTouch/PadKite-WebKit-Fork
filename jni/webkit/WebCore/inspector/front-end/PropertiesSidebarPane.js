@@ -32,16 +32,15 @@ WebInspector.PropertiesSidebarPane = function()
 }
 
 WebInspector.PropertiesSidebarPane.prototype = {
-    update: function(object)
+    update: function(node)
     {
         var body = this.bodyElement;
 
-        body.removeChildren();
-
-        this.sections = [];
-
-        if (!object)
+        if (!node) {
+            body.removeChildren();
+            this.sections = [];
             return;
+        }
 
         var self = this;
         var callback = function(prototypes) {
@@ -51,13 +50,13 @@ WebInspector.PropertiesSidebarPane.prototype = {
 
             // Get array of prototype user-friendly names.
             for (var i = 0; i < prototypes.length; ++i) {
-                var prototype = new WebInspector.ObjectProxy(object, [], i);
+                var prototype = new WebInspector.ObjectProxy(node.injectedScriptId, node.id, [], i);
                 var section = new WebInspector.ObjectPropertiesSection(prototype, prototypes[i], WebInspector.UIString("Prototype"));
                 self.sections.push(section);
                 body.appendChild(section.element);
             }
         };
-        InspectorController.getPrototypes(object, callback);
+        InjectedScriptAccess.get(node.injectedScriptId).getPrototypes(node.id, callback);
     }
 }
 

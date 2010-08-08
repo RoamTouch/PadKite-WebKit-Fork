@@ -73,7 +73,8 @@ public:
 #ifdef FLATTEN_FRAMESET
     void setGridNeedsLayout() { m_gridCalculated = false; }
 #endif
-    
+    bool flattenFrameSet() const;
+
 private:
     static const int noSplit = -1;
 
@@ -108,6 +109,7 @@ private:
     void computeEdgeInfo();
     void fillFromEdgeInfo(const FrameEdgeInfo& edgeInfo, int r, int c);
     void positionFrames();
+    void positionFramesWithFlattening();
 
     int splitPosition(const GridAxis&, int split) const;
     int hitTestSplit(const GridAxis&, int position) const;

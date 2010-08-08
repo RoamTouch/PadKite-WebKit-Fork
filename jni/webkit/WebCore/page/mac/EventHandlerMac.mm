@@ -28,16 +28,18 @@
 
 #include "AXObjectCache.h"
 #include "BlockExceptions.h"
+#include "Chrome.h"
 #include "ChromeClient.h"
 #include "ClipboardMac.h"
 #include "DragController.h"
 #include "EventNames.h"
 #include "FocusController.h"
-#include "FrameLoader.h"
 #include "Frame.h"
+#include "FrameLoader.h"
 #include "FrameView.h"
 #include "KeyboardEvent.h"
 #include "MouseEventWithHitTestResults.h"
+#include "NotImplemented.h"
 #include "Page.h"
 #include "PlatformKeyboardEvent.h"
 #include "PlatformWheelEvent.h"
@@ -60,7 +62,11 @@ static inline IMP method_setImplementation(Method m, IMP i)
 
 namespace WebCore {
 
+#if ENABLE(DRAG_SUPPORT)
 const double EventHandler::TextDragDelay = 0.15;
+#endif
+
+#if !ENABLE(EXPERIMENTAL_SINGLE_VIEW_MODE)
 
 static RetainPtr<NSEvent>& currentNSEventSlot()
 {
@@ -110,7 +116,7 @@ bool EventHandler::wheelEvent(NSEvent *event)
 
     m_useLatchedWheelEventNode = wkIsLatchingWheelEvent(event);
     
-    PlatformWheelEvent wheelEvent(event, page->chrome()->platformWindow());
+    PlatformWheelEvent wheelEvent(event, page->chrome()->platformPageClient());
     handleWheelEvent(wheelEvent);
 
     return wheelEvent.isAccepted();
@@ -132,65 +138,6 @@ PassRefPtr<KeyboardEvent> EventHandler::currentKeyboardEvent() const
         default:
             return 0;
     }
-}
-
-static inline bool isKeyboardOptionTab(KeyboardEvent* event)
-{
-    return event
-        && (event->type() == eventNames().keydownEvent || event->type() == eventNames().keypressEvent)
-        && event->altKey()
-        && event->keyIdentifier() == "U+0009";    
-}
-
-bool EventHandler::invertSenseOfTabsToLinks(KeyboardEvent* event) const
-{
-    return isKeyboardOptionTab(event);
-}
-
-bool EventHandler::tabsToAllControls(KeyboardEvent* event) const
-{
-    Page* page = m_frame->page();
-    if (!page)
-        return false;
-
-    KeyboardUIMode keyboardUIMode = page->chrome()->client()->keyboardUIMode();
-    bool handlingOptionTab = isKeyboardOptionTab(event);
-
-    // If tab-to-links is off, option-tab always highlights all controls
-    if ((keyboardUIMode & KeyboardAccessTabsToLinks) == 0 && handlingOptionTab)
-        return true;
-    
-    // If system preferences say to include all controls, we always include all controls
-    if (keyboardUIMode & KeyboardAccessFull)
-        return true;
-    
-    // Otherwise tab-to-links includes all controls, unless the sense is flipped via option-tab.
-    if (keyboardUIMode & KeyboardAccessTabsToLinks)
-        return !handlingOptionTab;
-    
-    return handlingOptionTab;
-}
-
-bool EventHandler::needsKeyboardEventDisambiguationQuirks() const
-{
-    Document* document = m_frame->document();
-
-    // RSS view needs arrow key keypress events.
-    if (applicationIsSafari() && document->url().protocolIs("feed") || document->url().protocolIs("feeds"))
-        return true;
-    Settings* settings = m_frame->settings();
-    if (!settings)
-        return false;
-
-#if ENABLE(DASHBOARD_SUPPORT)
-    if (settings->usesDashboardBackwardCompatibilityMode())
-        return true;
-#endif
-        
-    if (settings->needsKeyboardEventDisambiguationQuirks())
-        return true;
-
-    return false;
 }
 
 bool EventHandler::keyEvent(NSEvent *event)
@@ -367,11 +314,7 @@ NSView *EventHandler::mouseDownViewIfStillGood()
     return mouseDownView;
 }
 
-bool EventHandler::eventActivatedView(const PlatformMouseEvent& event) const
-{
-    return m_activationEventNumber == event.eventNumber();
-}
-
+#if ENABLE(DRAG_SUPPORT)
 bool EventHandler::eventLoopHandleMouseDragged(const MouseEventWithHitTestResults&)
 {
     NSView *view = mouseDownViewIfStillGood();
@@ -390,15 +333,7 @@ bool EventHandler::eventLoopHandleMouseDragged(const MouseEventWithHitTestResult
     
     return true;
 }
-    
-PassRefPtr<Clipboard> EventHandler::createDraggingClipboard() const 
-{
-    NSPasteboard *pasteboard = [NSPasteboard pasteboardWithName:NSDragPboard];
-    // Must be done before ondragstart adds types and data to the pboard,
-    // also done for security, as it erases data from the last drag
-    [pasteboard declareTypes:[NSArray array] owner:nil];
-    return ClipboardMac::create(true, pasteboard, ClipboardWritable, m_frame);
-}
+#endif // ENABLE(DRAG_SUPPORT)
     
 bool EventHandler::eventLoopHandleMouseUp(const MouseEventWithHitTestResults&)
 {
@@ -430,8 +365,10 @@ bool EventHandler::passSubframeEventToSubframe(MouseEventWithHitTestResults& eve
             // layout tests.
             if (!m_mouseDownWasInSubframe)
                 return false;
+#if ENABLE(DRAG_SUPPORT)
             if (subframe->page()->dragController()->didInitiateDrag())
                 return false;
+#endif
         case NSMouseMoved:
             // Since we're passing in currentNSEvent() here, we can call
             // handleMouseMoveEvent() directly, since the save/restore of
@@ -691,6 +628,224 @@ bool EventHandler::passMouseReleaseEventToSubframe(MouseEventWithHitTestResults&
     return passSubframeEventToSubframe(mev, subframe);
 }
 
+PlatformMouseEvent EventHandler::currentPlatformMouseEvent() const
+{
+    NSView *windowView = nil;
+    if (Page* page = m_frame->page())
+        windowView = page->chrome()->platformPageClient();
+    return PlatformMouseEvent(currentNSEvent(), windowView);
+}
+
+#if ENABLE(CONTEXT_MENUS)
+bool EventHandler::sendContextMenuEvent(NSEvent *event)
+{
+    Page* page = m_frame->page();
+    if (!page)
+        return false;
+    return sendContextMenuEvent(PlatformMouseEvent(event, page->chrome()->platformPageClient()));
+}
+#endif // ENABLE(CONTEXT_MENUS)
+
+#if ENABLE(DRAG_SUPPORT)
+bool EventHandler::eventMayStartDrag(NSEvent *event)
+{
+    Page* page = m_frame->page();
+    if (!page)
+        return false;
+    return eventMayStartDrag(PlatformMouseEvent(event, page->chrome()->platformPageClient()));
+}
+#endif // ENABLE(DRAG_SUPPORT)
+
+bool EventHandler::eventActivatedView(const PlatformMouseEvent& event) const
+{
+    return m_activationEventNumber == event.eventNumber();
+}
+
+#else // ENABLE(EXPERIMENTAL_SINGLE_VIEW_MODE)
+
+NSEvent *EventHandler::currentNSEvent()
+{
+    return 0;
+}
+
+bool EventHandler::passMousePressEventToSubframe(MouseEventWithHitTestResults& mev, Frame* subframe)
+{
+    subframe->eventHandler()->handleMousePressEvent(mev.event());
+    return true;
+}
+
+bool EventHandler::passMouseMoveEventToSubframe(MouseEventWithHitTestResults& mev, Frame* subframe, HitTestResult* hoveredNode)
+{
+    if (m_mouseDownMayStartDrag && !m_mouseDownWasInSubframe)
+        return false;
+    subframe->eventHandler()->handleMouseMoveEvent(mev.event(), hoveredNode);
+    return true;
+}
+
+bool EventHandler::passMouseReleaseEventToSubframe(MouseEventWithHitTestResults& mev, Frame* subframe)
+{
+    subframe->eventHandler()->handleMouseReleaseEvent(mev.event());
+    return true;
+}
+
+bool EventHandler::passWheelEventToWidget(PlatformWheelEvent& wheelEvent, Widget* widget)
+{
+    if (!widget->isFrameView())
+        return false;
+
+    return static_cast<FrameView*>(widget)->frame()->eventHandler()->handleWheelEvent(wheelEvent);
+}
+
+void EventHandler::focusDocumentView()
+{
+    Page* page = m_frame->page();
+    if (!page)
+        return;
+    page->focusController()->setFocusedFrame(m_frame);
+}
+
+bool EventHandler::passWidgetMouseDownEventToWidget(const MouseEventWithHitTestResults&)
+{
+    notImplemented();
+    return false;
+}
+
+bool EventHandler::eventActivatedView(const PlatformMouseEvent&) const
+{
+    notImplemented();
+    return false;
+}
+
+PassRefPtr<KeyboardEvent> EventHandler::currentKeyboardEvent() const
+{
+    return 0;
+}
+
+void EventHandler::mouseDown(NSEvent *)
+{
+    notImplemented();
+}
+
+void EventHandler::mouseDragged(NSEvent *)
+{
+    notImplemented();
+}
+
+void EventHandler::mouseUp(NSEvent *)
+{
+    notImplemented();
+}
+
+void EventHandler::mouseMoved(NSEvent *)
+{
+    notImplemented();
+}
+
+bool EventHandler::keyEvent(NSEvent *)
+{
+    notImplemented();
+    return false;
+}
+
+bool EventHandler::wheelEvent(NSEvent *)
+{
+    notImplemented();
+    return false;
+}
+
+#if ENABLE(CONTEXT_MENUS)
+bool EventHandler::sendContextMenuEvent(NSEvent *)
+{
+    notImplemented();
+    return false;
+}
+#endif
+
+bool EventHandler::eventMayStartDrag(NSEvent *)
+{
+    notImplemented();
+    return false;
+}
+
+void EventHandler::sendFakeEventsAfterWidgetTracking(NSEvent *)
+{
+}
+
+
+#endif
+
+#if ENABLE(DRAG_SUPPORT)
+
+PassRefPtr<Clipboard> EventHandler::createDraggingClipboard() const
+{
+    NSPasteboard *pasteboard = [NSPasteboard pasteboardWithName:NSDragPboard];
+    // Must be done before ondragstart adds types and data to the pboard,
+    // also done for security, as it erases data from the last drag
+    [pasteboard declareTypes:[NSArray array] owner:nil];
+    return ClipboardMac::create(true, pasteboard, ClipboardWritable, m_frame);
+}
+
+#endif
+
+static inline bool isKeyboardOptionTab(KeyboardEvent* event)
+{
+    return event
+        && (event->type() == eventNames().keydownEvent || event->type() == eventNames().keypressEvent)
+        && event->altKey()
+        && event->keyIdentifier() == "U+0009";    
+}
+
+bool EventHandler::invertSenseOfTabsToLinks(KeyboardEvent* event) const
+{
+    return isKeyboardOptionTab(event);
+}
+
+bool EventHandler::tabsToAllControls(KeyboardEvent* event) const
+{
+    Page* page = m_frame->page();
+    if (!page)
+        return false;
+
+    KeyboardUIMode keyboardUIMode = page->chrome()->client()->keyboardUIMode();
+    bool handlingOptionTab = isKeyboardOptionTab(event);
+
+    // If tab-to-links is off, option-tab always highlights all controls
+    if ((keyboardUIMode & KeyboardAccessTabsToLinks) == 0 && handlingOptionTab)
+        return true;
+    
+    // If system preferences say to include all controls, we always include all controls
+    if (keyboardUIMode & KeyboardAccessFull)
+        return true;
+    
+    // Otherwise tab-to-links includes all controls, unless the sense is flipped via option-tab.
+    if (keyboardUIMode & KeyboardAccessTabsToLinks)
+        return !handlingOptionTab;
+    
+    return handlingOptionTab;
+}
+
+bool EventHandler::needsKeyboardEventDisambiguationQuirks() const
+{
+    Document* document = m_frame->document();
+
+    // RSS view needs arrow key keypress events.
+    if (applicationIsSafari() && document->url().protocolIs("feed") || document->url().protocolIs("feeds"))
+        return true;
+    Settings* settings = m_frame->settings();
+    if (!settings)
+        return false;
+
+#if ENABLE(DASHBOARD_SUPPORT)
+    if (settings->usesDashboardBackwardCompatibilityMode())
+        return true;
+#endif
+        
+    if (settings->needsKeyboardEventDisambiguationQuirks())
+        return true;
+
+    return false;
+}
+
 unsigned EventHandler::accessKeyModifiers()
 {
     // Control+Option key combinations are usually unused on Mac OS X, but not when VoiceOver is enabled.
@@ -700,30 +855,6 @@ unsigned EventHandler::accessKeyModifiers()
         return PlatformKeyboardEvent::CtrlKey;
 
     return PlatformKeyboardEvent::CtrlKey | PlatformKeyboardEvent::AltKey;
-}
-
-PlatformMouseEvent EventHandler::currentPlatformMouseEvent() const
-{
-    NSView *windowView = nil;
-    if (Page* page = m_frame->page())
-        windowView = page->chrome()->platformWindow();
-    return PlatformMouseEvent(currentNSEvent(), windowView);
-}
-
-bool EventHandler::sendContextMenuEvent(NSEvent *event)
-{
-    Page* page = m_frame->page();
-    if (!page)
-        return false;
-    return sendContextMenuEvent(PlatformMouseEvent(event, page->chrome()->platformWindow()));
-}
-
-bool EventHandler::eventMayStartDrag(NSEvent *event)
-{
-    Page* page = m_frame->page();
-    if (!page)
-        return false;
-    return eventMayStartDrag(PlatformMouseEvent(event, page->chrome()->platformWindow()));
 }
 
 }

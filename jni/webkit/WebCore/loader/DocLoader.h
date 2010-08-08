@@ -47,7 +47,7 @@ class ImageLoader;
 class KURL;
 
 // The DocLoader manages the loading of scripts/images/stylesheets for a single document.
-class DocLoader
+class DocLoader : public Noncopyable
 {
 friend class Cache;
 friend class ImageLoader;
@@ -122,7 +122,7 @@ private:
     Document* m_doc;
     
     int m_requestCount;
-
+    
     ListHashSet<CachedResource*> m_preloads;
     struct PendingPreload {
         CachedResource::Type m_type;

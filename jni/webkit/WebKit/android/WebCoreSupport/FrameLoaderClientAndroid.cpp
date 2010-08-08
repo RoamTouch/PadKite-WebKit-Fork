@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -22,48 +22,57 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
 #define LOG_TAG "WebCore"
 
 #include "config.h"
+#include "FrameLoaderClientAndroid.h"
 
-#include "android_graphics.h"
+#include "BackForwardList.h"
 #include "CString.h"
-#include "DocumentLoader.h"
+#include "CachedFrame.h"
+#include "CachedFramePlatformDataAndroid.h"
 #include "DOMImplementation.h"
+#include "Document.h"
+#include "DocumentLoader.h"
 #include "Frame.h"
 #include "FrameLoader.h"
-#include "FrameLoaderClientAndroid.h"
 #include "FrameTree.h"
+#include "FrameView.h"
 #include "GraphicsContext.h"
 #include "HTMLFrameOwnerElement.h"
 #include "HTMLPlugInElement.h"
+#include "HistoryItem.h"
 #include "IconDatabase.h"
 #include "MIMETypeRegistry.h"
 #include "NotImplemented.h"
+#include "PackageNotifier.h"
 #include "Page.h"
+#include "PlatformBridge.h"
 #include "PlatformGraphicsContext.h"
 #include "PlatformString.h"
 #include "PluginDatabase.h"
 #include "PluginView.h"
+#include "PluginWidget.h"
 #include "ProgressTracker.h"
 #include "RenderPart.h"
+#include "RenderView.h"
+#include "RenderWidget.h"
 #include "ResourceError.h"
+#include "ResourceHandle.h"
+#include "ResourceHandleInternal.h"
 #include "SelectionController.h"
+#include "Settings.h"
 #include "SkCanvas.h"
 #include "SkRect.h"
 #include "TextEncoding.h"
-#include "Document.h"
-#include "FrameView.h"
-#include "HistoryItem.h"
-#include "ResourceHandle.h"
-#include "ResourceHandleInternal.h"
 #include "WebCoreFrameBridge.h"
 #include "WebCoreResourceLoader.h"
 #include "WebHistory.h"
 #include "WebIconDatabase.h"
 #include "WebFrameView.h"
 #include "WebViewCore.h"
-#include "Settings.h"
+#include "android_graphics.h"
 
 #include <utils/AssetManager.h>
 
@@ -75,7 +84,10 @@ static const int EXTRA_LAYOUT_DELAY = 1000;
 
 FrameLoaderClientAndroid::FrameLoaderClientAndroid(WebFrame* webframe)
     : m_frame(NULL)
-    , m_webFrame(webframe) {
+    , m_webFrame(webframe)
+    , m_manualLoader(NULL)
+    , m_hasSentResponseToPlugin(false)
+    , m_onDemandPluginsEnabled(false) {
     Retain(m_webFrame);
 }
 
@@ -99,6 +111,7 @@ bool FrameLoaderClientAndroid::hasWebView() const {
 }
 
 void FrameLoaderClientAndroid::makeRepresentation(DocumentLoader*) {
+    m_onDemandPluginsEnabled = false;
     // don't use representation
     verifiedOk();
 }
@@ -211,6 +224,21 @@ void FrameLoaderClientAndroid::dispatchDidChangeLocationWithinPage() {
     notImplemented();
 }
 
+void FrameLoaderClientAndroid::dispatchDidPushStateWithinPage()
+{
+    notImplemented();
+}
+
+void FrameLoaderClientAndroid::dispatchDidReplaceStateWithinPage()
+{
+    notImplemented();
+}
+
+void FrameLoaderClientAndroid::dispatchDidPopStateWithinPage()
+{
+    notImplemented();
+}
+
 void FrameLoaderClientAndroid::dispatchWillClose() {
     notImplemented();
 }
@@ -297,11 +325,11 @@ void FrameLoaderClientAndroid::dispatchDidFailProvisionalLoad(const ResourceErro
     AssetManager* am = globalAssetManager();
 
     // Check to see if the error code was not generated internally
-    WebFrame::RAW_RES_ID id = WebFrame::NODOMAIN;
+    WebCore::PlatformBridge::rawResId id = WebCore::PlatformBridge::NoDomain;
     if ((error.errorCode() == ErrorFile ||
             error.errorCode() == ErrorFileNotFound) &&
             (!error.localizedDescription().isEmpty())) {
-        id = WebFrame::LOADERROR;
+        id = WebCore::PlatformBridge::LoadError;
     }
     String filename = m_webFrame->getRawResourceFilename(id);
     if (filename.isEmpty())
@@ -343,7 +371,7 @@ void FrameLoaderClientAndroid::dispatchDidFailProvisionalLoad(const ResourceErro
     // load with the replacement data.
     // use KURL(const char*) as KURL(const String& url) can trigger ASSERT for
     // invalidate URL string.
-    loadDataIntoFrame(m_frame, KURL(data), error.failingURL(), s);
+    loadDataIntoFrame(m_frame, KURL(ParsedURLString, data), error.failingURL(), s);
 
     // Delete the asset.
     delete a;
@@ -432,7 +460,7 @@ void FrameLoaderClientAndroid::dispatchDecidePolicyForMIMEType(FramePolicyFuncti
     if (!func)
         return;
     if (request.isNull()) {
-        (m_frame->loader()->*func)(PolicyIgnore);
+        (m_frame->loader()->policyChecker()->*func)(PolicyIgnore);
         return;
     }
     // Default to Use (display internally).
@@ -463,7 +491,7 @@ void FrameLoaderClientAndroid::dispatchDecidePolicyForMIMEType(FramePolicyFuncti
     WebCore::DocumentLoader* docLoader = m_frame->loader()->activeDocumentLoader();
     if (docLoader->response().httpStatusCode() == 204)
         action = PolicyIgnore;
-    (m_frame->loader()->*func)(action);
+    (m_frame->loader()->policyChecker()->*func)(action);
 }
 
 void FrameLoaderClientAndroid::dispatchDecidePolicyForNewWindowAction(FramePolicyFunction func,
@@ -475,7 +503,7 @@ void FrameLoaderClientAndroid::dispatchDecidePolicyForNewWindowAction(FramePolic
         return;
 
     if (request.isNull()) {
-        (m_frame->loader()->*func)(PolicyIgnore);
+        (m_frame->loader()->policyChecker()->*func)(PolicyIgnore);
         return;
     }
 
@@ -486,9 +514,9 @@ void FrameLoaderClientAndroid::dispatchDecidePolicyForNewWindowAction(FramePolic
     // found by the frame tree. Instead of creating a new frame, return the
     // current frame in dispatchCreatePage.
     if (canHandleRequest(request))
-        (m_frame->loader()->*func)(PolicyUse);
+        (m_frame->loader()->policyChecker()->*func)(PolicyUse);
     else
-        (m_frame->loader()->*func)(PolicyIgnore);
+        (m_frame->loader()->policyChecker()->*func)(PolicyIgnore);
 }
 
 void FrameLoaderClientAndroid::cancelPolicyCheck() {
@@ -507,7 +535,7 @@ void FrameLoaderClientAndroid::dispatchDecidePolicyForNavigationAction(FramePoli
     if (!func)
         return;
     if (request.isNull()) {
-        (m_frame->loader()->*func)(PolicyIgnore);
+        (m_frame->loader()->policyChecker()->*func)(PolicyIgnore);
         return;
     }
 
@@ -520,14 +548,14 @@ void FrameLoaderClientAndroid::dispatchDecidePolicyForNavigationAction(FramePoli
         m_webFrame->decidePolicyForFormResubmission(func);
         return;
     } else {
-        (m_frame->loader()->*func)(PolicyUse);
+        (m_frame->loader()->policyChecker()->*func)(PolicyUse);
     }
 }
 
 void FrameLoaderClientAndroid::dispatchWillSubmitForm(FramePolicyFunction func, PassRefPtr<FormState>) {
     ASSERT(m_frame);
     ASSERT(func);
-    (m_frame->loader()->*func)(PolicyUse);
+    (m_frame->loader()->policyChecker()->*func)(PolicyUse);
 }
 
 void FrameLoaderClientAndroid::dispatchDidLoadMainResource(DocumentLoader*) {
@@ -540,9 +568,15 @@ void FrameLoaderClientAndroid::revertToProvisionalState(DocumentLoader*) {
 
 void FrameLoaderClientAndroid::setMainDocumentError(DocumentLoader* docLoader, const ResourceError& error) {
     ASSERT(m_frame);
-    if (!error.isNull() && error.errorCode() >= InternalErrorLast)
-        m_webFrame->reportError(error.errorCode(),
-                error.localizedDescription(), error.failingURL());
+    if (m_manualLoader) {
+        m_manualLoader->didFail(error);
+        m_manualLoader = NULL;
+        m_hasSentResponseToPlugin = false;
+    } else {
+        if (!error.isNull() && error.errorCode() >= InternalErrorLast)
+            m_webFrame->reportError(error.errorCode(),
+                    error.localizedDescription(), error.failingURL());
+    }
 }
 
 // This function is called right before the progress is updated.
@@ -604,7 +638,14 @@ void FrameLoaderClientAndroid::finishedLoading(DocumentLoader* docLoader) {
     // Telling the frame we received some data and passing 0 as the data is our
     // way to get work done that is normally done when the first bit of data is
     // received, even for the case of a document with no data (like about:blank)
-    committedLoad(docLoader, 0, 0);
+    if (!m_manualLoader) {
+        committedLoad(docLoader, 0, 0);
+        return;
+    }
+
+    m_manualLoader->didFinishLoading();
+    m_manualLoader = NULL;
+    m_hasSentResponseToPlugin = false;
 }
 
 void FrameLoaderClientAndroid::updateGlobalHistory() {
@@ -619,7 +660,7 @@ void FrameLoaderClientAndroid::updateGlobalHistory() {
             && docLoader->response().httpStatusCode() < 400) {
         m_webFrame->updateVisitedHistory(docLoader->urlForHistory(), false);
         if (!docLoader->serverRedirectSourceForHistory().isNull())
-            m_webFrame->updateVisitedHistory(KURL(docLoader->serverRedirectDestinationForHistory()), false);
+            m_webFrame->updateVisitedHistory(KURL(ParsedURLString, docLoader->serverRedirectDestinationForHistory()), false);
     }
 }
 
@@ -635,16 +676,38 @@ bool FrameLoaderClientAndroid::shouldGoToHistoryItem(HistoryItem* item) const {
     return item != NULL;
 }
 
+void FrameLoaderClientAndroid::didDisplayInsecureContent()
+{
+    notImplemented();
+}
+
+void FrameLoaderClientAndroid::didRunInsecureContent(SecurityOrigin*)
+{
+    notImplemented();
+}
+
 void FrameLoaderClientAndroid::committedLoad(DocumentLoader* loader, const char* data, int length) {
-    ASSERT(m_frame);
-    String encoding = loader->overrideEncoding();
-    bool userChosen = !encoding.isNull();
-    if (encoding.isNull())
-        encoding = loader->response().textEncodingName();
-    loader->frameLoader()->setEncoding(encoding, userChosen);
-    Document *doc = m_frame->document();
-    if (doc) {
-        loader->frameLoader()->addData(data, length);
+    if (!m_manualLoader) {
+        ASSERT(m_frame);
+        String encoding = loader->overrideEncoding();
+        bool userChosen = !encoding.isNull();
+        if (encoding.isNull())
+            encoding = loader->response().textEncodingName();
+        loader->frameLoader()->setEncoding(encoding, userChosen);
+        Document *doc = m_frame->document();
+        if (doc)
+            loader->frameLoader()->addData(data, length);
+    }
+    if (m_manualLoader) {
+        if (!m_hasSentResponseToPlugin) {
+            m_manualLoader->didReceiveResponse(loader->response());
+            // Failure could cause the main document to have an error causing
+            // the manual loader to be reset.
+            if (!m_manualLoader)
+                return;
+            m_hasSentResponseToPlugin = true;
+        }
+        m_manualLoader->didReceiveData(data, length);
     }
 }
 
@@ -698,7 +761,10 @@ bool FrameLoaderClientAndroid::canShowMIMEType(const String& mimeType) const {
     if (MIMETypeRegistry::isSupportedImageResourceMIMEType(mimeType) ||
             MIMETypeRegistry::isSupportedNonImageMIMEType(mimeType) ||
             MIMETypeRegistry::isSupportedJavaScriptMIMEType(mimeType) ||
-            PluginDatabase::installedPlugins()->isMIMETypeRegistered(mimeType) ||
+            (m_frame && m_frame->settings()
+                    && m_frame->settings()->arePluginsEnabled()
+                    && PluginDatabase::installedPlugins()->isMIMETypeRegistered(
+                            mimeType)) ||
             DOMImplementation::isTextMIMEType(mimeType) ||
             DOMImplementation::isXMLMIMEType(mimeType))
         return true;
@@ -724,12 +790,11 @@ void FrameLoaderClientAndroid::frameLoadCompleted() {
 }
 
 void FrameLoaderClientAndroid::saveViewStateToItem(HistoryItem* item) {
-#ifdef ANDROID_HISTORY_CLIENT
     ASSERT(m_frame);
     ASSERT(item);
     // We should have added a bridge when the child item was added to its
     // parent.
-    WebHistoryItem* bridge = item->bridge();
+    AndroidWebHistoryBridge* bridge = item->bridge();
     ASSERT(bridge);
     // store the current scale (only) for the top frame
     if (!m_frame->tree()->parent()) {
@@ -739,41 +804,38 @@ void FrameLoaderClientAndroid::saveViewStateToItem(HistoryItem* item) {
     }
 
     WebCore::notifyHistoryItemChanged(item);
-#endif
 }
 
 void FrameLoaderClientAndroid::restoreViewState() {
-#ifdef ANDROID_HISTORY_CLIENT
     WebViewCore* webViewCore = WebViewCore::getWebViewCore(m_frame->view());
-    HistoryItem* item = m_frame->loader()->currentHistoryItem();
+    HistoryItem* item = m_frame->loader()->history()->currentItem();
+    AndroidWebHistoryBridge* bridge = item->bridge();
     // restore the scale (only) for the top frame
     if (!m_frame->tree()->parent()) {
-        int scale = item->bridge()->scale();
+        int scale = bridge->scale();
         webViewCore->restoreScale(scale);
-        int screenWidthScale = item->bridge()->screenWidthScale();
+        int screenWidthScale = bridge->screenWidthScale();
         if (screenWidthScale != scale)
             webViewCore->restoreScreenWidthScale(screenWidthScale);
     }
-#endif
 }
 
-#ifdef ANDROID_HISTORY_CLIENT
-void FrameLoaderClientAndroid::dispatchDidAddHistoryItem(HistoryItem* item) const {
+void FrameLoaderClientAndroid::dispatchDidAddBackForwardItem(HistoryItem* item) const {
     ASSERT(m_frame);
     m_webFrame->addHistoryItem(item);
 }
 
-void FrameLoaderClientAndroid::dispatchDidRemoveHistoryItem(HistoryItem* item, int index) const {
+void FrameLoaderClientAndroid::dispatchDidRemoveBackForwardItem(HistoryItem* item) const {
     ASSERT(m_frame);
-    m_webFrame->removeHistoryItem(index);
+    m_webFrame->removeHistoryItem(0);
 }
 
-void FrameLoaderClientAndroid::dispatchDidChangeHistoryIndex(
-        BackForwardList* list) const {
+void FrameLoaderClientAndroid::dispatchDidChangeBackForwardIndex() const {
     ASSERT(m_frame);
+    BackForwardList* list = m_frame->page()->backForwardList();
+    ASSERT(list);
     m_webFrame->updateHistoryIndex(list->backListCount());
 }
-#endif
 
 void FrameLoaderClientAndroid::provisionalLoadStarted() {
     ASSERT(m_frame);
@@ -806,12 +868,17 @@ String FrameLoaderClientAndroid::userAgent(const KURL& u) {
     return m_webFrame->userAgentForURL(&u);
 }
 
-void FrameLoaderClientAndroid::savePlatformDataToCachedFrame(WebCore::CachedFrame*) {
-    notImplemented();
+void FrameLoaderClientAndroid::savePlatformDataToCachedFrame(WebCore::CachedFrame* cachedFrame) {
+    CachedFramePlatformDataAndroid* platformData = new CachedFramePlatformDataAndroid(m_frame->settings());
+    cachedFrame->setCachedFramePlatformData(platformData);
 }
 
-void FrameLoaderClientAndroid::transitionToCommittedFromCachedFrame(WebCore::CachedFrame*) {
-    notImplemented();
+void FrameLoaderClientAndroid::transitionToCommittedFromCachedFrame(WebCore::CachedFrame* cachedFrame) {
+    CachedFramePlatformDataAndroid* platformData = reinterpret_cast<CachedFramePlatformDataAndroid*>(cachedFrame->cachedFramePlatformData());
+#ifdef ANDROID_META_SUPPORT
+   platformData->restoreMetadata(m_frame->settings());
+#endif
+   m_webFrame->transitionToCommitted(m_frame);
 }
 
 void FrameLoaderClientAndroid::transitionToCommittedForNewPage() {
@@ -823,32 +890,29 @@ void FrameLoaderClientAndroid::transitionToCommittedForNewPage() {
         m_frame->settings()->resetMetadataSettings();
 #endif
 
-    if (m_frame->settings() && !m_frame->settings()->usesPageCache()) {
-        m_webFrame->transitionToCommitted(m_frame);
-        return;
-    }
+    // Save the old WebViewCore before creating a new FrameView. There is one
+    // WebViewCore per page. Each frame, including the main frame and sub frame,
+    // has a 1:1 FrameView and WebFrameView.
+    WebViewCore* webViewCore = WebViewCore::getWebViewCore(m_frame->view());
+    Retain(webViewCore);
 
-    // Remember the old WebFrameView
-    WebFrameView* webFrameView = static_cast<WebFrameView*> (
-            m_frame->view()->platformWidget());
-    Retain(webFrameView);
+    // Save the old WebFrameView's bounds and apply them to the new WebFrameView
+    WebFrameView* oldWebFrameView = static_cast<WebFrameView*> (m_frame->view()->platformWidget());
+    IntRect bounds = oldWebFrameView->getBounds();
+    IntRect windowBounds = oldWebFrameView->getWindowBounds();
+    WebCore::FrameView* oldFrameView = oldWebFrameView->view();
+    m_frame->createView(bounds.size(), oldFrameView->baseBackgroundColor(), oldFrameView->isTransparent(), IntSize(), false);
 
-    // Remove the old FrameView
-    m_frame->setView(NULL);
-
-    // Create a new FrameView and associate it with the saved webFrameView
-    RefPtr<FrameView> view = FrameView::create(m_frame);
-    webFrameView->setView(view.get());
-
-    Release(webFrameView);
-
-    // Give the new FrameView to the Frame
-    m_frame->setView(view);
-
-    if (m_frame->ownerRenderer())
-        m_frame->ownerRenderer()->setWidget(view.get());
-
-    m_frame->view()->initScrollbars();
+    // Create a new WebFrameView for the new FrameView
+    WebFrameView* newFrameView = new WebFrameView(m_frame->view(), webViewCore);
+    newFrameView->setLocation(bounds.x(), bounds.y());
+    newFrameView->setSize(bounds.width(), bounds.height());
+    newFrameView->setWindowBounds(windowBounds.x(), windowBounds.y(), windowBounds.width(), windowBounds.height());
+    // newFrameView attaches itself to FrameView which Retains the reference, so
+    // call Release for newFrameView
+    Release(newFrameView);
+    // WebFrameView Retains webViewCore, so call Release for webViewCore
+    Release(webViewCore);
 
     m_webFrame->transitionToCommitted(m_frame);
 }
@@ -860,8 +924,7 @@ bool FrameLoaderClientAndroid::canCachePage() const {
 void FrameLoaderClientAndroid::download(ResourceHandle* handle, const ResourceRequest&,
                                 const ResourceRequest&, const ResourceResponse&) {
     // Get the C++ side of the load listener and tell it to handle the download
-    WebCoreResourceLoader* loader = handle->getInternal()->m_loader;
-    loader->downloadFile();
+    handle->getInternal()->m_loader->downloadFile();
 }
 
 WTF::PassRefPtr<WebCore::Frame> FrameLoaderClientAndroid::createFrame(const KURL& url, const String& name,
@@ -938,6 +1001,128 @@ static bool isYouTubeUrl(const KURL& url, const String& mimeType)
             && equalIgnoringCase(mimeType, "application/x-shockwave-flash");
 }
 
+static bool isYouTubeInstalled() {
+    return WebCore::packageNotifier().isPackageInstalled("com.google.android.youtube");
+}
+
+// Use PluginWidget as it is not used by Android for real plugins.
+class PluginToggleWidget : public PluginWidget {
+public:
+    PluginToggleWidget(Frame* parent, const IntSize& size,
+            HTMLPlugInElement* elem, const KURL& url,
+            const WTF::Vector<String>& paramNames,
+            const WTF::Vector<String>& paramValues, const String& mimeType,
+            bool loadManually)
+        : m_parent(parent)
+        , m_size(size)
+        , m_element(elem)
+        , m_url(url)
+        , m_paramNames(paramNames)
+        , m_paramValues(paramValues)
+        , m_mimeType(mimeType)
+        , m_loadManually(loadManually)
+    {
+        resize(size);
+    }
+
+    virtual void paint(GraphicsContext* ctx, const IntRect& rect)
+    {
+        // Most of this code is copied from PluginView::paintMissingPluginIcon
+        // with slight modification.
+
+        static RefPtr<Image> image;
+        if (!image) {
+            image = Image::loadPlatformResource("togglePlugin");
+        }
+
+        IntRect imageRect(x(), y(), image->width(), image->height());
+
+        int xOffset = (width() - imageRect.width()) >> 1;
+        int yOffset = (height() - imageRect.height()) >> 1;
+
+        imageRect.move(xOffset, yOffset);
+
+        if (!rect.intersects(imageRect))
+            return;
+
+        // FIXME: We need to clip similarly to paintMissingPluginIcon but it is
+        // way screwed up right now. It has something to do with how we tell
+        // webkit the scroll position and it causes the placeholder to get
+        // clipped very badly. http://b/issue?id=2533303
+
+        ctx->save();
+        ctx->clip(frameRect());
+
+        ctx->setFillColor(Color::white, DeviceColorSpace);
+        ctx->fillRect(frameRect());
+        if (frameRect().contains(imageRect)) {
+            // Leave a 2 pixel padding.
+            const int pixelWidth = 2;
+            IntRect innerRect = frameRect();
+            innerRect.inflate(-pixelWidth);
+            // Draw a 2 pixel light gray border.
+            ctx->setStrokeColor(Color::lightGray, DeviceColorSpace);
+            ctx->strokeRect(innerRect, pixelWidth);
+        }
+
+        // Draw the image in the center
+        ctx->drawImage(image.get(), DeviceColorSpace, imageRect.location());
+        ctx->restore();
+    }
+
+    virtual void handleEvent(Event* event)
+    {
+        if (event->type() != eventNames().clickEvent)
+            return;
+
+        Frame* frame = m_parent->page()->mainFrame();
+        while (frame) {
+            RenderView* view = frame->contentRenderer();
+            const HashSet<RenderWidget*> widgets = view->widgets();
+            HashSet<RenderWidget*>::const_iterator it = widgets.begin();
+            HashSet<RenderWidget*>::const_iterator end = widgets.end();
+            for (; it != end; ++it) {
+                Widget* widget = (*it)->widget();
+                // PluginWidget is used only with PluginToggleWidget
+                if (widget->isPluginWidget()) {
+                    PluginToggleWidget* ptw =
+                            static_cast<PluginToggleWidget*>(widget);
+                    ptw->swapPlugin(*it);
+                }
+            }
+            frame = frame->tree()->traverseNext();
+        }
+    }
+
+    void swapPlugin(RenderWidget* renderer) {
+        typedef FrameLoaderClientAndroid FLCA;
+        FLCA* client = static_cast<FLCA*>(m_parent->loader()->client());
+        client->enableOnDemandPlugins();
+        WTF::PassRefPtr<PluginView> prpWidget =
+                PluginView::create(m_parent.get(),
+                                   m_size,
+                                   m_element,
+                                   m_url,
+                                   m_paramNames,
+                                   m_paramValues,
+                                   m_mimeType,
+                                   m_loadManually);
+        RefPtr<Widget> myProtector(this);
+        prpWidget->focusPluginElement();
+        renderer->setWidget(prpWidget);
+    }
+
+private:
+    RefPtr<Frame>       m_parent;
+    IntSize             m_size;
+    HTMLPlugInElement*  m_element;
+    KURL                m_url;
+    WTF::Vector<String> m_paramNames;
+    WTF::Vector<String> m_paramValues;
+    String              m_mimeType;
+    bool                m_loadManually;
+};
+
 WTF::PassRefPtr<Widget> FrameLoaderClientAndroid::createPlugin(
         const IntSize& size,
         HTMLPlugInElement* element,
@@ -946,8 +1131,44 @@ WTF::PassRefPtr<Widget> FrameLoaderClientAndroid::createPlugin(
         const WTF::Vector<String>& values,
         const String& mimeType,
         bool loadManually) {
+    WTF::PassRefPtr<PluginView> prpWidget = 0;
+#ifdef ANDROID_PLUGINS
+    // This is copied from PluginView.cpp. We need to determine if a plugin
+    // will be found before doing some of the work in PluginView.
+    String mimeTypeCopy = mimeType;
+    PluginPackage* plugin =
+            PluginDatabase::installedPlugins()->findPlugin(url, mimeTypeCopy);
+    if (!plugin && PluginDatabase::installedPlugins()->refresh()) {
+        mimeTypeCopy = mimeType;
+        plugin = PluginDatabase::installedPlugins()->findPlugin(url,
+                                                                mimeTypeCopy);
+    }
+    Settings* settings = m_frame->settings();
+    // Do the placeholder if plugins are on-demand and there is a plugin for the
+    // given mime type.
+    if (settings && settings->arePluginsOnDemand() && plugin &&
+            !m_onDemandPluginsEnabled) {
+        return adoptRef(new PluginToggleWidget(m_frame, size, element, url,
+                    names, values, mimeType, loadManually));
+    }
+    prpWidget = PluginView::create(m_frame,
+                                   size,
+                                   element,
+                                   url,
+                                   names,
+                                   values,
+                                   mimeType,
+                                   loadManually);
+    // Return the plugin if it was loaded successfully. Otherwise, fallback to
+    // the youtube placeholder if possible. No need to check prpWidget as
+    // PluginView::create will create a PluginView for missing plugins.
+    // Note: this check really only checks if the plugin was found and not if
+    // the plugin was loaded.
+    if (prpWidget->status() == PluginStatusLoadedSuccessfully)
+        return prpWidget;
+#endif
     // Create an iframe for youtube urls.
-    if (isYouTubeUrl(url, mimeType)) {
+    if (isYouTubeUrl(url, mimeType) && isYouTubeInstalled()) {
         WTF::RefPtr<Frame> frame = createFrame(blankURL(), String(), element,
                 String(), false, 0, 0);
         if (frame) {
@@ -970,30 +1191,20 @@ WTF::PassRefPtr<Widget> FrameLoaderClientAndroid::createPlugin(
             s = s.replace("VIDEO_ID", videoId);
             delete a;
             loadDataIntoFrame(frame.get(),
-                    KURL("file:///android_asset/webkit/"), String(), s);
+                    KURL(ParsedURLString, "file:///android_asset/webkit/"), String(), s);
             // Transfer ownership to a local refptr.
             WTF::RefPtr<Widget> widget(frame->view());
             return widget.release();
         }
-        return NULL;
     }
-#ifdef ANDROID_PLUGINS
-    return PluginView::create(m_frame,
-                              size,
-                              element,
-                              url,
-                              names,
-                              values,
-                              mimeType,
-                              loadManually);
-#else
-    return NULL;
-#endif
+    return prpWidget;
 }
 
 void FrameLoaderClientAndroid::redirectDataToPlugin(Widget* pluginWidget) {
-    // don't support plugin yet
-    notImplemented();
+    // Do not redirect data if the Widget is our plugin placeholder.
+    if (pluginWidget->isPluginView()) {
+        m_manualLoader = static_cast<PluginView*>(pluginWidget);
+    }
 }
 
 WTF::PassRefPtr<Widget> FrameLoaderClientAndroid::createJavaAppletWidget(const IntSize&, HTMLAppletElement*,
@@ -1008,35 +1219,7 @@ WTF::PassRefPtr<Widget> FrameLoaderClientAndroid::createJavaAppletWidget(const I
 // the contents and work out if it can render it.
 ObjectContentType FrameLoaderClientAndroid::objectContentType(const KURL& url,
                                         const String& mimeType) {
-    if (mimeType.length() == 0)
-    {
-        // Guess the mimeType from the extension
-        if (url.hasPath())
-        {
-            String path = url.path();
-            int lastIndex = path.reverseFind('.');
-            static const String image("image/");
-            if (lastIndex >= 0)
-            {
-                String mime(path.substring(lastIndex + 1));
-                mime.insert(image, 0);
-                if (Image::supportsType(mime))
-                    return ObjectContentImage;
-            }
-        }
-        return ObjectContentFrame;
-    }
-
-    if (Image::supportsType(mimeType))
-        return ObjectContentImage;
-
-    if (PluginDatabase::installedPlugins()->isMIMETypeRegistered(mimeType))
-        return ObjectContentOtherPlugin;
-
-    if (MIMETypeRegistry::isSupportedNonImageMIMEType(mimeType))
-        return ObjectContentFrame;
-
-    return ObjectContentNone;
+    return FrameLoader::defaultObjectContentType(url, mimeType);
 }
 
 // This function allows the application to set the correct CSS media
@@ -1049,7 +1232,11 @@ String FrameLoaderClientAndroid::overrideMediaType() const {
 }
 
 // This function is used to re-attach Javascript<->native code classes.
-void FrameLoaderClientAndroid::windowObjectCleared() {
+void FrameLoaderClientAndroid::dispatchDidClearWindowObjectInWorld(DOMWrapperWorld* world)
+{
+    if (world != mainThreadNormalWorld())
+        return;
+
     ASSERT(m_frame);
     LOGV("::WebCore:: windowObjectCleared called on frame %p for %s\n",
     		m_frame, m_frame->loader()->url().string().ascii().data());
@@ -1088,7 +1275,7 @@ void FrameLoaderClientAndroid::didAddIconForPageUrl(const String& pageUrl) {
     // may register for icon notifications again since the icon data may have
     // to be read from disk.
     registerForIconNotification(false);
-    KURL u(pageUrl);
+    KURL u(ParsedURLString, pageUrl);
     if (equalIgnoringFragmentIdentifier(u, m_frame->loader()->url())) {
         dispatchDidReceiveIcon();
     }

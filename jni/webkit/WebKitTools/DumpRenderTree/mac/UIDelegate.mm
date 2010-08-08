@@ -36,7 +36,9 @@
 #import <WebKit/WebFramePrivate.h>
 #import <WebKit/WebHTMLViewPrivate.h>
 #import <WebKit/WebSecurityOriginPrivate.h>
+#import <WebKit/WebUIDelegatePrivate.h>
 #import <WebKit/WebView.h>
+#import <WebKit/WebViewPrivate.h>
 #import <wtf/Assertions.h>
 
 DumpRenderTreeDraggingInfo *draggingInfo = nil;
@@ -121,6 +123,9 @@ DumpRenderTreeDraggingInfo *draggingInfo = nil;
 
     WebView *webView = createWebViewAndOffscreenWindow();
     
+    if (gLayoutTestController->newWindowsCopyBackForwardList())
+        [webView _loadBackForwardListFromOtherView:sender];
+    
     return [webView autorelease];
 }
 
@@ -148,6 +153,21 @@ DumpRenderTreeDraggingInfo *draggingInfo = nil;
 {
     if (gLayoutTestController->dumpStatusCallbacks())
         printf("UI DELEGATE STATUS CALLBACK: setStatusText:%s\n", [text UTF8String]);
+}
+
+- (void)webView:(WebView *)webView decidePolicyForGeolocationRequestFromOrigin:(WebSecurityOrigin *)origin frame:(WebFrame *)frame listener:(id<WebGeolocationPolicyListener>)listener
+{
+    if (gLayoutTestController->isGeolocationPermissionSet()) {
+        if (gLayoutTestController->geolocationPermission())
+            [listener allow];
+        else
+            [listener deny];
+    }
+}
+
+- (BOOL)webView:(WebView *)sender shouldHaltPlugin:(DOMNode *)pluginNode
+{
+    return NO;
 }
 
 - (void)dealloc

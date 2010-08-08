@@ -62,6 +62,10 @@ namespace WebCore {
     class GraphicsLayer;
 #endif
 
+#if ENABLE(NOTIFICATIONS)
+    class NotificationPresenter;
+#endif
+
     class ChromeClient {
     public:
         virtual void chromeDestroyed() = 0;
@@ -73,11 +77,17 @@ namespace WebCore {
         
         virtual float scaleFactor() = 0;
     
+#ifdef ANDROID_USER_GESTURE
+        virtual void focus(bool userGesture) = 0;
+#else
         virtual void focus() = 0;
+#endif
         virtual void unfocus() = 0;
 
         virtual bool canTakeFocus(FocusDirection) = 0;
         virtual void takeFocus(FocusDirection) = 0;
+
+        virtual void focusedNodeChanged(Node*) = 0;
 
         // The Frame pointer provides the ChromeClient with context about which
         // Frame wants to create the new Page.  Also, the newly created window
@@ -117,6 +127,9 @@ namespace WebCore {
         virtual bool shouldInterruptJavaScript() = 0;
         virtual bool tabsToLinks() const = 0;
 
+        virtual void registerProtocolHandler(const String&, const String&, const String&, const String&) { }
+        virtual void registerContentHandler(const String&, const String&, const String&, const String&) { }
+
         virtual IntRect windowResizerRect() const = 0;
 
         // Methods used by HostWindow.
@@ -124,11 +137,12 @@ namespace WebCore {
         virtual void scroll(const IntSize& scrollDelta, const IntRect& rectToScroll, const IntRect& clipRect) = 0;
         virtual IntPoint screenToWindow(const IntPoint&) const = 0;
         virtual IntRect windowToScreen(const IntRect&) const = 0;
-        virtual PlatformWidget platformWindow() const = 0;
+        virtual PlatformPageClient platformPageClient() const = 0;
         virtual void contentsSizeChanged(Frame*, const IntSize&) const = 0;
         virtual void scrollRectIntoView(const IntRect&, const ScrollView*) const = 0; // Currently only Mac has a non empty implementation.
         // End methods used by HostWindow.
 
+        virtual void scrollbarsModeDidChange() const = 0;
         virtual void mouseDidMoveOverElement(const HitTestResult&, unsigned modifierFlags) = 0;
 
         virtual void setToolTip(const String&, TextDirection) = 0;
@@ -152,6 +166,10 @@ namespace WebCore {
         virtual void dashboardRegionsChanged();
 #endif
 
+#if ENABLE(NOTIFICATIONS)
+        virtual NotificationPresenter* notificationPresenter() const = 0;
+#endif
+
         virtual void populateVisitedLinks();
 
         virtual FloatRect customHighlightRect(Node*, const AtomicString& type, const FloatRect& lineRect);
@@ -166,9 +184,10 @@ namespace WebCore {
                                           float value, float proportion, ScrollbarControlPartMask);
         virtual bool paintCustomScrollCorner(GraphicsContext*, const FloatRect&);
 
-        // This is an asynchronous call. The ChromeClient can display UI asking the user for permission
-        // to use Geolococation. The ChromeClient must call Geolocation::setShouldClearCache() appropriately.
+        // This can be either a synchronous or asynchronous call. The ChromeClient can display UI asking the user for permission
+        // to use Geolocation.
         virtual void requestGeolocationPermissionForFrame(Frame*, Geolocation*) = 0;
+        virtual void cancelGeolocationPermissionRequestForFrame(Frame*) = 0;
             
         virtual void runOpenPanel(Frame*, PassRefPtr<FileChooser>) = 0;
 
@@ -194,6 +213,10 @@ namespace WebCore {
         virtual void scheduleCompositingLayerSync() = 0;
 #endif
 
+        virtual bool supportsFullscreenForNode(const Node*) { return false; }
+        virtual void enterFullscreenForNode(Node*) { }
+        virtual void exitFullscreenForNode(Node*) { }
+        
 #if PLATFORM(MAC)
         virtual KeyboardUIMode keyboardUIMode() { return KeyboardAccessDefault; }
 
@@ -201,6 +224,10 @@ namespace WebCore {
         virtual void makeFirstResponder(NSResponder *) { }
 
         virtual void willPopUpMenu(NSMenu *) { }
+#endif
+
+#if ENABLE(TOUCH_EVENTS)
+        virtual void needTouchEvents(bool) = 0;
 #endif
 
     protected:

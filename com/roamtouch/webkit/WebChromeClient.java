@@ -17,6 +17,7 @@
 package android.webkit;
 
 import android.graphics.Bitmap;
+import android.net.Uri;
 import android.os.Message;
 import android.view.View;
 
@@ -261,8 +262,24 @@ public class WebChromeClient {
      * @param message The error message to report.
      * @param lineNumber The line number of the error.
      * @param sourceID The name of the source file that caused the error.
+     * @deprecated Use {@link #onConsoleMessage(ConsoleMessage) onConsoleMessage(ConsoleMessage)}
+     *      instead.
      */
-    public void onConsoleMessage(String message, int lineNumber, String sourceID) {}
+    @Deprecated
+    public void onConsoleMessage(String message, int lineNumber, String sourceID) { }
+
+    /**
+     * Report a JavaScript console message to the host application. The ChromeClient
+     * should override this to process the log message as they see fit.
+     * @param consoleMessage Object containing details of the console message.
+     * @return true if the message is handled by the client.
+     */
+    public boolean onConsoleMessage(ConsoleMessage consoleMessage) {
+        // Call the old version of this function for backwards compatability.
+        onConsoleMessage(consoleMessage.message(), consoleMessage.lineNumber(),
+                consoleMessage.sourceId());
+        return false;
+    }
 
     /**
      * When not playing, video elements are represented by a 'poster' image. The
@@ -294,4 +311,13 @@ public class WebChromeClient {
     public void getVisitedHistory(ValueCallback<String[]> callback) {
     }
 
+    /**
+     * Tell the client to open a file chooser.
+     * @param uploadFile A ValueCallback to set the URI of the file to upload.
+     *      onReceiveValue must be called to wake up the thread.
+     * @hide
+     */
+    public void openFileChooser(ValueCallback<Uri> uploadFile) {
+        uploadFile.onReceiveValue(null);
+    }
 }

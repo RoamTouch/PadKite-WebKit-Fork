@@ -79,7 +79,7 @@ public:
     virtual void removedFromDocument();
 
     // from CachedResourceClient
-    virtual void setCSSStyleSheet(const String &url, const String& charset, const CachedCSSStyleSheet* sheet);
+    virtual void setCSSStyleSheet(const String& href, const KURL& baseURL, const String& charset, const CachedCSSStyleSheet* sheet);
     bool isLoading() const;
     virtual bool sheetLoaded();
 
@@ -102,6 +102,14 @@ public:
     virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
 
     virtual void finishParsingChildren();
+
+#ifdef ANDROID_INSTRUMENT
+    // Overridden to resolve the ambiguous
+    void* operator new(size_t size);
+    void* operator new[](size_t size);
+    void operator delete(void* p, size_t size);
+    void operator delete[](void* p, size_t size);
+#endif
 
 protected:
     CachedResourceHandle<CachedCSSStyleSheet> m_cachedSheet;

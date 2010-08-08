@@ -35,117 +35,70 @@
 #include "EventListener.h"
 
 #include "V8AbstractEventListener.h"
+#include "V8Attr.h"
 #include "V8Binding.h"
-#include "V8CustomBinding.h"
+#include "V8CDATASection.h"
+#include "V8Comment.h"
 #include "V8CustomEventListener.h"
+#include "V8Document.h"
+#include "V8DocumentFragment.h"
+#include "V8DocumentType.h"
+#include "V8Element.h"
+#include "V8Entity.h"
+#include "V8EntityReference.h"
 #include "V8Node.h"
-#include "V8ObjectEventListener.h"
+#include "V8Notation.h"
+#include "V8ProcessingInstruction.h"
 #include "V8Proxy.h"
+#include "V8Text.h"
 
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
 
-static inline String toEventType(v8::Local<v8::String> value)
-{
-    String key = toWebCoreString(value);
-    ASSERT(key.startsWith("on"));
-    return key.substring(2);
-}
-
-static PassRefPtr<EventListener> getEventListener(Node* node, v8::Local<v8::Value> value, bool isAttribute, bool findOnly)
-{
-    V8Proxy* proxy = V8Proxy::retrieve(node->scriptExecutionContext());
-    // The document might be created using createDocument, which does
-    // not have a frame, use the active frame.
-    if (!proxy)
-        proxy = V8Proxy::retrieve(V8Proxy::retrieveFrameForEnteredContext());
-
-    if (proxy) {
-        V8EventListenerList* list = proxy->objectListeners();
-        return findOnly ? list->findWrapper(value, isAttribute) : list->findOrCreateWrapper<V8ObjectEventListener>(proxy->frame(), value, isAttribute);
-    }
-
-    return 0;
-}
-
-ACCESSOR_SETTER(NodeEventHandler)
-{
-    Node* node = V8DOMWrapper::convertDOMWrapperToNode<Node>(info.Holder());
-    String eventType = toEventType(name);
-
-    // Remove hidden dependency on the old event handler.
-    if (EventListener* listener = node->getAttributeEventListener(eventType)) {
-        if (static_cast<V8AbstractEventListener*>(listener)->isObjectListener()) {
-            v8::Local<v8::Object> v8Listener = static_cast<V8ObjectEventListener*>(listener)->getListenerObject();
-            removeHiddenDependency(info.Holder(), v8Listener, V8Custom::kNodeEventListenerCacheIndex);
-        }
-    }
-
-    // Set handler if the value is a function.
-    if (value->IsFunction()) {
-        RefPtr<EventListener> listener = getEventListener(node, value, true, false);
-        if (listener) {
-            node->setAttributeEventListener(eventType, listener);
-            createHiddenDependency(info.Holder(), value, V8Custom::kNodeEventListenerCacheIndex);
-        }
-    } else {
-        // Otherwise, clear the handler.
-        node->clearAttributeEventListener(eventType);
-    }
-}
-
-ACCESSOR_GETTER(NodeEventHandler)
-{
-    Node* node = V8DOMWrapper::convertDOMWrapperToNode<Node>(info.Holder());
-
-    EventListener* listener = node->getAttributeEventListener(toEventType(name));
-    return V8DOMWrapper::convertEventListenerToV8Object(listener);
-}
-
-CALLBACK_FUNC_DECL(NodeAddEventListener)
+v8::Handle<v8::Value> V8Node::addEventListenerCallback(const v8::Arguments& args)
 {
     INC_STATS("DOM.Node.addEventListener()");
-    Node* node = V8DOMWrapper::convertDOMWrapperToNode<Node>(args.Holder());
+    Node* node = V8Node::toNative(args.Holder());
 
-    RefPtr<EventListener> listener = getEventListener(node, args[1], false, false);
+    RefPtr<EventListener> listener = V8DOMWrapper::getEventListener(node, args[1], false, ListenerFindOrCreate);
     if (listener) {
         String type = toWebCoreString(args[0]);
         bool useCapture = args[2]->BooleanValue();
         node->addEventListener(type, listener, useCapture);
-        createHiddenDependency(args.Holder(), args[1], V8Custom::kNodeEventListenerCacheIndex);
+        createHiddenDependency(args.Holder(), args[1], cacheIndex);
     }
     return v8::Undefined();
 }
 
-CALLBACK_FUNC_DECL(NodeRemoveEventListener)
+v8::Handle<v8::Value> V8Node::removeEventListenerCallback(const v8::Arguments& args)
 {
     INC_STATS("DOM.Node.removeEventListener()");
-    Node* node = V8DOMWrapper::convertDOMWrapperToNode<Node>(args.Holder());
+    Node* node = V8Node::toNative(args.Holder());
 
     // It is possbile that the owner document of the node is detached
     // from the frame.
     // See issue http://b/878909
-    RefPtr<EventListener> listener = getEventListener(node, args[1], false, true);
+    RefPtr<EventListener> listener = V8DOMWrapper::getEventListener(node, args[1], false, ListenerFindOnly);
     if (listener) {
-        String type = toWebCoreString(args[0]);
+        AtomicString type = v8ValueToAtomicWebCoreString(args[0]);
         bool useCapture = args[2]->BooleanValue();
         node->removeEventListener(type, listener.get(), useCapture);
-        removeHiddenDependency(args.Holder(), args[1], V8Custom::kNodeEventListenerCacheIndex);
+        removeHiddenDependency(args.Holder(), args[1], cacheIndex);
     }
 
     return v8::Undefined();
 }
 
 // This function is customized to take advantage of the optional 4th argument: shouldLazyAttach
-CALLBACK_FUNC_DECL(NodeInsertBefore)
+v8::Handle<v8::Value> V8Node::insertBeforeCallback(const v8::Arguments& args)
 {
     INC_STATS("DOM.Node.insertBefore");
     v8::Handle<v8::Object> holder = args.Holder();
-    Node* imp = V8DOMWrapper::convertDOMWrapperToNode<Node>(holder);
+    Node* imp = V8Node::toNative(holder);
     ExceptionCode ec = 0;
-    Node* newChild = V8Node::HasInstance(args[0]) ? V8DOMWrapper::convertDOMWrapperToNode<Node>(v8::Handle<v8::Object>::Cast(args[0])) : 0;
-    Node* refChild = V8Node::HasInstance(args[1]) ? V8DOMWrapper::convertDOMWrapperToNode<Node>(v8::Handle<v8::Object>::Cast(args[1])) : 0;
+    Node* newChild = V8Node::HasInstance(args[0]) ? V8Node::toNative(v8::Handle<v8::Object>::Cast(args[0])) : 0;
+    Node* refChild = V8Node::HasInstance(args[1]) ? V8Node::toNative(v8::Handle<v8::Object>::Cast(args[1])) : 0;
     bool success = imp->insertBefore(newChild, refChild, ec, true);
     if (ec) {
         V8Proxy::setDOMException(ec);
@@ -157,14 +110,14 @@ CALLBACK_FUNC_DECL(NodeInsertBefore)
 }
 
 // This function is customized to take advantage of the optional 4th argument: shouldLazyAttach
-CALLBACK_FUNC_DECL(NodeReplaceChild)
+v8::Handle<v8::Value> V8Node::replaceChildCallback(const v8::Arguments& args)
 {
     INC_STATS("DOM.Node.replaceChild");
     v8::Handle<v8::Object> holder = args.Holder();
-    Node* imp = V8DOMWrapper::convertDOMWrapperToNode<Node>(holder);
+    Node* imp = V8Node::toNative(holder);
     ExceptionCode ec = 0;
-    Node* newChild = V8Node::HasInstance(args[0]) ? V8DOMWrapper::convertDOMWrapperToNode<Node>(v8::Handle<v8::Object>::Cast(args[0])) : 0;
-    Node* oldChild = V8Node::HasInstance(args[1]) ? V8DOMWrapper::convertDOMWrapperToNode<Node>(v8::Handle<v8::Object>::Cast(args[1])) : 0;
+    Node* newChild = V8Node::HasInstance(args[0]) ? V8Node::toNative(v8::Handle<v8::Object>::Cast(args[0])) : 0;
+    Node* oldChild = V8Node::HasInstance(args[1]) ? V8Node::toNative(v8::Handle<v8::Object>::Cast(args[1])) : 0;
     bool success = imp->replaceChild(newChild, oldChild, ec, true);
     if (ec) {
         V8Proxy::setDOMException(ec);
@@ -175,13 +128,13 @@ CALLBACK_FUNC_DECL(NodeReplaceChild)
     return v8::Null();
 }
 
-CALLBACK_FUNC_DECL(NodeRemoveChild)
+v8::Handle<v8::Value> V8Node::removeChildCallback(const v8::Arguments& args)
 {
     INC_STATS("DOM.Node.removeChild");
     v8::Handle<v8::Object> holder = args.Holder();
-    Node* imp = V8DOMWrapper::convertDOMWrapperToNode<Node>(holder);
+    Node* imp = V8Node::toNative(holder);
     ExceptionCode ec = 0;
-    Node* oldChild = V8Node::HasInstance(args[0]) ? V8DOMWrapper::convertDOMWrapperToNode<Node>(v8::Handle<v8::Object>::Cast(args[0])) : 0;
+    Node* oldChild = V8Node::HasInstance(args[0]) ? V8Node::toNative(v8::Handle<v8::Object>::Cast(args[0])) : 0;
     bool success = imp->removeChild(oldChild, ec);
     if (ec) {
         V8Proxy::setDOMException(ec);
@@ -193,13 +146,13 @@ CALLBACK_FUNC_DECL(NodeRemoveChild)
 }
 
 // This function is customized to take advantage of the optional 4th argument: shouldLazyAttach
-CALLBACK_FUNC_DECL(NodeAppendChild)
+v8::Handle<v8::Value> V8Node::appendChildCallback(const v8::Arguments& args)
 {
     INC_STATS("DOM.Node.appendChild");
     v8::Handle<v8::Object> holder = args.Holder();
-    Node* imp = V8DOMWrapper::convertDOMWrapperToNode<Node>(holder);
+    Node* imp = V8Node::toNative(holder);
     ExceptionCode ec = 0;
-    Node* newChild = V8Node::HasInstance(args[0]) ? V8DOMWrapper::convertDOMWrapperToNode<Node>(v8::Handle<v8::Object>::Cast(args[0])) : 0;
+    Node* newChild = V8Node::HasInstance(args[0]) ? V8Node::toNative(v8::Handle<v8::Object>::Cast(args[0])) : 0;
     bool success = imp->appendChild(newChild, ec, true );
     if (ec) {
         V8Proxy::setDOMException(ec);
@@ -210,4 +163,43 @@ CALLBACK_FUNC_DECL(NodeAppendChild)
     return v8::Null();
 }
 
+v8::Handle<v8::Value> toV8(Node* impl, bool forceNewObject)
+{
+    if (!impl)
+        return v8::Null();
+
+    if (!forceNewObject) {
+        v8::Handle<v8::Value> wrapper = V8DOMWrapper::getWrapper(impl);
+        if (!wrapper.IsEmpty())
+            return wrapper;
+    }
+    switch (impl->nodeType()) {
+    case Node::ELEMENT_NODE:
+        return toV8(static_cast<Element*>(impl), forceNewObject);
+    case Node::ATTRIBUTE_NODE:
+        return toV8(static_cast<Attr*>(impl), forceNewObject);
+    case Node::TEXT_NODE:
+        return toV8(static_cast<Text*>(impl), forceNewObject);
+    case Node::CDATA_SECTION_NODE:
+        return toV8(static_cast<CDATASection*>(impl), forceNewObject);
+    case Node::ENTITY_REFERENCE_NODE:
+        return toV8(static_cast<EntityReference*>(impl), forceNewObject);
+    case Node::ENTITY_NODE:
+        return toV8(static_cast<Entity*>(impl), forceNewObject);
+    case Node::PROCESSING_INSTRUCTION_NODE:
+        return toV8(static_cast<ProcessingInstruction*>(impl), forceNewObject);
+    case Node::COMMENT_NODE:
+        return toV8(static_cast<Comment*>(impl), forceNewObject);
+    case Node::DOCUMENT_NODE:
+        return toV8(static_cast<Document*>(impl), forceNewObject);
+    case Node::DOCUMENT_TYPE_NODE:
+        return toV8(static_cast<DocumentType*>(impl), forceNewObject);
+    case Node::DOCUMENT_FRAGMENT_NODE:
+        return toV8(static_cast<DocumentFragment*>(impl), forceNewObject);
+    case Node::NOTATION_NODE:
+        return toV8(static_cast<Notation*>(impl), forceNewObject);
+    default: break; // XPATH_NAMESPACE_NODE
+    }
+    return V8Node::wrap(impl, forceNewObject);
+}
 } // namespace WebCore

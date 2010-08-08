@@ -179,7 +179,7 @@ TextStream& operator<<(TextStream& ts, const FloatSize& s)
     return ts;
 }
 
-TextStream& operator<<(TextStream& ts, const TransformationMatrix& transform)
+TextStream& operator<<(TextStream& ts, const AffineTransform& transform)
 {
     if (transform.isIdentity())
         ts << "identity";
@@ -310,7 +310,7 @@ static void writeStyle(TextStream& ts, const RenderObject& object)
 
 static TextStream& writePositionAndStyle(TextStream& ts, const RenderObject& object)
 {
-    ts << " " << object.absoluteTransform().mapRect(object.repaintRectInLocalCoordinates());
+    ts << " " << const_cast<RenderObject&>(object).absoluteClippedOverflowRect();
     writeStyle(ts, object);
     return ts;
 }
@@ -521,11 +521,11 @@ void writeRenderResources(TextStream& ts, Node* parent)
             continue;
 
         SVGStyledElement* styled = static_cast<SVGStyledElement*>(svgElement);
-        RefPtr<SVGResource> resource(styled->canvasResource());
+        RefPtr<SVGResource> resource(styled->canvasResource(node->renderer()));
         if (!resource)
             continue;
 
-        String elementId = svgElement->getAttribute(HTMLNames::idAttr);
+        String elementId = svgElement->getAttribute(svgElement->idAttributeName());
         // FIXME: These names are lies!
         if (resource->isPaintServer()) {
             RefPtr<SVGPaintServer> paintServer = WTF::static_pointer_cast<SVGPaintServer>(resource);

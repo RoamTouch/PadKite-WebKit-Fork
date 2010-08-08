@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -25,17 +25,17 @@
 
 #define LOG_TAG "webcoreglue"
 
-#include <config.h>
+#include "config.h"
+#include "WebCoreFrameBridge.h"
 
-#include <wtf/Platform.h>
-
-#include "android_graphics.h"
 #include "Arena.h"
 #include "AtomicString.h"
+#include "BackForwardList.h"
 #include "Cache.h"
+#include "CString.h"
+#include "Chrome.h"
 #include "ChromeClientAndroid.h"
 #include "ContextMenuClientAndroid.h"
-#include "CString.h"
 #include "Document.h"
 #include "DocumentLoader.h"
 #include "DragClientAndroid.h"
@@ -59,18 +59,6 @@
 #include "IconDatabase.h"
 #include "Image.h"
 #include "InspectorClientAndroid.h"
-
-#if USE(JSC)
-#include "GCController.h"
-#include "JSDOMWindow.h"
-#include <runtime/InitializeThreading.h>
-#include <runtime/JSLock.h>
-#elif USE(V8)
-#include "InitializeThreading.h"
-#include "jni_npobject.h"
-#include "jni_instance.h"
-#endif  // USE(JSC)
-
 #include "KURL.h"
 #include "Page.h"
 #include "PageCache.h"
@@ -80,41 +68,93 @@
 #include "RenderTreeAsText.h"
 #include "RenderView.h"
 #include "ResourceHandle.h"
+#include "ResourceHandleInternal.h"
 #include "ScriptController.h"
 #include "ScriptValue.h"
+#include "SecurityOrigin.h"
 #include "SelectionController.h"
 #include "Settings.h"
 #include "SubstituteData.h"
-#include "WebCoreFrameBridge.h"
 #include "WebCoreJni.h"
 #include "WebCoreResourceLoader.h"
 #include "WebHistory.h"
 #include "WebIconDatabase.h"
 #include "WebFrameView.h"
 #include "WebViewCore.h"
+#include "android_graphics.h"
+#include "jni.h"
 #include "wds/DebugServer.h"
 
-#if USE(JSC)
-#include <runtime_root.h>
-#include <runtime_object.h>
-#endif  // USE(JSC)
-
-#include <jni_utility.h>
-#include "jni.h"
-
-#if USE(JSC)
-#include "jni_instance.h"
-#endif  // USE(JSC)
-
+#include <JNIUtility.h>
 #include <JNIHelp.h>
 #include <SkGraphics.h>
+#include <android_runtime/android_util_AssetManager.h>
 #include <utils/misc.h>
 #include <utils/AssetManager.h>
-#include <android_runtime/android_util_AssetManager.h>
+#include <wtf/CurrentTime.h>
+#include <wtf/Platform.h>
+
+#if USE(JSC)
+#include "GCController.h"
+#include "JSDOMWindow.h"
+#include "JavaInstanceJSC.h"
+#include <runtime_object.h>
+#include <runtime_root.h>
+#include <runtime/JSLock.h>
+#elif USE(V8)
+#include "JavaNPObjectV8.h"
+#include "JavaInstanceV8.h"
+#include "V8Counters.h"
+#endif  // USE(JSC)
 
 #ifdef ANDROID_INSTRUMENT
 #include "TimeCounter.h"
 #endif
+
+using namespace JSC::Bindings;
+
+static String* gUploadFileLabel;
+static String* gResetLabel;
+static String* gSubmitLabel;
+
+String* WebCore::PlatformBridge::globalLocalizedName(
+        WebCore::PlatformBridge::rawResId resId)
+{
+    switch (resId) {
+    case WebCore::PlatformBridge::FileUploadLabel:
+        return gUploadFileLabel;
+    case WebCore::PlatformBridge::ResetLabel:
+        return gResetLabel;
+    case WebCore::PlatformBridge::SubmitLabel:
+        return gSubmitLabel;
+    default:
+        return 0;
+    }
+}
+/**
+ * Instantiate the localized name desired.
+ */
+void initGlobalLocalizedName(WebCore::PlatformBridge::rawResId resId,
+        android::WebFrame* webFrame)
+{
+    String** pointer;
+    switch (resId) {
+    case WebCore::PlatformBridge::FileUploadLabel:
+        pointer = &gUploadFileLabel;
+        break;
+    case WebCore::PlatformBridge::ResetLabel:
+        pointer = &gResetLabel;
+        break;
+    case WebCore::PlatformBridge::SubmitLabel:
+        pointer = &gSubmitLabel;
+        break;
+    default:
+        return;
+    }
+    if (!(*pointer) && webFrame) {
+        (*pointer) = new String(webFrame->getRawResourceFilename(resId).impl());
+    }
+}
 
 namespace android {
 
@@ -126,8 +166,8 @@ namespace android {
 
 struct WebFrame::JavaBrowserFrame
 {
-    jobject     mObj;
-    jobject     mHistoryList; // WebBackForwardList object
+    jweak       mObj;
+    jweak       mHistoryList; // WebBackForwardList object
     jmethodID   mStartLoadingResource;
     jmethodID   mLoadStarted;
     jmethodID   mTransitionToCommitted;
@@ -146,6 +186,8 @@ struct WebFrame::JavaBrowserFrame
     jmethodID   mRequestFocus;
     jmethodID   mGetRawResFilename;
     jmethodID   mDensity;
+    jmethodID   mGetFileSize;
+    jmethodID   mGetFile;
     AutoJObject frame(JNIEnv* env) {
         return getRealObject(env, mObj);
     }
@@ -165,10 +207,10 @@ WebFrame::WebFrame(JNIEnv* env, jobject obj, jobject historyList, WebCore::Page*
 {
     jclass clazz = env->GetObjectClass(obj);
     mJavaFrame = new JavaBrowserFrame;
-    mJavaFrame->mObj = adoptGlobalRef(env, obj);
-    mJavaFrame->mHistoryList = adoptGlobalRef(env, historyList);
+    mJavaFrame->mObj = env->NewWeakGlobalRef(obj);
+    mJavaFrame->mHistoryList = env->NewWeakGlobalRef(historyList);
     mJavaFrame->mStartLoadingResource = env->GetMethodID(clazz, "startLoadingResource",
-            "(ILjava/lang/String;Ljava/lang/String;Ljava/util/HashMap;[BIZ)Landroid/webkit/LoadListener;");
+            "(ILjava/lang/String;Ljava/lang/String;Ljava/util/HashMap;[BJIZZZLjava/lang/String;Ljava/lang/String;)Landroid/webkit/LoadListener;");
     mJavaFrame->mLoadStarted = env->GetMethodID(clazz, "loadStarted",
             "(Ljava/lang/String;Landroid/graphics/Bitmap;IZ)V");
     mJavaFrame->mTransitionToCommitted = env->GetMethodID(clazz, "transitionToCommitted",
@@ -202,6 +244,8 @@ WebFrame::WebFrame(JNIEnv* env, jobject obj, jobject historyList, WebCore::Page*
     mJavaFrame->mGetRawResFilename = env->GetMethodID(clazz, "getRawResFilename",
             "(I)Ljava/lang/String;");
     mJavaFrame->mDensity = env->GetMethodID(clazz, "density","()F");
+    mJavaFrame->mGetFileSize = env->GetMethodID(clazz, "getFileSize", "(Ljava/lang/String;)I");
+    mJavaFrame->mGetFile = env->GetMethodID(clazz, "getFile", "(Ljava/lang/String;[BII)I");
 
     LOG_ASSERT(mJavaFrame->mStartLoadingResource, "Could not find method startLoadingResource");
     LOG_ASSERT(mJavaFrame->mLoadStarted, "Could not find method loadStarted");
@@ -221,6 +265,8 @@ WebFrame::WebFrame(JNIEnv* env, jobject obj, jobject historyList, WebCore::Page*
     LOG_ASSERT(mJavaFrame->mRequestFocus, "Could not find method requestFocus");
     LOG_ASSERT(mJavaFrame->mGetRawResFilename, "Could not find method getRawResFilename");
     LOG_ASSERT(mJavaFrame->mDensity, "Could not find method density");
+    LOG_ASSERT(mJavaFrame->mGetFileSize, "Could not find method getFileSize");
+    LOG_ASSERT(mJavaFrame->mGetFile, "Could not find method getFile");
 
     mUserAgent = WebCore::String();
     mUserInitiatedClick = false;
@@ -229,9 +275,9 @@ WebFrame::WebFrame(JNIEnv* env, jobject obj, jobject historyList, WebCore::Page*
 WebFrame::~WebFrame()
 {
     if (mJavaFrame->mObj) {
-        JNIEnv* env = JSC::Bindings::getJNIEnv();
-        env->DeleteGlobalRef(mJavaFrame->mObj);
-        env->DeleteGlobalRef(mJavaFrame->mHistoryList);
+        JNIEnv* env = getJNIEnv();
+        env->DeleteWeakGlobalRef(mJavaFrame->mObj);
+        env->DeleteWeakGlobalRef(mJavaFrame->mHistoryList);
         mJavaFrame->mObj = 0;
     }
     delete mJavaFrame;
@@ -274,9 +320,50 @@ static jobject createJavaMapFromHTTPHeaders(JNIEnv* env, const WebCore::HTTPHead
     return hashMap;
 }
 
-WebCoreResourceLoader*
+// In WebViewCore.java, we artificially append the filename to the URI so that
+// webkit treats the actual display name of the file as the filename, rather
+// than the last segment of the URI (which will simply be a number).  When we
+// pass the URI up to BrowserFrame, we no longer need the appended name (in fact
+// it causes problems), so remove it here.
+// FIXME: If we rewrite pathGetFileName (the current version is in
+// FileSystemPOSIX), we can get the filename that way rather than appending it.
+static jstring uriFromUriFileName(JNIEnv* env, const WebCore::String& name)
+{
+    const WebCore::String fileName = name.left(name.reverseFind('/'));
+    return env->NewString(fileName.characters(), fileName.length());
+}
+
+// This class stores the URI and the size of each file for upload.  The URI is
+// stored so we do not have to create it again.  The size is stored so we can
+// compare the actual size of the file with the stated size.  If the actual size
+// is larger, we will not copy it, since we will not have enough space in our
+// buffer.
+class FileInfo {
+public:
+    FileInfo(JNIEnv* env, const WebCore::String& name) {
+        m_uri = uriFromUriFileName(env, name);
+        checkException(env);
+        m_size = 0;
+        m_env = env;
+    }
+    ~FileInfo() {
+        m_env->DeleteLocalRef(m_uri);
+    }
+    int getSize() { return m_size; }
+    jstring getUri() { return m_uri; }
+    void setSize(int size) { m_size = size; }
+private:
+    // This is only a pointer to the JNIEnv* returned by
+    // JSC::Bindings::getJNIEnv().  Used to delete the jstring when finished.
+    JNIEnv* m_env;
+    jstring m_uri;
+    int m_size;
+};
+
+PassRefPtr<WebCore::ResourceLoaderAndroid>
 WebFrame::startLoadingResource(WebCore::ResourceHandle* loader,
                                   const WebCore::ResourceRequest& request,
+                                  bool mainResource,
                                   bool synchronous)
 {
 #ifdef ANDROID_INSTRUMENT
@@ -288,11 +375,7 @@ WebFrame::startLoadingResource(WebCore::ResourceHandle* loader,
     WebCore::String method = request.httpMethod();
     WebCore::HTTPHeaderMap headers = request.httpHeaderFields();
 
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return 0;
-
+    JNIEnv* env = getJNIEnv();
     WebCore::String urlStr = request.url().string();
     int colon = urlStr.find(':');
     bool allLower = true;
@@ -313,6 +396,7 @@ WebFrame::startLoadingResource(WebCore::ResourceHandle* loader,
         jMethodStr = env->NewString(method.characters(), method.length());
     jbyteArray jPostDataStr = NULL;
     WebCore::FormData* formdata = request.httpBody();
+    AutoJObject obj = mJavaFrame->frame(env);
     if (formdata) {
         // We can use the formdata->flatten() but it will result in two 
         // memcpys, first through loading up the vector with the form data
@@ -325,10 +409,19 @@ WebFrame::startLoadingResource(WebCore::ResourceHandle* loader,
         // Sizing pass
         int size = 0;
         size_t n = elements.size();
+        FileInfo** fileinfos = new FileInfo*[n];
         for (size_t i = 0; i < n; ++i) {
+            fileinfos[i] = 0;
             const WebCore::FormDataElement& e = elements[i];
             if (e.m_type == WebCore::FormDataElement::data) {
                 size += e.m_data.size();
+            } else if (e.m_type == WebCore::FormDataElement::encodedFile) {
+                fileinfos[i] = new FileInfo(env, e.m_filename);
+                int delta = env->CallIntMethod(obj.get(),
+                    mJavaFrame->mGetFileSize, fileinfos[i]->getUri());
+                checkException(env);
+                fileinfos[i]->setSize(delta);
+                size += delta;
             }
         }
 
@@ -347,26 +440,34 @@ WebFrame::startLoadingResource(WebCore::ResourceHandle* loader,
                         int delta = e.m_data.size();
                         memcpy(bytes + offset, e.m_data.data(), delta);
                         offset += delta;
+                    } else if (e.m_type
+                            == WebCore::FormDataElement::encodedFile) {
+                        int delta = env->CallIntMethod(obj.get(),
+                            mJavaFrame->mGetFile, fileinfos[i]->getUri(),
+                            jPostDataStr, offset, fileinfos[i]->getSize());
+                        checkException(env);
+                        offset += delta;
                     }
                 }
                 env->ReleaseByteArrayElements(jPostDataStr, bytes, 0);
             }
         }
+        delete[] fileinfos;
     }
 
     jobject jHeaderMap = createJavaMapFromHTTPHeaders(env, headers);
 
     // Convert the WebCore Cache Policy to a WebView Cache Policy.
-    int cacheMode = 0;  // WebView.LOAD_NORMAL
+    int cacheMode = 0;  // WebSettings.LOAD_NORMAL
     switch (request.cachePolicy()) {
         case WebCore::ReloadIgnoringCacheData:
-            cacheMode = 2; // WebView.LOAD_NO_CACHE
+            cacheMode = 2; // WebSettings.LOAD_NO_CACHE
             break;
         case WebCore::ReturnCacheDataDontLoad:
-            cacheMode = 3; // WebView.LOAD_CACHE_ONLY
+            cacheMode = 3; // WebSettings.LOAD_CACHE_ONLY
             break;
         case WebCore::ReturnCacheDataElseLoad:
-            cacheMode = 1;   // WebView.LOAD_CACHE_ELSE_NETWORK
+            cacheMode = 1;   // WebSettings.LOAD_CACHE_ELSE_NETWORK
             break;
         case WebCore::UseProtocolCachePolicy:
         default:
@@ -375,22 +476,31 @@ WebFrame::startLoadingResource(WebCore::ResourceHandle* loader,
 
     LOGV("::WebCore:: startLoadingResource %s with cacheMode %d", urlStr.ascii().data(), cacheMode);
 
+    ResourceHandleInternal* loaderInternal = loader->getInternal();
+    jstring jUsernameString = loaderInternal->m_user.isEmpty() ?
+            NULL : env->NewString(loaderInternal->m_user.characters(), loaderInternal->m_user.length());
+    jstring jPasswordString = loaderInternal->m_pass.isEmpty() ?
+            NULL : env->NewString(loaderInternal->m_pass.characters(), loaderInternal->m_pass.length());
 
     jobject jLoadListener =
         env->CallObjectMethod(obj.get(), mJavaFrame->mStartLoadingResource,
-                                              (int)loader, jUrlStr, jMethodStr, jHeaderMap,
-                                              jPostDataStr, cacheMode, synchronous);
+                (int)loader, jUrlStr, jMethodStr, jHeaderMap,
+                jPostDataStr, formdata ? formdata->identifier(): 0,
+                cacheMode, mainResource, request.getUserGesture(),
+                synchronous, jUsernameString, jPasswordString);
 
     env->DeleteLocalRef(jUrlStr);
     env->DeleteLocalRef(jMethodStr);
     env->DeleteLocalRef(jPostDataStr);
     env->DeleteLocalRef(jHeaderMap);
+    env->DeleteLocalRef(jUsernameString);
+    env->DeleteLocalRef(jPasswordString);
     if (checkException(env))
         return NULL;
 
-    WebCoreResourceLoader* h = NULL;
+    PassRefPtr<WebCore::ResourceLoaderAndroid> h;
     if (jLoadListener)
-        h = new WebCoreResourceLoader(env, jLoadListener);
+        h = WebCoreResourceLoader::create(env, jLoadListener);
     env->DeleteLocalRef(jLoadListener);
     return h;
 }
@@ -403,14 +513,12 @@ WebFrame::reportError(int errorCode, const WebCore::String& description,
     TimeCounterAuto counter(TimeCounter::JavaCallbackTimeCounter);
 #endif
     LOGV("::WebCore:: reportError(%d, %s)", errorCode, description.ascii().data());
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return;
+    JNIEnv* env = getJNIEnv();
 
     jstring descStr = env->NewString((unsigned short*)description.characters(), description.length());
     jstring failUrl = env->NewString((unsigned short*)failingUrl.characters(), failingUrl.length());
-    env->CallVoidMethod(obj.get(), mJavaFrame->mReportError, errorCode, descStr, failUrl);
+    env->CallVoidMethod(mJavaFrame->frame(env).get(), mJavaFrame->mReportError,
+            errorCode, descStr, failUrl);
     env->DeleteLocalRef(descStr);
     env->DeleteLocalRef(failUrl);
 }
@@ -435,10 +543,7 @@ WebFrame::loadStarted(WebCore::Frame* frame)
              !isMainFrame))
         return;
 
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return;
+    JNIEnv* env = getJNIEnv();
     WebCore::String urlString(url.string());
     // If this is the main frame and we already have a favicon in the database,
     // send it along with the page started notification.
@@ -451,7 +556,7 @@ WebFrame::loadStarted(WebCore::Frame* frame)
     }
     jstring urlStr = env->NewString((unsigned short*)urlString.characters(), urlString.length());
 
-    env->CallVoidMethod(obj.get(), mJavaFrame->mLoadStarted, urlStr, favicon,
+    env->CallVoidMethod(mJavaFrame->frame(env).get(), mJavaFrame->mLoadStarted, urlStr, favicon,
             (int)loadType, isMainFrame);
     checkException(env);
     env->DeleteLocalRef(urlStr);
@@ -475,13 +580,10 @@ WebFrame::transitionToCommitted(WebCore::Frame* frame)
 #ifdef ANDROID_INSTRUMENT
     TimeCounterAuto counter(TimeCounter::JavaCallbackTimeCounter);
 #endif
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return;
+    JNIEnv* env = getJNIEnv();
     WebCore::FrameLoadType loadType = frame->loader()->loadType();
     bool isMainFrame = (!frame->tree() || !frame->tree()->parent());
-    env->CallVoidMethod(obj.get(), mJavaFrame->mTransitionToCommitted,
+    env->CallVoidMethod(mJavaFrame->frame(env).get(), mJavaFrame->mTransitionToCommitted,
             (int)loadType, isMainFrame);
     checkException(env);
 }
@@ -492,10 +594,7 @@ WebFrame::didFinishLoad(WebCore::Frame* frame)
 #ifdef ANDROID_INSTRUMENT
     TimeCounterAuto counter(TimeCounter::JavaCallbackTimeCounter);
 #endif
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return;
+    JNIEnv* env = getJNIEnv();
     WebCore::FrameLoader* loader = frame->loader();
     const WebCore::KURL& url = loader->activeDocumentLoader()->url();
     if (url.isEmpty())
@@ -506,7 +605,7 @@ WebFrame::didFinishLoad(WebCore::Frame* frame)
     WebCore::FrameLoadType loadType = loader->loadType();
     WebCore::String urlString(url.string());
     jstring urlStr = env->NewString((unsigned short*)urlString.characters(), urlString.length());
-    env->CallVoidMethod(obj.get(), mJavaFrame->mLoadFinished, urlStr,
+    env->CallVoidMethod(mJavaFrame->frame(env).get(), mJavaFrame->mLoadFinished, urlStr,
             (int)loadType, isMainFrame);
     checkException(env);
     env->DeleteLocalRef(urlStr);
@@ -519,7 +618,7 @@ WebFrame::addHistoryItem(WebCore::HistoryItem* item)
     TimeCounterAuto counter(TimeCounter::JavaCallbackTimeCounter);
 #endif
     LOGV("::WebCore:: addHistoryItem");
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
+    JNIEnv* env = getJNIEnv();
     WebHistory::AddItem(mJavaFrame->history(env), item);
 }
 
@@ -530,7 +629,7 @@ WebFrame::removeHistoryItem(int index)
     TimeCounterAuto counter(TimeCounter::JavaCallbackTimeCounter);
 #endif
     LOGV("::WebCore:: removeHistoryItem at %d", index);
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
+    JNIEnv* env = getJNIEnv();
     WebHistory::RemoveItem(mJavaFrame->history(env), index);
 }
 
@@ -541,7 +640,7 @@ WebFrame::updateHistoryIndex(int newIndex)
     TimeCounterAuto counter(TimeCounter::JavaCallbackTimeCounter);
 #endif
     LOGV("::WebCore:: updateHistoryIndex to %d", newIndex);
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
+    JNIEnv* env = getJNIEnv();
     WebHistory::UpdateHistoryIndex(mJavaFrame->history(env), newIndex);
 }
 
@@ -554,13 +653,10 @@ WebFrame::setTitle(const WebCore::String& title)
 #ifndef NDEBUG
     LOGV("setTitle(%s)", title.ascii().data());
 #endif
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return;
+    JNIEnv* env = getJNIEnv();
     jstring jTitleStr = env->NewString((unsigned short *)title.characters(), title.length());
 
-    env->CallVoidMethod(obj.get(), mJavaFrame->mSetTitle,
+    env->CallVoidMethod(mJavaFrame->frame(env).get(), mJavaFrame->mSetTitle,
                                         jTitleStr);
     checkException(env);
     env->DeleteLocalRef(jTitleStr);
@@ -573,12 +669,9 @@ WebFrame::windowObjectCleared(WebCore::Frame* frame)
     TimeCounterAuto counter(TimeCounter::JavaCallbackTimeCounter);
 #endif
     LOGV("::WebCore:: windowObjectCleared");
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return;
+    JNIEnv* env = getJNIEnv();
 
-    env->CallVoidMethod(obj.get(), mJavaFrame->mWindowObjectCleared, (int)frame);
+    env->CallVoidMethod(mJavaFrame->frame(env).get(), mJavaFrame->mWindowObjectCleared, (int)frame);
     checkException(env);
 }
 
@@ -588,12 +681,9 @@ WebFrame::setProgress(float newProgress)
 #ifdef ANDROID_INSTRUMENT
     TimeCounterAuto counter(TimeCounter::JavaCallbackTimeCounter);
 #endif
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return;
+    JNIEnv* env = getJNIEnv();
     int progress = (int) (100 * newProgress);
-    env->CallVoidMethod(obj.get(), mJavaFrame->mSetProgress, progress);
+    env->CallVoidMethod(mJavaFrame->frame(env).get(), mJavaFrame->mSetProgress, progress);
     checkException(env);
 }
 
@@ -610,15 +700,12 @@ WebFrame::didReceiveIcon(WebCore::Image* icon)
     TimeCounterAuto counter(TimeCounter::JavaCallbackTimeCounter);
 #endif
     LOG_ASSERT(icon, "DidReceiveIcon called without an image!");
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return;
+    JNIEnv* env = getJNIEnv();
     jobject bitmap = webcoreImageToJavaBitmap(env, icon);
     if (!bitmap)
         return;
 
-    env->CallVoidMethod(obj.get(), mJavaFrame->mDidReceiveIcon, bitmap);
+    env->CallVoidMethod(mJavaFrame->frame(env).get(), mJavaFrame->mDidReceiveIcon, bitmap);
     env->DeleteLocalRef(bitmap);
     checkException(env);
 }
@@ -629,14 +716,11 @@ WebFrame::didReceiveTouchIconURL(const WebCore::String& url, bool precomposed)
 #ifdef ANDROID_INSTRUMENT
     TimeCounterAuto counter(TimeCounter::JavaCallbackTimeCounter);
 #endif
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return;
+    JNIEnv* env = getJNIEnv();
     jstring jUrlStr = env->NewString((unsigned short*)url.characters(),
             url.length());
 
-    env->CallVoidMethod(obj.get(),
+    env->CallVoidMethod(mJavaFrame->frame(env).get(),
             mJavaFrame->mDidReceiveTouchIconUrl, jUrlStr, precomposed);
     checkException(env);
 }
@@ -648,14 +732,10 @@ WebFrame::updateVisitedHistory(const WebCore::KURL& url, bool reload)
     TimeCounterAuto counter(TimeCounter::JavaCallbackTimeCounter);
 #endif
     WebCore::String urlStr(url.string());
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return;
-
+    JNIEnv* env = getJNIEnv();
     jstring jUrlStr = env->NewString((unsigned short*)urlStr.characters(), urlStr.length());
 
-    env->CallVoidMethod(obj.get(), mJavaFrame->mUpdateVisitedHistory, jUrlStr, reload);
+    env->CallVoidMethod(mJavaFrame->frame(env).get(), mJavaFrame->mUpdateVisitedHistory, jUrlStr, reload);
     checkException(env);
 }
 
@@ -678,15 +758,12 @@ WebFrame::canHandleRequest(const WebCore::ResourceRequest& request)
     // Empty urls should not be sent to java
     if (url.isEmpty())
         return true;
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return true;
+    JNIEnv* env = getJNIEnv();
     jstring jUrlStr = env->NewString((unsigned short *)url.characters(), url.length());
 
     // check to see whether browser app wants to hijack url loading.
     // if browser app handles the url, we will return false to bail out WebCore loading
-    jboolean ret = env->CallBooleanMethod(obj.get(), mJavaFrame->mHandleUrl, jUrlStr);
+    jboolean ret = env->CallBooleanMethod(mJavaFrame->frame(env).get(), mJavaFrame->mHandleUrl, jUrlStr);
     checkException(env);
     return (ret == 0);
 }
@@ -697,14 +774,11 @@ WebFrame::createWindow(bool dialog, bool userGesture)
 #ifdef ANDROID_INSTRUMENT
     TimeCounterAuto counter(TimeCounter::JavaCallbackTimeCounter);
 #endif
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return NULL;
-    jobject jobj = env->CallObjectMethod(obj.get(),
+    JNIEnv* env = getJNIEnv();
+    jobject obj = env->CallObjectMethod(mJavaFrame->frame(env).get(),
             mJavaFrame->mCreateWindow, dialog, userGesture);
-    if (jobj) {
-        WebCore::Frame* frame = GET_NATIVE_FRAME(env, jobj);
+    if (obj) {
+        WebCore::Frame* frame = GET_NATIVE_FRAME(env, obj);
         return frame;
     }
     return NULL;
@@ -716,11 +790,8 @@ WebFrame::requestFocus() const
 #ifdef ANDROID_INSTRUMENT
     TimeCounterAuto counter(TimeCounter::JavaCallbackTimeCounter);
 #endif
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return;
-    env->CallVoidMethod(obj.get(), mJavaFrame->mRequestFocus);
+    JNIEnv* env = getJNIEnv();
+    env->CallVoidMethod(mJavaFrame->frame(env).get(), mJavaFrame->mRequestFocus);
     checkException(env);
 }
 
@@ -731,11 +802,8 @@ WebFrame::closeWindow(WebViewCore* webViewCore)
     TimeCounterAuto counter(TimeCounter::JavaCallbackTimeCounter);
 #endif
     assert(webViewCore);
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return;
-    env->CallVoidMethod(obj.get(), mJavaFrame->mCloseWindow,
+    JNIEnv* env = getJNIEnv();
+    env->CallVoidMethod(mJavaFrame->frame(env).get(), mJavaFrame->mCloseWindow,
             webViewCore->getJavaObject().get());
 }
 
@@ -749,23 +817,17 @@ WebFrame::decidePolicyForFormResubmission(WebCore::FramePolicyFunction func)
 #ifdef ANDROID_INSTRUMENT
     TimeCounterAuto counter(TimeCounter::JavaCallbackTimeCounter);
 #endif
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return;
+    JNIEnv* env = getJNIEnv();
     PolicyFunctionWrapper* p = new PolicyFunctionWrapper;
     p->func = func;
-    env->CallVoidMethod(obj.get(), mJavaFrame->mDecidePolicyForFormResubmission, p);
+    env->CallVoidMethod(mJavaFrame->frame(env).get(), mJavaFrame->mDecidePolicyForFormResubmission, p);
 }
 
 WebCore::String
-WebFrame::getRawResourceFilename(RAW_RES_ID id) const
+WebFrame::getRawResourceFilename(WebCore::PlatformBridge::rawResId id) const
 {
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return WebCore::String();
-    jstring ret = (jstring) env->CallObjectMethod(obj.get(),
+    JNIEnv* env = getJNIEnv();
+    jstring ret = (jstring) env->CallObjectMethod(mJavaFrame->frame(env).get(),
             mJavaFrame->mGetRawResFilename, (int)id);
 
     return to_string(env, ret);
@@ -774,11 +836,8 @@ WebFrame::getRawResourceFilename(RAW_RES_ID id) const
 float
 WebFrame::density() const
 {
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = mJavaFrame->frame(env);
-    if (!obj.get())
-        return 1.0;
-    jfloat dpi = env->CallFloatMethod(obj.get(), mJavaFrame->mDensity);
+    JNIEnv* env = getJNIEnv();
+    jfloat dpi = env->CallFloatMethod(mJavaFrame->frame(env).get(), mJavaFrame->mDensity);
     checkException(env);
     return dpi;
 }
@@ -798,18 +857,17 @@ static void CallPolicyFunction(JNIEnv* env, jobject obj, jint func, jint decisio
     if (decision == WebCore::PolicyUse)
         pFrame->loader()->resetMultipleFormSubmissionProtection();
 
-    (pFrame->loader()->*(pFunc->func))((WebCore::PolicyAction)decision);
+    (pFrame->loader()->policyChecker()->*(pFunc->func))((WebCore::PolicyAction)decision);
 }
 
 static void CreateFrame(JNIEnv* env, jobject obj, jobject javaview, jobject jAssetManager, jobject historyList)
 {
-#if USE(JSC)
-    JSC::initializeThreading();
-#elif USE(V8)
-    V8::initializeThreading();
-#endif
+    ScriptController::initializeThreading();
 
 #ifdef ANDROID_INSTRUMENT
+#if USE(V8)
+    V8Counters::initCounters();
+#endif
     TimeCounterAuto counter(TimeCounter::NativeCallbackTimeCounter);
 #endif
     ChromeClientAndroid*      chromeC = new ChromeClientAndroid;
@@ -818,18 +876,16 @@ static void CreateFrame(JNIEnv* env, jobject obj, jobject javaview, jobject jAss
     WebCore::DragClient*        dragC = new DragClientAndroid;
     InspectorClientAndroid* inspectorC = new InspectorClientAndroid;
     // Create a new page
-    WebCore::Page* page = new WebCore::Page(chromeC, contextMenuC, editorC, dragC, inspectorC);
+    WebCore::Page* page = new WebCore::Page(chromeC,
+                                            contextMenuC,
+                                            editorC,
+                                            dragC,
+                                            inspectorC,
+                                            0, // PluginHalterClient
+                                            0); // GeolocationControllerClient
     // css files without explicit MIMETYPE is treated as generic text files in
     // the Java side. So we can't enforce CSS MIMETYPE.
     page->settings()->setEnforceCSSMIMETypeInStrictMode(false);
-    /* TODO: Don't turn on PageCache until we can restore the ScrollView State.
-     * This caused bug http://b/issue?id=1202983
-    page->settings()->setUsesPageCache(true);
-    // 10 is a random number chosen because it is small enough to give the user
-    // a good back/forward page cache without allowing the page cache to get too
-    // big.
-    WebCore::pageCache()->setCapacity(10);
-    */
     editorC->setPage(page);
     page->setGroupName("android.webkit");
 
@@ -865,15 +921,16 @@ static void CreateFrame(JNIEnv* env, jobject obj, jobject javaview, jobject jAss
     frame->selection()->setFocused(true);
 
     // Allow local access to file:/// and substitute data
-    WebCore::FrameLoader::setLocalLoadPolicy(
-            WebCore::FrameLoader::AllowLocalLoadsForLocalAndSubstituteData);
+    WebCore::SecurityOrigin::setLocalLoadPolicy(
+            WebCore::SecurityOrigin::AllowLocalLoadsForLocalAndSubstituteData);
 
     LOGV("::WebCore:: createFrame %p", frame);
 
     // Set the mNativeFrame field in Frame
     SET_NATIVE_FRAME(env, obj, (int)frame);
 
-    String directory = webFrame->getRawResourceFilename(WebFrame::DRAWABLEDIR);
+    String directory = webFrame->getRawResourceFilename(
+            WebCore::PlatformBridge::DrawableDir);
     if (directory.isEmpty())
         LOGE("Can't find the drawable directory");
     else {
@@ -882,6 +939,10 @@ static void CreateFrame(JNIEnv* env, jobject obj, jobject javaview, jobject jAss
         // Initialize our skinning classes
         WebCore::RenderSkinAndroid::Init(am, directory);
     }
+    for (int i = WebCore::PlatformBridge::FileUploadLabel;
+            i <= WebCore::PlatformBridge::SubmitLabel; i++)
+        initGlobalLocalizedName(
+                static_cast<WebCore::PlatformBridge::rawResId>(i), webFrame);
 }
 
 static void DestroyFrame(JNIEnv* env, jobject obj)
@@ -911,7 +972,7 @@ static void DestroyFrame(JNIEnv* env, jobject obj)
 #endif
 }
 
-static void LoadUrl(JNIEnv *env, jobject obj, jstring url)
+static void LoadUrl(JNIEnv *env, jobject obj, jstring url, jobject headers)
 {
 #ifdef ANDROID_INSTRUMENT
     TimeCounterAuto counter(TimeCounter::NativeCallbackTimeCounter);
@@ -922,6 +983,45 @@ static void LoadUrl(JNIEnv *env, jobject obj, jstring url)
     WebCore::String webcoreUrl = to_string(env, url);
     WebCore::KURL kurl(WebCore::KURL(), webcoreUrl);
     WebCore::ResourceRequest request(kurl);
+    if (headers) {
+        // dalvikvm will raise exception if any of these fail
+        jclass mapClass = env->FindClass("java/util/Map");
+        jmethodID entrySet = env->GetMethodID(mapClass, "entrySet",
+                "()Ljava/util/Set;");
+        jobject set = env->CallObjectMethod(headers, entrySet);
+
+        jclass setClass = env->FindClass("java/util/Set");
+        jmethodID iterator = env->GetMethodID(setClass, "iterator",
+                "()Ljava/util/Iterator;");
+        jobject iter = env->CallObjectMethod(set, iterator);
+
+        jclass iteratorClass = env->FindClass("java/util/Iterator");
+        jmethodID hasNext = env->GetMethodID(iteratorClass, "hasNext", "()Z");
+        jmethodID next = env->GetMethodID(iteratorClass, "next",
+                "()Ljava/lang/Object;");
+        jclass entryClass = env->FindClass("java/util/Map$Entry");
+        jmethodID getKey = env->GetMethodID(entryClass, "getKey",
+                "()Ljava/lang/Object;");
+        jmethodID getValue = env->GetMethodID(entryClass, "getValue",
+                "()Ljava/lang/Object;");
+
+        while (env->CallBooleanMethod(iter, hasNext)) {
+            jobject entry = env->CallObjectMethod(iter, next);
+            jstring key = (jstring) env->CallObjectMethod(entry, getKey);
+            jstring value = (jstring) env->CallObjectMethod(entry, getValue);
+            request.setHTTPHeaderField(to_string(env, key), to_string(env, value));
+            env->DeleteLocalRef(entry);
+            env->DeleteLocalRef(key);
+            env->DeleteLocalRef(value);
+        }
+
+        env->DeleteLocalRef(entryClass);
+        env->DeleteLocalRef(iteratorClass);
+        env->DeleteLocalRef(iter);
+        env->DeleteLocalRef(setClass);
+        env->DeleteLocalRef(set);
+        env->DeleteLocalRef(mapClass);
+    }
     LOGV("LoadUrl %s", kurl.string().latin1().data());
     pFrame->loader()->load(request, false);
 }
@@ -942,13 +1042,17 @@ static void PostUrl(JNIEnv *env, jobject obj, jstring url, jbyteArray postData)
     if (postData) {
         jsize size = env->GetArrayLength(postData);
         jbyte* bytes = env->GetByteArrayElements(postData, NULL);
-        request.setHTTPBody(WebCore::FormData::create((const void*)bytes, size));
+        RefPtr<FormData> formData = FormData::create((const void*)bytes, size);
+        // the identifier uses the same logic as generateFormDataIdentifier() in
+        // HTMLFormElement.cpp
+        formData->setIdentifier(static_cast<int64_t>(WTF::currentTime() * 1000000.0));
+        request.setHTTPBody(formData);
         env->ReleaseByteArrayElements(postData, bytes, 0);
     }
 
     LOGV("PostUrl %s", kurl.string().latin1().data());
     WebCore::FrameLoadRequest frameRequest(request);
-    pFrame->loader()->loadFrameRequest(frameRequest, false, false, 0, 0);
+    pFrame->loader()->loadFrameRequest(frameRequest, false, false, 0, 0, WebCore::SendReferrer);
 }
 
 static void LoadData(JNIEnv *env, jobject obj, jstring baseUrl, jstring data,
@@ -973,7 +1077,7 @@ static void LoadData(JNIEnv *env, jobject obj, jstring baseUrl, jstring data,
 
     WebCore::SubstituteData substituteData(sharedBuffer,
             to_string(env, mimeType), to_string(env, encoding),
-            WebCore::KURL(to_string(env, failUrl)));
+            WebCore::KURL(ParsedURLString, to_string(env, failUrl)));
 
     // Perform the load
     pFrame->loader()->load(request, substituteData, false);
@@ -1001,7 +1105,7 @@ static jstring ExternalRepresentation(JNIEnv *env, jobject obj)
     LOG_ASSERT(pFrame, "android_webcore_nativeExternalRepresentation must take a valid frame pointer!");
 
     // Request external representation of the render tree
-    WebCore::String renderDump = WebCore::externalRepresentation(pFrame->contentRenderer());
+    WebCore::String renderDump = WebCore::externalRepresentation(pFrame);
     unsigned len = renderDump.length();
     if (!len)
         return NULL;
@@ -1060,7 +1164,7 @@ static void GoBackOrForward(JNIEnv *env, jobject obj, jint pos)
     else if (pos == -1)
         pFrame->page()->goBack();
     else
-        pFrame->loader()->goBackOrForward(pos);
+        pFrame->page()->goBackOrForward(pos);
 }
 
 static jobject StringByEvaluatingJavaScriptFromString(JNIEnv *env, jobject obj, jstring script)
@@ -1072,9 +1176,10 @@ static jobject StringByEvaluatingJavaScriptFromString(JNIEnv *env, jobject obj, 
     LOG_ASSERT(pFrame, "stringByEvaluatingJavaScriptFromString must take a valid frame pointer!");
 
     WebCore::ScriptValue value =
-            pFrame->loader()->executeScript(to_string(env, script), true);
+            pFrame->script()->executeScript(to_string(env, script), true);
     WebCore::String result = WebCore::String();
-    if (!value.getString(result))
+    ScriptState* scriptState = mainWorldScriptState(pFrame);
+    if (!value.getString(scriptState, result))
         return NULL;
     unsigned len = result.length();
     if (len == 0)
@@ -1082,58 +1187,90 @@ static jobject StringByEvaluatingJavaScriptFromString(JNIEnv *env, jobject obj, 
     return env->NewString((unsigned short*)result.characters(), len);
 }
 
-#if USE(JSC)
 // Wrap the JavaInstance used when binding custom javascript interfaces. Use a
 // weak reference so that the gc can collect the WebView. Override virtualBegin
 // and virtualEnd and swap the weak reference for the real object.
-class WeakJavaInstance : public JSC::Bindings::JavaInstance {
+class WeakJavaInstance : public JavaInstance {
 public:
-    static PassRefPtr<WeakJavaInstance> create(jobject obj,
-            PassRefPtr<JSC::Bindings::RootObject> root) {
+#if USE(JSC)
+    static PassRefPtr<WeakJavaInstance> create(jobject obj, PassRefPtr<RootObject> root)
+    {
         return adoptRef(new WeakJavaInstance(obj, root));
     }
-
-protected:
-    WeakJavaInstance(jobject instance, PassRefPtr<JSC::Bindings::RootObject> rootObject)
-        : JSC::Bindings::JavaInstance(instance, rootObject)
+#elif USE(V8)
+    static PassRefPtr<WeakJavaInstance> create(jobject obj)
     {
-        JNIEnv* env = JSC::Bindings::getJNIEnv();
+        return adoptRef(new WeakJavaInstance(obj));
+    }
+#endif
+
+private:
+#if USE(JSC)
+    WeakJavaInstance(jobject instance, PassRefPtr<RootObject> rootObject)
+        : JavaInstance(instance, rootObject)
+#elif USE(V8)
+    WeakJavaInstance(jobject instance)
+        : JavaInstance(instance)
+#endif
+        , m_beginEndDepth(0)
+    {
+        JNIEnv* env = getJNIEnv();
         // JavaInstance creates a global ref to instance in its constructor.
-        env->DeleteGlobalRef(_instance->_instance);
-        // Set the object to our WeakReference wrapper.
-        _instance->_instance = adoptGlobalRef(env, instance);
+        env->DeleteGlobalRef(m_instance->instance());
+        // Set the object to a weak reference.
+        m_instance->setInstance(env->NewWeakGlobalRef(instance));
+    }
+    ~WeakJavaInstance()
+    {
+        JNIEnv* env = getJNIEnv();
+        // Store the weak reference so we can delete it later.
+        jweak weak = m_instance->instance();
+        // The JavaInstance destructor attempts to delete the global ref stored
+        // in m_instance. Since we replaced it in our constructor with a weak
+        // reference, restore the global ref here so the vm will not complain.
+        m_instance->setInstance(env->NewGlobalRef(
+                getRealObject(env, m_instance->instance()).get()));
+        // Delete the weak reference.
+        env->DeleteWeakGlobalRef(weak);
     }
 
-    virtual void virtualBegin() {
-        _weakRef = _instance->_instance;
-        JNIEnv* env = JSC::Bindings::getJNIEnv();
+    virtual void virtualBegin()
+    {
+        if (m_beginEndDepth++ > 0)
+            return;
+        m_weakRef = m_instance->instance();
+        JNIEnv* env = getJNIEnv();
         // This is odd. getRealObject returns an AutoJObject which is used to
         // cleanly create and delete a local reference. But, here we need to
         // maintain the local reference across calls to virtualBegin() and
         // virtualEnd(). So, release the local reference from the AutoJObject
         // and delete the local reference in virtualEnd().
-        _realObject = getRealObject(env, _weakRef).release();
+        m_realObject = getRealObject(env, m_weakRef).release();
         // Point to the real object
-        _instance->_instance = _realObject;
+        m_instance->setInstance(m_realObject);
         // Call the base class method
         INHERITED::virtualBegin();
     }
 
-    virtual void virtualEnd() {
+    virtual void virtualEnd()
+    {
+        if (--m_beginEndDepth > 0)
+            return;
         // Call the base class method first to pop the local frame.
         INHERITED::virtualEnd();
         // Get rid of the local reference to the real object.
-        JSC::Bindings::getJNIEnv()->DeleteLocalRef(_realObject);
+        getJNIEnv()->DeleteLocalRef(m_realObject);
         // Point back to the WeakReference.
-        _instance->_instance = _weakRef;
+        m_instance->setInstance(m_weakRef);
     }
 
 private:
-    typedef JSC::Bindings::JavaInstance INHERITED;
-    jobject _realObject;
-    jobject _weakRef;
+    typedef JavaInstance INHERITED;
+    jobject m_realObject;
+    jweak m_weakRef;
+    // The current depth of nested calls to virtualBegin and virtualEnd.
+    int m_beginEndDepth;
 };
-#endif  // USE(JSC)
 
 static void AddJavascriptInterface(JNIEnv *env, jobject obj, jint nativeFramePointer,
         jobject javascriptObj, jstring interfaceName)
@@ -1155,39 +1292,44 @@ static void AddJavascriptInterface(JNIEnv *env, jobject obj, jint nativeFramePoi
 #if USE(JSC)
     // Copied from qwebframe.cpp
     JSC::JSLock lock(false);
-    WebCore::JSDOMWindow *window = WebCore::toJSDOMWindow(pFrame);
+    WebCore::JSDOMWindow *window = WebCore::toJSDOMWindow(pFrame, mainThreadNormalWorld());
     if (window) {
-        JSC::Bindings::RootObject *root = pFrame->script()->bindingRootObject();
-        JSC::Bindings::setJavaVM(vm);
+        RootObject *root = pFrame->script()->bindingRootObject();
+        setJavaVM(vm);
         // Add the binding to JS environment
         JSC::ExecState* exec = window->globalExec();
-        JSC::JSObject *addedObject = WeakJavaInstance::create(javascriptObj,
+        JSC::JSObject* addedObject = WeakJavaInstance::create(javascriptObj,
                 root)->createRuntimeObject(exec);
         const jchar* s = env->GetStringChars(interfaceName, NULL);
         if (s) {
             // Add the binding name to the window's table of child objects.
             JSC::PutPropertySlot slot;
-            window->put(exec, JSC::Identifier(exec, (const UChar *)s, 
+            window->put(exec, JSC::Identifier(exec, (const UChar *)s,
                     env->GetStringLength(interfaceName)), addedObject, slot);
             env->ReleaseStringChars(interfaceName, s);
             checkException(env);
         }
     }
-#endif  // USE(JSC)
-
-#if USE(V8)
+#elif USE(V8)
     if (pFrame) {
-        const char* name = JSC::Bindings::getCharactersFromJStringInEnv(env, interfaceName);
-        NPObject* obj = JSC::Bindings::JavaInstanceToNPObject(new JSC::Bindings::JavaInstance(javascriptObj));
-        pFrame->script()->bindToWindowObject(pFrame, name, obj);
-        // JavaInstanceToNPObject calls NPN_RetainObject on the
-        // returned one (see CreateV8ObjectForNPObject in V8NPObject.cpp).
-        // BindToWindowObject also increases obj's ref count and decrease
+        PassRefPtr<JavaInstance> addedObject = WeakJavaInstance::create(javascriptObj);
+        const char* name = getCharactersFromJStringInEnv(env, interfaceName);
+        // Pass ownership of the added object to bindToWindowObject.
+        NPObject* npObject = JavaInstanceToNPObject(addedObject);
+        pFrame->script()->bindToWindowObject(pFrame, name, npObject);
+        // bindToWindowObject calls NPN_RetainObject on the
+        // returned one (see createV8ObjectForNPObject in V8NPObject.cpp).
+        // bindToWindowObject also increases obj's ref count and decreases
         // the ref count when the object is not reachable from JavaScript
         // side. Code here must release the reference count increased by
-        // JavaInstanceToNPObject.
-        _NPN_ReleaseObject(obj);
-        JSC::Bindings::releaseCharactersForJString(interfaceName, name);
+        // bindToWindowObject.
+
+        // Note that while this function is declared in WebCore/bridge/npruntime.h, for V8 builds
+        // we use WebCore/bindings/v8/npruntime.cpp (rather than
+        // WebCore/bridge/npruntime.cpp), so the function is implemented there.
+        // TODO: Combine the two versions of these NPAPI files.
+        NPN_ReleaseObject(npObject);
+        releaseCharactersForJString(interfaceName, name);
     }
 #endif
 
@@ -1228,6 +1370,14 @@ static void ClearCache(JNIEnv *env, jobject obj)
         WebCore::cache()->setDisabled(true);
         WebCore::cache()->setDisabled(false);
     }
+
+    // clear page cache
+    int pageCapacity = WebCore::pageCache()->capacity();
+    // Setting size to 0, makes all pages be released.
+    WebCore::pageCache()->setCapacity(0);
+    WebCore::pageCache()->releaseAutoreleasedPagesNow();
+    WebCore::pageCache()->setCapacity(pageCapacity);
+
 #if USE(JSC)    
     // force JavaScript to GC when clear cache
     WebCore::gcController().garbageCollectSoon();
@@ -1259,8 +1409,11 @@ static jboolean HasPasswordField(JNIEnv *env, jobject obj)
     bool found = false;
     WTF::PassRefPtr<WebCore::HTMLCollection> form = pFrame->document()->forms();
     WebCore::Node* node = form->firstItem();
-    while (node && !found) {
-        WTF::Vector<WebCore::HTMLFormControlElement*> elements =
+    // Null/Empty namespace means that node is not created in HTMLFormElement
+    // class, but just normal Element class.
+    while (node && !found && !node->namespaceURI().isNull() &&
+           !node->namespaceURI().isEmpty()) {
+        WTF::Vector<WebCore::HTMLFormControlElement*>& elements =
         		((WebCore::HTMLFormElement*)node)->formElements;
         size_t size = elements.size();
         for (size_t i = 0; i< size && !found; i++) {
@@ -1289,8 +1442,9 @@ static jobjectArray GetUsernamePassword(JNIEnv *env, jobject obj)
     bool found = false;
     WTF::PassRefPtr<WebCore::HTMLCollection> form = pFrame->document()->forms();
     WebCore::Node* node = form->firstItem();
-    while (node && !found) {
-        WTF::Vector<WebCore::HTMLFormControlElement*> elements =
+    while (node && !found && !node->namespaceURI().isNull() &&
+           !node->namespaceURI().isEmpty()) {
+        WTF::Vector<WebCore::HTMLFormControlElement*>& elements =
         		((WebCore::HTMLFormElement*)node)->formElements;
         size_t size = elements.size();
         for (size_t i = 0; i< size && !found; i++) {
@@ -1334,8 +1488,9 @@ static void SetUsernamePassword(JNIEnv *env, jobject obj,
     bool found = false;
     WTF::PassRefPtr<WebCore::HTMLCollection> form = pFrame->document()->forms();
     WebCore::Node* node = form->firstItem();
-    while (node && !found) {
-        WTF::Vector<WebCore::HTMLFormControlElement*> elements =
+    while (node && !found && !node->namespaceURI().isNull() &&
+           !node->namespaceURI().isEmpty()) {
+        WTF::Vector<WebCore::HTMLFormControlElement*>& elements =
         		((WebCore::HTMLFormElement*)node)->formElements;
         size_t size = elements.size();
         for (size_t i = 0; i< size && !found; i++) {
@@ -1381,35 +1536,32 @@ static jobject GetFormTextData(JNIEnv *env, jobject obj)
                 "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
         LOG_ASSERT(put, "Could not find put method on HashMap");
 
-        static const WebCore::AtomicString text("text");
-        static const WebCore::AtomicString off("off");
-
         WebCore::HTMLFormElement* form;
         WebCore::HTMLInputElement* input;
-        for (WebCore::Node* node = collection->firstItem(); node; node = collection->nextItem()) {
+        for (WebCore::Node* node = collection->firstItem();
+             node && !node->namespaceURI().isNull() && !node->namespaceURI().isEmpty();
+             node = collection->nextItem()) {
             form = static_cast<WebCore::HTMLFormElement*>(node);
             if (form->autoComplete()) {
                 WTF::Vector<WebCore::HTMLFormControlElement*> elements = form->formElements;
                 size_t size = elements.size();
                 for (size_t i = 0; i < size; i++) {
                     WebCore::HTMLFormControlElement* e = elements[i];
-                    if (e->type() == text) {
-                        if (e->hasAttribute(WebCore::HTMLNames::autocompleteAttr)) {
-                            const WebCore::AtomicString& attr = e->getAttribute(WebCore::HTMLNames::autocompleteAttr);
-                            if (attr == off)
-                                continue;
-                        }
-                        input = (WebCore::HTMLInputElement*) e;
-                        WebCore::String value = input->value();
-                        int len = value.length();
-                        if (len) {
-                            const WebCore::AtomicString& name = input->name();
-                            jstring key = env->NewString((jchar *)name.characters(), name.length());
-                            jstring val = env->NewString((jchar *)value.characters(), len);
-                            LOG_ASSERT(key && val, "name or value not set");
-                            env->CallObjectMethod(hashMap, put, key, val);
-                            env->DeleteLocalRef(key);
-                            env->DeleteLocalRef(val);
+                    if (e->hasTagName(WebCore::HTMLNames::inputTag)) {
+                        input = static_cast<WebCore::HTMLInputElement*>(e);
+                        if (input->isTextField() && !input->isPasswordField()
+                                && input->autoComplete()) {
+                            WebCore::String value = input->value();
+                            int len = value.length();
+                            if (len) {
+                                const WebCore::AtomicString& name = input->name();
+                                jstring key = env->NewString((jchar *)name.characters(), name.length());
+                                jstring val = env->NewString((jchar *)value.characters(), len);
+                                LOG_ASSERT(key && val, "name or value not set");
+                                env->CallObjectMethod(hashMap, put, key, val);
+                                env->DeleteLocalRef(key);
+                                env->DeleteLocalRef(val);
+                            }
                         }
                     }
                 }
@@ -1419,6 +1571,16 @@ static jobject GetFormTextData(JNIEnv *env, jobject obj)
 
     }
     return hashMap;
+}
+
+static void OrientationChanged(JNIEnv *env, jobject obj, int orientation)
+{
+#ifdef ANDROID_INSTRUMENT
+    TimeCounterAuto counter(TimeCounter::NativeCallbackTimeCounter);
+#endif
+    WebCore::Frame* pFrame = GET_NATIVE_FRAME(env, obj);
+    LOGV("Sending orientation: %d", orientation);
+    pFrame->sendOrientationChangeEvent(orientation);
 }
 
 // ----------------------------------------------------------------------------
@@ -1436,7 +1598,7 @@ static JNINativeMethod gBrowserFrameNativeMethods[] = {
         (void*) DestroyFrame },
     { "nativeStopLoading", "()V",
         (void*) StopLoading },
-    { "nativeLoadUrl", "(Ljava/lang/String;)V",
+    { "nativeLoadUrl", "(Ljava/lang/String;Ljava/util/Map;)V",
         (void*) LoadUrl },
     { "nativePostUrl", "(Ljava/lang/String;[B)V",
         (void*) PostUrl },
@@ -1470,7 +1632,9 @@ static JNINativeMethod gBrowserFrameNativeMethods[] = {
     { "setUsernamePassword", "(Ljava/lang/String;Ljava/lang/String;)V",
         (void*) SetUsernamePassword },
     { "getFormTextData", "()Ljava/util/HashMap;",
-        (void*) GetFormTextData }
+        (void*) GetFormTextData },
+    { "nativeOrientationChanged", "(I)V",
+        (void*) OrientationChanged }
 };
 
 int register_webframe(JNIEnv* env)

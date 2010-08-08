@@ -33,8 +33,9 @@
 #include "SimpleFontData.h"
 #include "StringHash.h"
 #include "UnicodeRange.h"
-#include <windows.h>
 #include <mlang.h>
+#include <windows.h>
+#include <wtf/StdLibExtras.h>
 #if PLATFORM(CG)
 #include <ApplicationServices/ApplicationServices.h>
 #include <WebKitSystemInterface/WebKitSystemInterface.h>
@@ -295,17 +296,27 @@ const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font, cons
     return fontData;
 }
 
-FontPlatformData* FontCache::getSimilarFontPlatformData(const Font& font)
+SimpleFontData* FontCache::getSimilarFontPlatformData(const Font& font)
 {
     return 0;
 }
 
-FontPlatformData* FontCache::getLastResortFallbackFont(const FontDescription& fontDescription)
+SimpleFontData* FontCache::getLastResortFallbackFont(const FontDescription& fontDescription)
 {
     // FIXME: Would be even better to somehow get the user's default font here.  For now we'll pick
     // the default that the user would get without changing any prefs.
     static AtomicString timesStr("Times New Roman");
-    return getCachedFontPlatformData(fontDescription, timesStr);
+    if (SimpleFontData* simpleFont = getCachedFontData(fontDescription, timesStr))
+        return simpleFont;
+
+    DEFINE_STATIC_LOCAL(String, defaultGUIFontFamily, ());
+    if (defaultGUIFontFamily.isEmpty()) {
+        HFONT defaultGUIFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        LOGFONT logFont;
+        GetObject(defaultGUIFont, sizeof(logFont), &logFont);
+        defaultGUIFontFamily = String(logFont.lfFaceName, wcsnlen(logFont.lfFaceName, LF_FACESIZE));
+    }
+    return getCachedFontData(fontDescription, defaultGUIFontFamily);
 }
 
 static LONG toGDIFontWeight(FontWeight fontWeight)
@@ -388,7 +399,7 @@ static int CALLBACK matchImprovingEnumProc(CONST LOGFONT* candidate, CONST TEXTM
     return 1;
 }
 
-static HFONT createGDIFont(const AtomicString& family, LONG desiredWeight, bool desiredItalic, int size)
+static HFONT createGDIFont(const AtomicString& family, LONG desiredWeight, bool desiredItalic, int size, bool synthesizeItalic)
 {
     HDC hdc = GetDC(0);
 
@@ -421,6 +432,9 @@ static HFONT createGDIFont(const AtomicString& family, LONG desiredWeight, bool 
 #endif
     matchData.m_chosen.lfQuality = DEFAULT_QUALITY;
     matchData.m_chosen.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+
+   if (desiredItalic && !matchData.m_chosen.lfItalic && synthesizeItalic)
+       matchData.m_chosen.lfItalic = 1;
 
     HFONT result = CreateFontIndirect(&matchData.m_chosen);
     if (!result)
@@ -503,8 +517,14 @@ FontPlatformData* FontCache::createFontPlatformData(const FontDescription& fontD
     // This masks rounding errors related to the HFONT metrics being  different from the CGFont metrics.
     // FIXME: We will eventually want subpixel precision for GDI mode, but the scaled rendering doesn't
     // look as nice. That may be solvable though.
+#if PLATFORM(CG)
+    bool canCreateCGFontWithLOGFONT = wkCanCreateCGFontWithLOGFONT();
+#else
+    bool canCreateCGFontWithLOGFONT = true;
+#endif
     LONG weight = adjustedGDIFontWeight(toGDIFontWeight(fontDescription.weight()), family);
-    HFONT hfont = createGDIFont(family, weight, fontDescription.italic(), fontDescription.computedPixelSize() * (useGDI ? 1 : 32));
+    HFONT hfont = createGDIFont(family, weight, fontDescription.italic(),
+                                fontDescription.computedPixelSize() * (useGDI ? 1 : 32), useGDI && canCreateCGFontWithLOGFONT);
 
     if (!hfont)
         return 0;

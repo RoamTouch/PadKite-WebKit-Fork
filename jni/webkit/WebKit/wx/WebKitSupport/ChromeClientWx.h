@@ -54,6 +54,8 @@ public:
     virtual bool canTakeFocus(FocusDirection);
     virtual void takeFocus(FocusDirection);
 
+    virtual void focusedNodeChanged(Node*);
+
     virtual Page* createWindow(Frame*, const FrameLoadRequest&, const WindowFeatures&);
     virtual Page* createModalDialog(Frame*, const FrameLoadRequest&);
     virtual void show();
@@ -104,9 +106,10 @@ public:
     virtual void scroll(const IntSize& scrollDelta, const IntRect& rectToScroll, const IntRect& clipRect);
     virtual IntPoint screenToWindow(const IntPoint&) const;
     virtual IntRect windowToScreen(const IntRect&) const;
-    virtual PlatformWidget platformWindow() const;
+    virtual PlatformPageClient platformPageClient() const;
     virtual void contentsSizeChanged(Frame*, const IntSize&) const;
 
+    virtual void scrollbarsModeDidChange() const { }
     virtual void mouseDidMoveOverElement(const HitTestResult&, unsigned modifierFlags);
 
     virtual void setToolTip(const String&, TextDirection);

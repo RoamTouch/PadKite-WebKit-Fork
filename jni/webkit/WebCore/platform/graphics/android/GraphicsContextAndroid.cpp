@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -24,28 +24,28 @@
  */
 
 #include "config.h"
-#include "Gradient.h"
 #include "GraphicsContext.h"
+
+#include "AffineTransform.h"
+#include "Gradient.h"
 #include "GraphicsContextPrivate.h"
 #include "NotImplemented.h"
 #include "Path.h"
 #include "Pattern.h"
-
+#include "PlatformGraphicsContext.h"
+#include "SkBitmapRef.h"
 #include "SkBlurDrawLooper.h"
 #include "SkBlurMaskFilter.h"
 #include "SkCanvas.h"
 #include "SkColorPriv.h"
 #include "SkDashPathEffect.h"
 #include "SkDevice.h"
-#include "SkPaint.h"
-#include "PlatformGraphicsContext.h"
-#include "TransformationMatrix.h"
-
-#include "android_graphics.h"
 #include "SkGradientShader.h"
-#include "SkBitmapRef.h"
+#include "SkPaint.h"
 #include "SkString.h"
 #include "SkiaUtils.h"
+#include "TransformationMatrix.h"
+#include "android_graphics.h"
 
 using namespace std;
 
@@ -247,6 +247,13 @@ public:
         paint->setColor(mState->applyAlpha(mState->mFillColor));
     }
 
+    void setup_paint_bitmap(SkPaint* paint) const {
+        this->setup_paint_common(paint);
+        // we only want the global alpha for bitmaps,
+        // so just give applyAlpha opaque black
+        paint->setColor(mState->applyAlpha(0xFF000000));
+    }
+
     /*  sets up the paint for stroking. Returns true if the style is really
         just a dash of squares (the size of the paint's stroke-width.
     */
@@ -323,23 +330,15 @@ static SkShader::TileMode SpreadMethod2TileMode(GradientSpreadMethod sm) {
     return mode;
 }
 
-static void extactShader(SkPaint* paint, ColorSpace cs, Pattern* pat,
-                         Gradient* grad)
+static void extactShader(SkPaint* paint, Pattern* pat, Gradient* grad)
 {
-    switch (cs) {
-        case PatternColorSpace:
-            // createPlatformPattern() returns a new inst
-            paint->setShader(pat->createPlatformPattern(
-                                                        TransformationMatrix()))->safeUnref();
-            break;
-        case GradientColorSpace: {
-            // grad->getShader() returns a cached obj
-            GradientSpreadMethod sm = grad->spreadMethod();
-            paint->setShader(grad->getShader(SpreadMethod2TileMode(sm)));
-            break;
-        }
-        default:
-            break;
+    if (pat) {
+        // platformPattern() returns a cached obj
+        paint->setShader(pat->platformPattern(AffineTransform()));
+    } else if (grad) {
+        // grad->getShader() returns a cached obj
+        GradientSpreadMethod sm = grad->spreadMethod();
+        paint->setShader(grad->getShader(SpreadMethod2TileMode(sm)));
     }
 }
     
@@ -417,10 +416,16 @@ void GraphicsContext::drawRect(const IntRect& rect)
         m_data->setup_paint_fill(&paint);
         GC2Canvas(this)->drawRect(r, paint);
     }
-    
+
+    /*  According to GraphicsContext.h, stroking inside drawRect always means
+        a stroke of 1 inside the rect.
+     */
     if (strokeStyle() != NoStroke && strokeColor().alpha()) {
         paint.reset();
         m_data->setup_paint_stroke(&paint, &r);
+        paint.setPathEffect(NULL);              // no dashing please
+        paint.setStrokeWidth(SK_Scalar1);       // always just 1.0 width
+        r.inset(SK_ScalarHalf, SK_ScalarHalf);  // ensure we're "inside"
         GC2Canvas(this)->drawRect(r, paint);
     }
 }
@@ -639,7 +644,7 @@ void GraphicsContext::drawConvexPolygon(size_t numPoints, const FloatPoint* poin
 }
 
 void GraphicsContext::fillRoundedRect(const IntRect& rect, const IntSize& topLeft, const IntSize& topRight,
-                                      const IntSize& bottomLeft, const IntSize& bottomRight, const Color& color)
+                                      const IntSize& bottomLeft, const IntSize& bottomRight, const Color& color, ColorSpace)
 {
     if (paintingDisabled())
         return;
@@ -668,14 +673,14 @@ void GraphicsContext::fillRect(const FloatRect& rect)
     
     m_data->setup_paint_fill(&paint);
 
-    extactShader(&paint, m_common->state.fillColorSpace,
+    extactShader(&paint,
                  m_common->state.fillPattern.get(),
                  m_common->state.fillGradient.get());
 
     GC2Canvas(this)->drawRect(rect, paint);
 }
 
-void GraphicsContext::fillRect(const FloatRect& rect, const Color& color)
+void GraphicsContext::fillRect(const FloatRect& rect, const Color& color, ColorSpace)
 {
     if (paintingDisabled())
         return;
@@ -750,6 +755,11 @@ void GraphicsContext::addInnerRoundedRectClip(const IntRect& rect, int thickness
         path.addOval(r, SkPath::kCCW_Direction);
     }
     GC2Canvas(this)->clipPath(path);
+}
+
+void GraphicsContext::canvasClip(const Path& path)
+{
+    clip(path);
 }
 
 void GraphicsContext::clipOut(const IntRect& r)
@@ -831,10 +841,14 @@ void GraphicsContext::endTransparencyLayer()
 
     ///////////////////////////////////////////////////////////////////////////
 
+    void GraphicsContext::setupBitmapPaint(SkPaint* paint) {
+        m_data->setup_paint_bitmap(paint);
+    }
+
     void GraphicsContext::setupFillPaint(SkPaint* paint) {
         m_data->setup_paint_fill(paint);
     }
-    
+
     void GraphicsContext::setupStrokePaint(SkPaint* paint) {
         m_data->setup_paint_stroke(paint, NULL);
     }
@@ -842,24 +856,8 @@ void GraphicsContext::endTransparencyLayer()
     bool GraphicsContext::setupShadowPaint(SkPaint* paint, SkPoint* offset) {
         return m_data->mState->setupShadowPaint(paint, offset);
     }
-        
-    // referenced from CanvasStyle.cpp
-    void GraphicsContext::setCMYKAFillColor(float c, float m, float y, float k, float a) {
-        float r = 1 - (c + k);
-        float g = 1 - (m + k);
-        float b = 1 - (y + k);
-        return this->setFillColor(Color(r, g, b, a));
-    }
 
-    // referenced from CanvasStyle.cpp
-    void GraphicsContext::setCMYKAStrokeColor(float c, float m, float y, float k, float a) {
-        float r = 1 - (c + k);
-        float g = 1 - (m + k);
-        float b = 1 - (y + k);
-        return this->setStrokeColor(Color(r, g, b, a));
-    }
-
-    void GraphicsContext::setPlatformStrokeColor(const Color& c) {
+    void GraphicsContext::setPlatformStrokeColor(const Color& c, ColorSpace) {
         m_data->setStrokeColor(c);
     }
     
@@ -867,11 +865,11 @@ void GraphicsContext::endTransparencyLayer()
         m_data->setStrokeThickness(f);
     }
 
-    void GraphicsContext::setPlatformFillColor(const Color& c) {
+    void GraphicsContext::setPlatformFillColor(const Color& c, ColorSpace) {
         m_data->setFillColor(c);
     }
     
-void GraphicsContext::setPlatformShadow(const IntSize& size, int blur, const Color& color)
+void GraphicsContext::setPlatformShadow(const IntSize& size, int blur, const Color& color, ColorSpace)
 {
     if (paintingDisabled())
         return;
@@ -899,7 +897,12 @@ void GraphicsContext::clearPlatformShadow()
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void GraphicsContext::drawFocusRing(const Color& color)
+void GraphicsContext::drawFocusRing(const Vector<IntRect>&, int, int, const Color&)
+{
+    // Do nothing, since we draw the focus ring independently.
+}
+
+void GraphicsContext::drawFocusRing(const Vector<Path>&, int, int, const Color&)
 {
     // Do nothing, since we draw the focus ring independently.
 }
@@ -1029,25 +1032,28 @@ void GraphicsContext::translate(float x, float y)
     GC2Canvas(this)->translate(SkFloatToScalar(x), SkFloatToScalar(y));
 }
 
-void GraphicsContext::concatCTM(const TransformationMatrix& xform)
+void GraphicsContext::concatCTM(const AffineTransform& affine)
 {
     if (paintingDisabled())
         return;
-    
-//printf("-------------- GraphicsContext::concatCTM\n");
-    GC2Canvas(this)->concat((SkMatrix) xform);
+    GC2Canvas(this)->concat(affine);
 }
 
+/*  This is intended to round the rect to device pixels (through the CTM)
+    and then invert the result back into source space, with the hope that when
+    it is drawn (through the matrix), it will land in the "right" place (i.e.
+    on pixel boundaries).
+
+    For android, we record this geometry once and then draw it though various
+    scale factors as the user zooms, without re-recording. Thus this routine
+    should just leave the original geometry alone.
+
+    If we instead draw into bitmap tiles, we should then perform this
+    transform -> round -> inverse step.
+ */
 FloatRect GraphicsContext::roundToDevicePixels(const FloatRect& rect)
 {
-    if (paintingDisabled())
-        return FloatRect();
-    
-    const SkMatrix& matrix = GC2Canvas(this)->getTotalMatrix();
-    SkRect r(rect);
-    matrix.mapRect(&r);
-    FloatRect result(SkScalarToFloat(r.fLeft), SkScalarToFloat(r.fTop), SkScalarToFloat(r.width()), SkScalarToFloat(r.height()));
-    return result;
+    return rect;
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1085,15 +1091,15 @@ void GraphicsContext::setPlatformShouldAntialias(bool useAA)
     m_data->mState->mUseAA = useAA;
 }
 
-TransformationMatrix GraphicsContext::getCTM() const
+AffineTransform GraphicsContext::getCTM() const
 {
     const SkMatrix& m = GC2Canvas(this)->getTotalMatrix();
-    return TransformationMatrix(SkScalarToDouble(m.getScaleX()),      // a
-                                SkScalarToDouble(m.getSkewY()),       // b
-                                SkScalarToDouble(m.getSkewX()),       // c
-                                SkScalarToDouble(m.getScaleY()),      // d
-                                SkScalarToDouble(m.getTranslateX()),  // e
-                                SkScalarToDouble(m.getTranslateY())); // f
+    return AffineTransform(SkScalarToDouble(m.getScaleX()),      // a
+                           SkScalarToDouble(m.getSkewY()),       // b
+                           SkScalarToDouble(m.getSkewX()),       // c
+                           SkScalarToDouble(m.getScaleY()),      // d
+                           SkScalarToDouble(m.getTranslateX()),  // e
+                           SkScalarToDouble(m.getTranslateY())); // f
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1126,7 +1132,7 @@ void GraphicsContext::fillPath()
     SkPaint paint;
     m_data->setup_paint_fill(&paint);
 
-    extactShader(&paint, m_common->state.fillColorSpace,
+    extactShader(&paint,
                  m_common->state.fillPattern.get(),
                  m_common->state.fillGradient.get());
 
@@ -1142,7 +1148,7 @@ void GraphicsContext::strokePath()
     SkPaint paint;
     m_data->setup_paint_stroke(&paint, NULL);
 
-    extactShader(&paint, m_common->state.strokeColorSpace,
+    extactShader(&paint,
                  m_common->state.strokePattern.get(),
                  m_common->state.strokeGradient.get());
     
@@ -1175,4 +1181,3 @@ SkCanvas* android_gc2canvas(WebCore::GraphicsContext* gc)
 {
     return gc->platformContext()->mCanvas;
 }
-

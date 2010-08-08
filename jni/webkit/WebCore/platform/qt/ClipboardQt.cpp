@@ -95,21 +95,7 @@ void ClipboardQt::clearData(const String& type)
         return;
 
     if (m_writableData) {
-#if QT_VERSION >= 0x040400
         m_writableData->removeFormat(type);
-#else
-        const QString toClearType = type;
-        QMap<QString, QByteArray> formats;
-        foreach (QString format, m_writableData->formats()) {
-            if (format != toClearType)
-                formats[format] = m_writableData->data(format);
-        }
-
-        m_writableData->clear();
-        QMap<QString, QByteArray>::const_iterator it, end = formats.constEnd();
-        for (it = formats.begin(); it != end; ++it)
-            m_writableData->setData(it.key(), it.value());
-#endif
         if (m_writableData->formats().isEmpty()) {
             if (isForDragging())
                 delete m_writableData;
@@ -239,8 +225,6 @@ static CachedImage* getCachedImage(Element* element)
 void ClipboardQt::declareAndWriteDragImage(Element* element, const KURL& url, const String& title, Frame* frame)
 {
     ASSERT(frame);
-    Q_UNUSED(url);
-    Q_UNUSED(title);
 
     //WebCore::writeURL(m_writableDataObject.get(), url, title, true, false);
     if (!m_writableData)
@@ -262,8 +246,10 @@ void ClipboardQt::declareAndWriteDragImage(Element* element, const KURL& url, co
         return;
 
     QList<QUrl> urls;
+    urls.append(url);
     urls.append(fullURL);
 
+    m_writableData->setText(title);
     m_writableData->setUrls(urls);
 #ifndef QT_NO_CLIPBOARD
     if (!isForDragging())
@@ -298,6 +284,19 @@ void ClipboardQt::writeRange(Range* range, Frame* frame)
     text.replace(QChar(0xa0), QLatin1Char(' '));
     m_writableData->setText(text);
     m_writableData->setHtml(createMarkup(range, 0, AnnotateForInterchange));
+#ifndef QT_NO_CLIPBOARD
+    if (!isForDragging())
+        QApplication::clipboard()->setMimeData(m_writableData);
+#endif
+}
+
+void ClipboardQt::writePlainText(const String& str)
+{
+    if (!m_writableData)
+        m_writableData = new QMimeData;
+    QString text = str;
+    text.replace(QChar(0xa0), QLatin1Char(' '));
+    m_writableData->setText(text);
 #ifndef QT_NO_CLIPBOARD
     if (!isForDragging())
         QApplication::clipboard()->setMimeData(m_writableData);

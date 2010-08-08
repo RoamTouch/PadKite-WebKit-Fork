@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -90,9 +90,11 @@ SkShader* Gradient::getShader(SkShader::TileMode mode)
 
     SkShader* s;
     if (m_radial)
-        // FIXME: SVG always passes 0 for m_r0
-        s = SkGradientShader::CreateRadial(pts[0],
-            SkFloatToScalar(m_r0 ? m_r0 : m_r1), colors, pos, count, mode);
+        s = SkGradientShader::CreateTwoPointRadial(pts[0],
+                                                   SkFloatToScalar(m_r0),
+                                                   pts[1],
+                                                   SkFloatToScalar(m_r1),
+                                                   colors, pos, count, mode);
     else
         s = SkGradientShader::CreateLinear(pts, colors, pos, count, mode);
 

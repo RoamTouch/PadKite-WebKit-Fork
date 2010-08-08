@@ -36,18 +36,13 @@
 #include "IconRecord.h"
 #include "IntSize.h"
 #include "Logging.h"
+#include "ScriptController.h"
 #include "SQLiteStatement.h"
 #include "SQLiteTransaction.h"
 #include "SuddenTermination.h"
 #include <wtf/CurrentTime.h>
 #include <wtf/MainThread.h>
 #include <wtf/StdLibExtras.h>
-
-#if USE(JSC)
-#include <runtime/InitializeThreading.h>
-#elif USE(V8)
-#include "InitializeThreading.h"
-#endif
 
 // For methods that are meant to support API from the main thread - should not be called internally
 #define ASSERT_NOT_SYNC_THREAD() ASSERT(!m_syncThreadRunning || !IS_ICON_SYNC_THREAD())
@@ -98,11 +93,7 @@ static IconDatabaseClient* defaultClient()
 IconDatabase* iconDatabase()
 {
     if (!sharedIconDatabase) {
-#if USE(JSC)
-        JSC::initializeThreading();
-#elif USE(V8)
-        V8::initializeThreading();
-#endif
+        ScriptController::initializeThreading();
         sharedIconDatabase = new IconDatabase;
     }
     return sharedIconDatabase;
@@ -137,7 +128,7 @@ bool IconDatabase::open(const String& databasePath)
         return false;
     }
 
-    m_databaseDirectory = databasePath.copy();
+    m_databaseDirectory = databasePath.crossThreadString();
 
     // Formulate the full path for the database file
     m_completeDatabasePath = pathByAppendingComponent(m_databaseDirectory, defaultDatabaseFilename());
@@ -241,7 +232,7 @@ Image* IconDatabase::iconForPageURL(const String& pageURLOriginal, const IntSize
     
     PageURLRecord* pageRecord = m_pageURLToRecordMap.get(pageURLOriginal);
     if (!pageRecord) {
-        pageURLCopy = pageURLOriginal.copy();
+        pageURLCopy = pageURLOriginal.crossThreadString();
         pageRecord = getOrCreatePageURLRecord(pageURLCopy);
     }
     
@@ -277,7 +268,7 @@ Image* IconDatabase::iconForPageURL(const String& pageURLOriginal, const IntSize
     // mark it to be read by the background thread
     if (iconRecord->imageDataStatus() == ImageDataStatusUnknown) {
         if (pageURLCopy.isNull())
-            pageURLCopy = pageURLOriginal.copy();
+            pageURLCopy = pageURLOriginal.crossThreadString();
     
         MutexLocker locker(m_pendingReadingLock);
         m_pageURLsInterestedInIcons.add(pageURLCopy);
@@ -326,7 +317,7 @@ String IconDatabase::iconURLForPageURL(const String& pageURLOriginal)
     
     PageURLRecord* pageRecord = m_pageURLToRecordMap.get(pageURLOriginal);
     if (!pageRecord)
-        pageRecord = getOrCreatePageURLRecord(pageURLOriginal.copy());
+        pageRecord = getOrCreatePageURLRecord(pageURLOriginal.crossThreadString());
     
     // If pageRecord is NULL, one of two things is true -
     // 1 - The initial url import is incomplete and this pageURL has already been marked to be notified once it is complete if an iconURL exists
@@ -335,7 +326,7 @@ String IconDatabase::iconURLForPageURL(const String& pageURLOriginal)
         return String();
     
     // Possible the pageRecord is around because it's a retained pageURL with no iconURL, so we have to check
-    return pageRecord->iconRecord() ? pageRecord->iconRecord()->iconURL().copy() : String();
+    return pageRecord->iconRecord() ? pageRecord->iconRecord()->iconURL().threadsafeCopy() : String();
 }
 
 #ifdef CAN_THEME_URL_ICON
@@ -419,7 +410,7 @@ void IconDatabase::retainIconForPageURL(const String& pageURLOriginal)
     String pageURL;
     
     if (!record) {
-        pageURL = pageURLOriginal.copy();
+        pageURL = pageURLOriginal.crossThreadString();
 
         record = new PageURLRecord(pageURL);
         m_pageURLToRecordMap.set(pageURL, record);
@@ -427,7 +418,7 @@ void IconDatabase::retainIconForPageURL(const String& pageURLOriginal)
     
     if (!record->retain()) {
         if (pageURL.isNull())
-            pageURL = pageURLOriginal.copy();
+            pageURL = pageURLOriginal.crossThreadString();
 
         // This page just had its retain count bumped from 0 to 1 - Record that fact
         m_retainedPageURLs.add(pageURL);
@@ -502,7 +493,7 @@ void IconDatabase::releaseIconForPageURL(const String& pageURLOriginal)
     // Mark stuff for deletion from the database only if we're not in private browsing
     if (!m_privateBrowsingEnabled) {
         MutexLocker locker(m_pendingSyncLock);
-        m_pageURLsPendingSync.set(pageURLOriginal.copy(), pageRecord->snapshot(true));
+        m_pageURLsPendingSync.set(pageURLOriginal.crossThreadString(), pageRecord->snapshot(true));
     
         // If this page is the last page to refer to a particular IconRecord, that IconRecord needs to
         // be marked for deletion
@@ -526,7 +517,7 @@ void IconDatabase::setIconDataForIconURL(PassRefPtr<SharedBuffer> dataOriginal, 
         return;
     
     RefPtr<SharedBuffer> data = dataOriginal ? dataOriginal->copy() : 0;
-    String iconURL = iconURLOriginal.copy();
+    String iconURL = iconURLOriginal.crossThreadString();
     
     Vector<String> pageURLs;
     {
@@ -603,8 +594,8 @@ void IconDatabase::setIconURLForPageURL(const String& iconURLOriginal, const Str
         if (pageRecord && pageRecord->iconRecord() && pageRecord->iconRecord()->iconURL() == iconURLOriginal)
             return;
             
-        pageURL = pageURLOriginal.copy();
-        iconURL = iconURLOriginal.copy();
+        pageURL = pageURLOriginal.crossThreadString();
+        iconURL = iconURLOriginal.crossThreadString();
 
         if (!pageRecord) {
             pageRecord = new PageURLRecord(pageURL);
@@ -861,13 +852,13 @@ bool IconDatabase::isOpen() const
 String IconDatabase::databasePath() const
 {
     MutexLocker locker(m_syncLock);
-    return m_completeDatabasePath.copy();
+    return m_completeDatabasePath.threadsafeCopy();
 }
 
 String IconDatabase::defaultDatabaseFilename()
 {
     DEFINE_STATIC_LOCAL(String, defaultDatabaseFilename, ("WebpageIcons.db"));
-    return defaultDatabaseFilename.copy();
+    return defaultDatabaseFilename.threadsafeCopy();
 }
 
 // Unlike getOrCreatePageURLRecord(), getOrCreateIconRecord() does not mark the icon as "interested in import"
@@ -1375,7 +1366,7 @@ void* IconDatabase::syncThreadMainLoop()
             didAnyWork = readFromDatabase();
             if (shouldStopThreadActivity())
                 break;
-               
+                
             // Prune unretained icons after the first time we sync anything out to the database
             // This way, pruning won't be the only operation we perform to the database by itself
             // We also don't want to bother doing this if the thread should be terminating (the user is quitting)

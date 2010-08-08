@@ -135,8 +135,8 @@ static NSAttributedString *stripAttachmentCharacters(NSAttributedString *string)
 
 void Pasteboard::writeSelection(NSPasteboard* pasteboard, Range* selectedRange, bool canSmartCopyOrDelete, Frame* frame)
 {
-    if (WebArchivePboardType == nil)
-        Pasteboard::generalPasteboard(); //Initialises pasteboard types
+    if (!WebArchivePboardType)
+        Pasteboard::generalPasteboard(); // Initializes pasteboard types.
     ASSERT(selectedRange);
     
     NSAttributedString *attributedString = [[[NSAttributedString alloc] _initWithDOMRange:kit(selectedRange)] autorelease];
@@ -197,18 +197,38 @@ void Pasteboard::writeSelection(NSPasteboard* pasteboard, Range* selectedRange, 
         [pasteboard setData:nil forType:WebSmartPastePboardType];
     }
 }
+
+void Pasteboard::writePlainText(NSPasteboard* pasteboard, const String& text)
+{
+    NSArray *types = [NSArray arrayWithObject:NSStringPboardType];
+    [pasteboard declareTypes:types owner:nil];
+    
+    [pasteboard setString:text forType:NSStringPboardType];
+}
     
 void Pasteboard::writeSelection(Range* selectedRange, bool canSmartCopyOrDelete, Frame* frame)
 {
     Pasteboard::writeSelection(m_pasteboard.get(), selectedRange, canSmartCopyOrDelete, frame);
 }
 
+void Pasteboard::writePlainText(const String& text)
+{
+    if (!WebArchivePboardType)
+        Pasteboard::generalPasteboard(); // Initializes pasteboard types.
+
+    NSArray *types = [NSArray arrayWithObject:NSStringPboardType];
+    NSPasteboard *pasteboard = m_pasteboard.get();
+    [pasteboard declareTypes:types owner:nil];
+
+    [pasteboard setString:text forType:NSStringPboardType];
+}
+
 void Pasteboard::writeURL(NSPasteboard* pasteboard, NSArray* types, const KURL& url, const String& titleStr, Frame* frame)
 {
-    if (WebArchivePboardType == nil)
-        Pasteboard::generalPasteboard(); //Initialises pasteboard types
+    if (!WebArchivePboardType)
+        Pasteboard::generalPasteboard(); // Initializes pasteboard types.
    
-    if (types == nil) {
+    if (!types) {
         types = writableTypesForURL();
         [pasteboard declareTypes:types owner:nil];
     }
@@ -360,7 +380,7 @@ PassRefPtr<DocumentFragment> Pasteboard::documentFragment(Frame* frame, PassRefP
             }
         }
         if ([HTMLString length] != 0) {
-            RefPtr<DocumentFragment> fragment = createFragmentFromMarkup(frame->document(), HTMLString, "");
+            RefPtr<DocumentFragment> fragment = createFragmentFromMarkup(frame->document(), HTMLString, "", FragmentScriptingNotAllowed);
             if (fragment)
                 return fragment.release();
         }

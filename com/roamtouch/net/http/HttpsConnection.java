@@ -59,7 +59,7 @@ public class HttpsConnection extends Connection {
     private static SSLSocketFactory mSslSocketFactory = null;
 
     static {
-        // This intiialization happens in the zygote. It triggers some
+        // This initialization happens in the zygote. It triggers some
         // lazy initialization that can will benefit later invocations of
         // initializeEngine().
         initializeEngine(null);
@@ -131,13 +131,16 @@ public class HttpsConnection extends Connection {
      */
     private boolean mAborted = false;
 
+    // Used when connecting through a proxy.
+    private HttpHost mProxyHost;
+
     /**
      * Contructor for a https connection.
      */
-    HttpsConnection(Context context, HttpHost host,
-                    RequestQueue.ConnectionManager connectionManager,
+    HttpsConnection(Context context, HttpHost host, HttpHost proxy,
                     RequestFeeder requestFeeder) {
-        super(context, host, connectionManager, requestFeeder);
+        super(context, host, requestFeeder);
+        mProxyHost = proxy;
     }
 
     /**
@@ -159,8 +162,7 @@ public class HttpsConnection extends Connection {
     AndroidHttpClientConnection openConnection(Request req) throws IOException {
         SSLSocket sslSock = null;
 
-        HttpHost proxyHost = mConnectionManager.getProxyHost();
-        if (proxyHost != null) {
+        if (mProxyHost != null) {
             // If we have a proxy set, we first send a CONNECT request
             // to the proxy; if the proxy returns 200 OK, we negotiate
             // a secure connection to the target server via the proxy.
@@ -172,7 +174,7 @@ public class HttpsConnection extends Connection {
             Socket proxySock = null;
             try {
                 proxySock = new Socket
-                    (proxyHost.getHostName(), proxyHost.getPort());
+                    (mProxyHost.getHostName(), mProxyHost.getPort());
 
                 proxySock.setSoTimeout(60 * 1000);
 
@@ -306,12 +308,6 @@ public class HttpsConnection extends Connection {
         SslError error = CertificateChainValidator.getInstance().
             doHandshakeAndValidateServerCertificates(this, sslSock, mHost.getHostName());
 
-        EventHandler eventHandler = req.getEventHandler();
-
-        // Update the certificate info (to be consistent, it is better to do it
-        // here, before we start handling SSL errors, if any)
-        eventHandler.certificate(mCertificate);
-
         // Inform the user if there is a problem
         if (error != null) {
             // handleSslErrorRequest may immediately unsuspend if it wants to
@@ -323,7 +319,7 @@ public class HttpsConnection extends Connection {
                 mSuspended = true;
             }
             // don't hold the lock while calling out to the event handler
-            boolean canHandle = eventHandler.handleSslErrorRequest(error);
+            boolean canHandle = req.getEventHandler().handleSslErrorRequest(error);
             if(!canHandle) {
                 throw new IOException("failed to handle "+ error);
             }

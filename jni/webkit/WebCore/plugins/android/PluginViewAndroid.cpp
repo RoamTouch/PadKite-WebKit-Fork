@@ -5,16 +5,16 @@
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
- * 1. Redistributions of source code must retain the above copyright
+ *  * Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
+ *  * Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE COMPUTER, INC. ``AS IS'' AND ANY
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -23,6 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
 #define LOG_TAG "WebCore"
 
 #include "config.h"
@@ -51,7 +52,9 @@
 #include "PlatformKeyboardEvent.h"
 #include "PluginMainThreadScheduler.h"
 #include "PluginPackage.h"
+#include "Touch.h"
 #include "TouchEvent.h"
+#include "TouchList.h"
 #include "android_graphics.h"
 #include "SkCanvas.h"
 #include "npruntime_impl.h"
@@ -68,6 +71,12 @@
 // #include "runtime.h"
 #include "WebViewCore.h"
 
+/* Controls the printing of log messages in this file. This must be defined
+   before PluginDebugAndroid.h is included.
+ */
+// #define PLUGIN_DEBUG_LOCAL
+#define TRACE_KEY_EVENTS 0
+
 #include "PluginDebug.h"
 #include "PluginDebugAndroid.h"
 #include "PluginViewBridgeAndroid.h"
@@ -75,6 +84,7 @@
 
 #include "android_npapi.h"
 #include "ANPSurface_npapi.h"
+#include "ANPSystem_npapi.h"
 #include "SkANP.h"
 #include "SkFlipPixelRef.h"
 
@@ -83,6 +93,7 @@
 extern void ANPAudioTrackInterfaceV0_Init(ANPInterface* value);
 extern void ANPBitmapInterfaceV0_Init(ANPInterface* value);
 extern void ANPCanvasInterfaceV0_Init(ANPInterface* value);
+extern void ANPEventInterfaceV0_Init(ANPInterface* value);
 extern void ANPLogInterfaceV0_Init(ANPInterface* value);
 extern void ANPMatrixInterfaceV0_Init(ANPInterface* value);
 extern void ANPOffscreenInterfaceV0_Init(ANPInterface* value);
@@ -106,6 +117,7 @@ static const VarProcPair gVarProcs[] = {
     { VARPROCLINE(AudioTrackInterfaceV0)    },
     { VARPROCLINE(BitmapInterfaceV0)        },
     { VARPROCLINE(CanvasInterfaceV0)        },
+    { VARPROCLINE(EventInterfaceV0)         },
     { VARPROCLINE(LogInterfaceV0)           },
     { VARPROCLINE(MatrixInterfaceV0)        },
     { VARPROCLINE(PaintInterfaceV0)         },
@@ -163,61 +175,22 @@ void PluginView::platformInit()
     m_npWindow.window = 0;
 }
 
-void PluginView::platformStart()
+bool PluginView::platformStart()
 {
-    notImplemented();
+    return true;
 }
 
-PluginView::~PluginView()
+void PluginView::platformDestroy()
 {
-    stop();
-
-    deleteAllValues(m_requests);
-
-    freeStringArray(m_paramNames, m_paramCount);
-    freeStringArray(m_paramValues, m_paramCount);
-
-    m_parentFrame->script()->cleanupScriptObjectsForPlugin(this);
-
-// Since we have no legacy plugins to check, we ignore the quirks check
-//    if (m_plugin && !m_plugin->quirks().contains(PluginQuirkDontUnloadPlugin))
-    if (m_plugin) {
-        m_plugin->unload();
-    }
     delete m_window;
-}
-
-void PluginView::init()
-{
-    if (m_haveInitialized)
-        return;
-    m_haveInitialized = true;
-
-    android::WebViewCore* c = android::WebViewCore::getWebViewCore(this->parent());
-    m_window->init(c);
-
-    if (!m_plugin) {
-        ASSERT(m_status == PluginStatusCanNotFindPlugin);
-        return;
-    }
-
-    if (!m_plugin->load()) {
-        m_plugin = 0;
-        m_status = PluginStatusCanNotLoadPlugin;
-        return;
-    }
-
-    if (!start()) {
-        m_status = PluginStatusCanNotLoadPlugin;
-        return;
-    }
-
-    m_status = PluginStatusLoadedSuccessfully;
 }
 
 void PluginView::handleTouchEvent(TouchEvent* event)
 {
     if (!m_window->isAcceptingEvent(kTouch_ANPEventFlag))
+        return;
+
+    if (!m_window->inFullScreen() && m_parentFrame->document()->focusedNode() != m_element)
         return;
 
     ANPEvent evt;
@@ -232,26 +205,28 @@ void PluginView::handleTouchEvent(TouchEvent* event)
         evt.data.touch.action = kMove_ANPTouchAction;
     else if (eventNames().touchcancelEvent == type)
         evt.data.touch.action = kCancel_ANPTouchAction;
+    else if (eventNames().touchlongpressEvent == type)
+        evt.data.touch.action = kLongPress_ANPTouchAction;
+    else if (eventNames().touchdoubletapEvent == type)
+        evt.data.touch.action = kDoubleTap_ANPTouchAction;
     else
         return;
 
     evt.data.touch.modifiers = 0;   // todo
 
-    // convert to coordinates that are relative to the plugin. The pageX / pageY
-    // values are the only values in the event that are consistently in frame
-    // coordinates despite their misleading name.
-    evt.data.touch.x = event->pageX() - m_npWindow.x;
-    evt.data.touch.y = event->pageY() - m_npWindow.y;
+    // In the event of a touchend (up) or touchcancel event, we must ask the changedTouch for the
+    // co-ordinates as there is no touch in touches anymore.
+    TouchList* touches = (evt.data.touch.action == kUp_ANPTouchAction
+        || evt.data.touch.action == kCancel_ANPTouchAction) ? event->changedTouches() : event->touches();
 
-    if (m_plugin->pluginFuncs()->event(m_instance, &evt)) {
-        // The plugin needs focus to receive keyboard events
-        if (evt.data.touch.action == kDown_ANPTouchAction) {
-            if (Page* page = m_parentFrame->page())
-                page->focusController()->setFocusedFrame(m_parentFrame);
-            m_parentFrame->document()->setFocusedNode(m_element);
-        }
-        event->setDefaultPrevented(true);
-    }
+    // Convert to coordinates that are relative to the plugin.
+    // We only support single touch points at the moment, so we want to look at index 0 only.
+    IntPoint localPos = roundedIntPoint(m_element->renderer()->absoluteToLocal(IntPoint(touches->item(0)->pageX(), touches->item(0)->pageY())));
+    evt.data.touch.x = localPos.x();
+    evt.data.touch.y = localPos.y();
+
+    if (m_window->sendEvent(evt))
+        event->preventDefault();
 }
 
 void PluginView::handleMouseEvent(MouseEvent* event)
@@ -266,23 +241,22 @@ void PluginView::handleMouseEvent(MouseEvent* event)
         SkANP::InitEvent(&evt, kMouse_ANPEventType);
         evt.data.mouse.action = isUp ? kUp_ANPMouseAction : kDown_ANPMouseAction;
 
-        // convert to coordinates that are relative to the plugin. The pageX / pageY
-        // values are the only values in the event that are consistently in frame
-        // coordinates despite their misleading name.
-        evt.data.mouse.x = event->pageX() - m_npWindow.x;
-        evt.data.mouse.y = event->pageY() - m_npWindow.y;
+        // Convert to coordinates that are relative to the plugin.
+        IntPoint localPos = roundedIntPoint(m_element->renderer()->absoluteToLocal(event->absoluteLocation()));
+        evt.data.mouse.x = localPos.x();
+        evt.data.mouse.y = localPos.y();
+
         if (isDown) {
-            // The plugin needs focus to receive keyboard events
-            if (Page* page = m_parentFrame->page())
-                page->focusController()->setFocusedFrame(m_parentFrame);
-            m_parentFrame->document()->setFocusedNode(m_element);
+            // The plugin needs focus to receive keyboard and touch events
+            m_element->focus();
+            event->setDefaultHandled();
         }
     }
     else {
       return;
     }
 
-    if (m_plugin->pluginFuncs()->event(m_instance, &evt)) {
+    if (m_window->sendEvent(evt)) {
         event->setDefaultHandled();
     }
 }
@@ -296,6 +270,20 @@ static ANPKeyModifier make_modifiers(bool shift, bool alt) {
         mod |= kAlt_ANPKeyModifier;
     }
     return mod;
+}
+
+void PluginView::handleFocusEvent(bool hasFocus)
+{
+    ANPEvent evt;
+    SkANP::InitEvent(&evt, kLifecycle_ANPEventType);
+    evt.data.lifecycle.action = hasFocus ? kGainFocus_ANPLifecycleAction :
+                                           kLoseFocus_ANPLifecycleAction;
+    m_window->sendEvent(evt);
+
+    // redraw the plugin which subsequently invalidates the nav cache
+    IntRect rect = IntRect(m_npWindow.x, m_npWindow.y,
+                           m_npWindow.width, m_npWindow.height);
+    m_window->webViewCore()->contentInvalidate(rect);
 }
 
 void PluginView::handleKeyboardEvent(KeyboardEvent* event)
@@ -315,8 +303,8 @@ void PluginView::handleKeyboardEvent(KeyboardEvent* event)
 
     switch (pke->type()) {
         case PlatformKeyboardEvent::KeyDown:
-#ifdef TRACE_KEY_EVENTS
-            SkDebugf("--------- KeyDown, ignore\n");
+#if TRACE_KEY_EVENTS
+            PLUGIN_LOG("--------- KeyDown, ignore\n");
 #endif
             ignoreEvent = true;
             break;
@@ -324,8 +312,8 @@ void PluginView::handleKeyboardEvent(KeyboardEvent* event)
             evt.data.key.action = kDown_ANPKeyAction;
             break;
         case PlatformKeyboardEvent::Char:
-#ifdef TRACE_KEY_EVENTS
-            SkDebugf("--------- Char, ignore\n");
+#if TRACE_KEY_EVENTS
+            PLUGIN_LOG("--------- Char, ignore\n");
 #endif
             ignoreEvent = true;
             break;
@@ -333,8 +321,8 @@ void PluginView::handleKeyboardEvent(KeyboardEvent* event)
             evt.data.key.action = kUp_ANPKeyAction;
             break;
         default:
-#ifdef TRACE_KEY_EVENTS
-            SkDebugf("------ unexpected keyevent type %d\n", pke->type());
+#if TRACE_KEY_EVENTS
+            PLUGIN_LOG("------ unexpected keyevent type %d\n", pke->type());
 #endif
             ignoreEvent = true;
             break;
@@ -357,8 +345,15 @@ void PluginView::handleKeyboardEvent(KeyboardEvent* event)
     evt.data.key.modifiers = make_modifiers(pke->shiftKey(), pke->altKey());
     evt.data.key.unichar = pke->unichar();
 
-    if (m_plugin->pluginFuncs()->event(m_instance, &evt)) {
+    if (m_window->sendEvent(evt)) {
         event->setDefaultHandled();
+    } else if (m_window->inFullScreen()){
+        // while in the full screen mode, always consumes the key events and
+        // keeps the document focus
+        event->setDefaultHandled();
+    } else {
+        // remove the plugin from the document's focus
+        m_parentFrame->document()->focusedNodeRemoved();
     }
 }
 
@@ -372,38 +367,78 @@ NPError PluginView::getValueStatic(NPNVariable variable, void* value)
 {
     // our interface query is valid with no NPP instance
     NPError error = NPERR_GENERIC_ERROR;
-    if ((value != NULL) && (variable == NPNVisOfflineBool)) {
-      bool* retValue = static_cast<bool*>(value);
-      *retValue = !networkStateNotifier().onLine();
-      return NPERR_NO_ERROR;
+
+    switch (variable) {
+        case NPNVisOfflineBool: {
+            if (value != NULL) {
+                bool* retValue = static_cast<bool*>(value);
+                *retValue = !networkStateNotifier().onLine();
+                return NPERR_NO_ERROR;
+            }
+            break;
+        }
+        case kJavaContext_ANPGetValue: {
+            jobject* retObject = static_cast<jobject*>(value);
+            *retObject = android::WebViewCore::getApplicationContext();
+            return NPERR_NO_ERROR;
+        }
+        default:
+            ; // do nothing
     }
+
     (void)anp_getInterface(variable, value, &error);
     return error;
 }
 
 void PluginView::setParent(ScrollView* parent)
 {
+    PLUGIN_LOG("--%p SetParent old=[%p], new=[%p] \n", instance(), this->parent(), parent);
+
     Widget::setParent(parent);
 
-    if (parent)
+    if (parent) {
+        // the widget needs initialized now so that the plugin has access to
+        // WebViewCore when NPP_New is called
+        if (m_window && !m_window->webViewCore()) {
+            android::WebViewCore* c = android::WebViewCore::getWebViewCore(this->parent());
+            m_window->init(c);
+        }
         init();
+
+        /* Our widget needs to recompute its m_windowRect which then sets
+           the NPWindowRect if necessary.  This ensures that if NPWindowRect
+           is set prior to parent() being set that we still (1) notify the
+           plugin of its current rect and (2) that we execute our logic in
+           PluginWidgetAndroid in response to changes to NPWindowRect.
+         */
+        updatePluginWidget();
+    }
 }
 
-void PluginView::setNPWindowRect(const IntRect& rect)
+void PluginView::setNPWindowRect(const IntRect&)
 {
-    if (!m_isStarted)
+    setNPWindowIfNeeded();
+}
+
+void PluginView::setNPWindowIfNeeded()
+{
+    PLUGIN_LOG("--%p SetWindow isStarted=[%d] \n", instance(), m_isStarted);
+
+    if (!m_isStarted || !parent())
         return;
 
-    // the rect is relative to the frameview's (0,0)
-    m_npWindow.x = rect.x();
-    m_npWindow.y = rect.y();
-    m_npWindow.width = rect.width();
-    m_npWindow.height = rect.height();
+    // in Android, plugin always get the setwindow() in the page coordinate.
 
-    m_npWindow.clipRect.left = 0;
-    m_npWindow.clipRect.top = 0;
-    m_npWindow.clipRect.right = rect.width();
-    m_npWindow.clipRect.bottom = rect.height();
+    // the m_npWindow is relative to the page
+    m_npWindow.x = m_pageRect.x();
+    m_npWindow.y = m_pageRect.y();
+    m_npWindow.width = m_pageRect.width();
+    m_npWindow.height = m_pageRect.height();
+
+    m_npWindow.clipRect.left = m_pageRect.x();
+    m_npWindow.clipRect.top = m_pageRect.y();
+    m_npWindow.clipRect.right = m_pageRect.x() + m_pageRect.width();
+    m_npWindow.clipRect.bottom = m_pageRect.y() + m_pageRect.height();
 
     if (m_plugin->pluginFuncs()->setwindow) {
 #if USE(JSC)
@@ -478,7 +513,13 @@ NPError PluginView::getValue(NPNVariable variable, void* value)
 
         case kSupportedDrawingModel_ANPGetValue: {
             uint32_t* bits = reinterpret_cast<uint32_t*>(value);
-            *bits = (1 << kBitmap_ANPDrawingModel);
+            *bits = kBitmap_ANPDrawingModel & kSurface_ANPDrawingModel;
+            return NPERR_NO_ERROR;
+        }
+
+        case kJavaContext_ANPGetValue: {
+            jobject* retObject = static_cast<jobject*>(value);
+            *retObject = android::WebViewCore::getWebViewCore(parent())->getContext();
             return NPERR_NO_ERROR;
         }
 
@@ -495,12 +536,6 @@ NPError PluginView::platformSetValue(NPPVariable variable, void* value)
     NPError error = NPERR_GENERIC_ERROR;
 
     switch (variable) {
-        case kSetPluginStubJavaClassName_ANPSetValue: {
-            char* className = reinterpret_cast<char*>(value);
-            if (m_window->setPluginStubJavaClassName(className))
-                error = NPERR_NO_ERROR;
-            break;
-        }
         case kRequestDrawingModel_ANPSetValue: {
             ANPDrawingModel model = reinterpret_cast<ANPDrawingModel>(value);
             if (m_window->setDrawingModel(model))
@@ -538,7 +573,6 @@ void PluginView::invalidateRect(NPRect* rect)
     }
 
     m_window->inval(r, true);
-//    android::WebViewCore::getWebViewCore(parent())->contentInvalidate(r);
 }
 
 void PluginView::invalidateRegion(NPRegion region)
@@ -561,12 +595,31 @@ void PluginView::show()
 {
     setSelfVisible(true);
     Widget::show();
+
+    if (platformPluginWidget())
+        platformPluginWidget()->layoutSurface();
+
 }
 
 void PluginView::hide()
 {
     setSelfVisible(false);
     Widget::hide();
+
+   if (platformPluginWidget())
+        platformPluginWidget()->layoutSurface();
+}
+
+void PluginView::setParentVisible(bool visible) {
+
+    if (isParentVisible() == visible)
+        return;
+
+    Widget::setParentVisible(visible);
+
+    if (platformPluginWidget())
+        platformPluginWidget()->layoutSurface();
+
 }
 
 void PluginView::paint(GraphicsContext* context, const IntRect& rect)
@@ -579,25 +632,56 @@ void PluginView::paint(GraphicsContext* context, const IntRect& rect)
 
     IntRect frame = frameRect();
     if (!frame.width() || !frame.height()) {
+        PLUGIN_LOG("--%p FrameRect Dimensions are (0,0).\n", instance());
         return;
     }
 
-    m_window->inval(rect, false);
-    m_window->draw(android_gc2canvas(context));
+    if (m_window->isSurfaceDrawingModel()) {
+        /* the document position of the frame (e.g. iFrame) containing the
+           surface may have changed, which requires us to to update the global
+           coordinates of the surface. This is necessary because the plugin has
+           not moved within its parent frame and therefore will not get any
+           notification of its global position change.
+         */
+        updatePluginWidget();
+        m_window->setSurfaceClip(context->platformContext()->mCanvas->getTotalClip().getBounds());
+    } else {
+        m_window->inval(rect, false);
+        context->save();
+        context->translate(frame.x(), frame.y());
+        m_window->draw(android_gc2canvas(context));
+        context->restore();
+    }
+
+
 }
 
-// new as of SVN 38068, Nov 5 2008
 void PluginView::updatePluginWidget()
 {
-    // I bet/hope we can move all of setNPWindowRect() into here
     FrameView* frameView = static_cast<FrameView*>(parent());
+    PLUGIN_LOG("--%p UpdatePluginWidget frame=[%p] \n", instance(), frameView);
     if (frameView) {
-        m_windowRect = IntRect(frameView->contentsToWindow(frameRect().location()), frameRect().size());
+        m_windowRect = frameView->contentsToWindow(frameRect());
+
+        IntRect oldPageRect = m_pageRect;
+
+        // only the top ScrollView can have the offset
+        m_pageRect = m_windowRect;
+        ScrollView* top = parent();
+        while (top->parent())
+            top = top->parent();
+        m_pageRect.move(top->scrollOffset());
+
+        if (m_pageRect != oldPageRect)
+            setNPWindowIfNeeded();
     }
 }
 
-// new as of SVN 38068, Nov 5 2008
-void PluginView::setParentVisible(bool) {
+void PluginView::halt() {
+    notImplemented();
+}
+
+void PluginView::restart() {
     notImplemented();
 }
 

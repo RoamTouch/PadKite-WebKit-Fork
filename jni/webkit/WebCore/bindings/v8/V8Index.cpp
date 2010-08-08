@@ -33,6 +33,10 @@
 
 #include "V8Attr.h"
 #include "V8BarInfo.h"
+#include "V8BeforeLoadEvent.h"
+#include "V8Blob.h"
+#include "V8WebGLActiveInfo.h"
+#include "V8CanvasRenderingContext.h"
 #include "V8CanvasRenderingContext2D.h"
 #include "V8CanvasGradient.h"
 #include "V8CanvasPattern.h"
@@ -43,6 +47,7 @@
 #include "V8ClientRectList.h"
 #include "V8Clipboard.h"
 #include "V8Comment.h"
+#include "V8CompositionEvent.h"
 #include "V8Console.h"
 #include "V8Counter.h"
 #include "V8CSSStyleDeclaration.h"
@@ -107,6 +112,7 @@
 #include "V8HTMLHtmlElement.h"
 #include "V8HTMLIFrameElement.h"
 #include "V8HTMLImageElement.h"
+#include "V8HTMLImageElementConstructor.h"
 #include "V8HTMLInputElement.h"
 #include "V8HTMLIsIndexElement.h"
 #include "V8HTMLLabelElement.h"
@@ -121,6 +127,7 @@
 #include "V8HTMLOListElement.h"
 #include "V8HTMLOptGroupElement.h"
 #include "V8HTMLOptionElement.h"
+#include "V8HTMLOptionElementConstructor.h"
 #include "V8HTMLParagraphElement.h"
 #include "V8HTMLParamElement.h"
 #include "V8HTMLPreElement.h"
@@ -148,11 +155,15 @@
 #include "V8NodeList.h"
 #include "V8NodeFilter.h"
 #include "V8Notation.h"
+#include "V8PopStateEvent.h"
 #include "V8ProcessingInstruction.h"
 #include "V8ProgressEvent.h"
 #include "V8StyleSheet.h"
 #include "V8Text.h"
 #include "V8TextEvent.h"
+#include "V8Touch.h"
+#include "V8TouchEvent.h"
+#include "V8TouchList.h"
 #include "V8DOMCoreException.h"
 #include "V8DOMParser.h"
 #include "V8DOMWindow.h"
@@ -179,6 +190,7 @@
 #include "V8Navigator.h"
 #include "V8MimeType.h"
 #include "V8MimeTypeArray.h"
+#include "V8PageTransitionEvent.h"
 #include "V8Plugin.h"
 #include "V8PluginArray.h"
 #include "V8Range.h"
@@ -195,22 +207,9 @@
 #include "V8XMLHttpRequestUpload.h"
 #include "V8XMLSerializer.h"
 #include "V8RGBColor.h"
-#include "V8VoidCallback.h"
-
-#if !PLATFORM(ANDROID)
-#include "V8InspectorBackend.h"
-#endif
 
 #if ENABLE(OFFLINE_WEB_APPLICATIONS)
 #include "V8DOMApplicationCache.h"
-#endif
-
-#if ENABLE(DATABASE)
-#include "V8Database.h"
-#include "V8SQLError.h"
-#include "V8SQLResultSet.h"
-#include "V8SQLResultSetRowList.h"
-#include "V8SQLTransaction.h"
 #endif
 
 #if ENABLE(DOM_STORAGE)
@@ -226,7 +225,7 @@
 #include "V8SVGSetElement.h"
 #endif
 
-#if ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "V8SVGComponentTransferFunctionElement.h"
 #include "V8SVGFEBlendElement.h"
 #include "V8SVGFEColorMatrixElement.h"
@@ -244,6 +243,7 @@
 #include "V8SVGFEImageElement.h"
 #include "V8SVGFEMergeElement.h"
 #include "V8SVGFEMergeNodeElement.h"
+#include "V8SVGFEMorphologyElement.h"
 #include "V8SVGFEOffsetElement.h"
 #include "V8SVGFEPointLightElement.h"
 #include "V8SVGFESpecularLightingElement.h"
@@ -254,12 +254,13 @@
 #endif
 
 #if ENABLE(SVG_FONTS)
-#include "V8SVGDefinitionSrcElement.h"
+#include "V8SVGFontElement.h"
 #include "V8SVGFontFaceElement.h"
 #include "V8SVGFontFaceFormatElement.h"
 #include "V8SVGFontFaceNameElement.h"
 #include "V8SVGFontFaceSrcElement.h"
 #include "V8SVGFontFaceUriElement.h"
+#include "V8SVGMissingGlyphElement.h"
 #endif
 
 #if ENABLE(SVG_FOREIGN_OBJECT)
@@ -364,17 +365,21 @@
 #include "V8SVGTransform.h"
 #include "V8SVGTransformList.h"
 #include "V8SVGUnitTypes.h"
-#include "V8SVGURIReference.h"
 #include "V8SVGZoomEvent.h"
 #endif
 
 #if ENABLE(VIDEO)
 #include "V8HTMLAudioElement.h"
+#include "V8HTMLAudioElementConstructor.h"
 #include "V8HTMLMediaElement.h"
 #include "V8HTMLSourceElement.h"
 #include "V8HTMLVideoElement.h"
 #include "V8MediaError.h"
 #include "V8TimeRanges.h"
+#endif
+
+#if ENABLE(WEB_SOCKETS)
+#include "V8WebSocket.h"
 #endif
 
 #if ENABLE(WORKERS)
@@ -386,65 +391,97 @@
 #include "V8WorkerNavigator.h"
 #endif
 
+#if ENABLE(NOTIFICATIONS)
+#include "V8Notification.h"
+#include "V8NotificationCenter.h"
+#endif
+
 #if ENABLE(SHARED_WORKERS)
 #include "V8SharedWorker.h"
+#include "V8SharedWorkerContext.h"
 #endif
 
-#if ENABLE(GEOLOCATION)
-#include "V8Coordinates.h"
-#include "V8Geolocation.h"
-#include "V8Geoposition.h"
-#include "V8PositionError.h"
+#if ENABLE(3D_CANVAS)
+#include "V8WebGLRenderingContext.h"
+#include "V8WebGLArrayBuffer.h"
+#include "V8WebGLArray.h"
+#include "V8WebGLByteArray.h"
+#include "V8WebGLBuffer.h"
+#include "V8WebGLContextAttributes.h"
+#include "V8WebGLFloatArray.h"
+#include "V8WebGLFramebuffer.h"
+#include "V8WebGLIntArray.h"
+#include "V8WebGLProgram.h"
+#include "V8WebGLRenderbuffer.h"
+#include "V8WebGLShader.h"
+#include "V8WebGLShortArray.h"
+#include "V8WebGLTexture.h"
+#include "V8WebGLUniformLocation.h"
+#include "V8WebGLUnsignedByteArray.h"
+#include "V8WebGLUnsignedIntArray.h"
+#include "V8WebGLUnsignedShortArray.h"
 #endif
 
-#if ENABLE(TOUCH_EVENTS)
-#include "V8Touch.h"
-#include "V8TouchList.h"
-#include "V8TouchEvent.h"
+#if ENABLE(DATABASE)
+#include "V8Database.h"
+#include "V8SQLError.h"
+#include "V8SQLResultSet.h"
+#include "V8SQLResultSetRowList.h"
+#include "V8SQLTransaction.h"
+#endif
+
+#if ENABLE(INDEXED_DATABASE)
+#include "V8IDBDatabaseError.h"
+#include "V8IDBDatabaseException.h"
+#include "V8IDBRequest.h"
+#include "V8IndexedDatabaseRequest.h"
 #endif
 
 #if ENABLE(XPATH)
 #include "V8XPathResult.h"
 #include "V8XPathException.h"
 #include "V8XPathExpression.h"
-#include "V8XPathEvaluator.h"
 #include "V8XPathNSResolver.h"
+#include "V8XPathEvaluator.h"
 #endif
 
 #if ENABLE(XSLT)
 #include "V8XSLTProcessor.h"
 #endif
 
+#if ENABLE(INSPECTOR)
+#include "V8InjectedScriptHost.h"
+#include "V8InspectorBackend.h"
+#include "V8InspectorFrontendHost.h"
+#endif
+
+#if ENABLE(EVENTSOURCE)
+#include "V8EventSource.h"
+#endif
+
+// Geolocation
+#include "V8Coordinates.h"
+#include "V8Geolocation.h"
+#include "V8Geoposition.h"
+#include "V8PositionError.h"
+
+#if PLATFORM(ANDROID)
+// Temporary modification - will not be upstreamed
+#include "V8Connection.h"
+#endif  // PLATFORM(ANDROID)
+
 namespace WebCore {
 
-FunctionTemplateFactory V8ClassIndex::GetFactory(V8WrapperType type)
+v8::Persistent<v8::FunctionTemplate> V8ClassIndex::getTemplate(V8WrapperType type)
 {
     switch (type) {
 #define MAKE_CASE(type, name)\
-    case V8ClassIndex::type: return V8##name::GetTemplate;
+    case V8ClassIndex::type: return V8##name::GetTemplate();
     WRAPPER_TYPES(MAKE_CASE)
 #undef MAKE_CASE
-    default: return NULL;
-    }
-}
-
-
-#define MAKE_CACHE(type, name)\
-    static v8::Persistent<v8::FunctionTemplate> name##_cache_;
-    ALL_WRAPPER_TYPES(MAKE_CACHE)
-#undef MAKE_CACHE
-
-
-v8::Persistent<v8::FunctionTemplate>* V8ClassIndex::GetCache(V8WrapperType type)
-{
-    switch (type) {
-#define MAKE_CASE(type, name)\
-    case V8ClassIndex::type: return &name##_cache_;
-    ALL_WRAPPER_TYPES(MAKE_CASE)
-#undef MAKE_CASE
     default:
-        ASSERT(false);
-        return NULL;
+        ASSERT_NOT_REACHED();
+        return v8::Persistent<v8::FunctionTemplate>::New(v8::FunctionTemplate::New());
   }
 }
 

@@ -1,6 +1,4 @@
 /**
- * This file is part of the DOM implementation for KDE.
- *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
@@ -94,6 +92,14 @@ bool CSSValueList::hasValue(CSSValue* val)
             return true;
     }
     return false;
+}
+
+PassRefPtr<CSSValueList> CSSValueList::copy()
+{
+    PassRefPtr<CSSValueList> newList = m_isSpaceSeparated ? createSpaceSeparated() : createCommaSeparated();
+    for (size_t index = 0; index < m_values.size(); index++)
+        newList->append(item(index));
+    return newList;
 }
 
 String CSSValueList::cssText() const

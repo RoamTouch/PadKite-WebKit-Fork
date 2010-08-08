@@ -40,6 +40,8 @@ typedef struct _GdkCursor GdkCursor;
 #include <QCursor>
 #elif PLATFORM(CHROMIUM)
 #include "PlatformCursor.h"
+#elif PLATFORM(HAIKU)
+#include <app/Cursor.h>
 #endif
 
 #if PLATFORM(MAC)
@@ -54,6 +56,11 @@ class NSCursor;
 class wxCursor;
 #endif
 
+#if PLATFORM(WIN)
+typedef struct HICON__ *HICON;
+typedef HICON HCURSOR;
+#endif
+
 namespace WebCore {
 
     class Image;
@@ -63,7 +70,7 @@ namespace WebCore {
     class SharedCursor : public RefCounted<SharedCursor> {
     public:
         static PassRefPtr<SharedCursor> create(HCURSOR nativeCursor) { return adoptRef(new SharedCursor(nativeCursor)); }
-        ~SharedCursor() { DestroyIcon(m_nativeCursor); }
+        ~SharedCursor();
         HCURSOR nativeCursor() const { return m_nativeCursor; }
     private:
         SharedCursor(HCURSOR nativeCursor) : m_nativeCursor(nativeCursor) { }
@@ -86,6 +93,9 @@ namespace WebCore {
 #elif PLATFORM(CHROMIUM)
     // See PlatformCursor.h
     typedef void* PlatformCursorHandle;
+#elif PLATFORM(HAIKU)
+    typedef BCursor* PlatformCursor;
+    typedef BCursor* PlatformCursorHandle;
 #else
     typedef void* PlatformCursor;
     typedef void* PlatformCursorHandle;

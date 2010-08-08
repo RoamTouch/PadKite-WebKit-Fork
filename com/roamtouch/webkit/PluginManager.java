@@ -21,6 +21,7 @@ import java.util.List;
 
 import android.annotation.SdkConstant;
 import android.annotation.SdkConstant.SdkConstantType;
+import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
@@ -60,6 +61,9 @@ public class PluginManager {
 
     private static final String LOGTAG = "webkit";
 
+    private static final String PLUGIN_TYPE = "type";
+    private static final String TYPE_NATIVE = "native";
+
     private static PluginManager mInstance = null;
 
     private final Context mContext;
@@ -85,7 +89,7 @@ public class PluginManager {
                 throw new IllegalStateException(
                         "First call to PluginManager need a valid context.");
             }
-            mInstance = new PluginManager(context);
+            mInstance = new PluginManager(context.getApplicationContext());
         }
         return mInstance;
     }
@@ -108,7 +112,8 @@ public class PluginManager {
         ArrayList<String> directories = new ArrayList<String>();
         PackageManager pm = mContext.getPackageManager();
         List<ResolveInfo> plugins = pm.queryIntentServices(new Intent(
-                PLUGIN_ACTION), PackageManager.GET_SERVICES);
+                PLUGIN_ACTION), PackageManager.GET_SERVICES
+                | PackageManager.GET_META_DATA);
 
         synchronized(mPackageInfoCache) {
 
@@ -116,27 +121,35 @@ public class PluginManager {
             mPackageInfoCache.clear();
 
             for (ResolveInfo info : plugins) {
+
+                // retrieve the plugin's service information
                 ServiceInfo serviceInfo = info.serviceInfo;
                 if (serviceInfo == null) {
                     Log.w(LOGTAG, "Ignore bad plugin");
                     continue;
                 }
+
+                // retrieve information from the plugin's manifest
                 PackageInfo pkgInfo;
                 try {
                     pkgInfo = pm.getPackageInfo(serviceInfo.packageName,
                                     PackageManager.GET_PERMISSIONS
                                     | PackageManager.GET_SIGNATURES);
                 } catch (NameNotFoundException e) {
-                    Log.w(LOGTAG, "Cant find plugin: " + serviceInfo.packageName);
+                    Log.w(LOGTAG, "Can't find plugin: " + serviceInfo.packageName);
                     continue;
                 }
                 if (pkgInfo == null) {
                     continue;
                 }
+
+                // check if their is a conflict in the lib directory names
                 String directory = pkgInfo.applicationInfo.dataDir + "/lib";
                 if (directories.contains(directory)) {
                     continue;
                 }
+
+                // check if the plugin has the required permissions
                 String permissions[] = pkgInfo.requestedPermissions;
                 if (permissions == null) {
                     continue;
@@ -151,6 +164,8 @@ public class PluginManager {
                 if (!permissionOk) {
                     continue;
                 }
+
+                // check to ensure the plugin is properly signed
                 Signature signatures[] = pkgInfo.signatures;
                 if (signatures == null) {
                     continue;
@@ -169,6 +184,39 @@ public class PluginManager {
                         continue;
                     }
                 }
+
+                // determine the type of plugin from the manifest
+                if (serviceInfo.metaData == null) {
+                    Log.e(LOGTAG, "The plugin '" + serviceInfo.name + "' has no type defined");
+                    continue;
+                }
+
+                String pluginType = serviceInfo.metaData.getString(PLUGIN_TYPE);
+                if (!TYPE_NATIVE.equals(pluginType)) {
+                    Log.e(LOGTAG, "Unrecognized plugin type: " + pluginType);
+                    continue;
+                }
+
+                try {
+                    Class<?> cls = getPluginClass(serviceInfo.packageName, serviceInfo.name);
+
+                    //TODO implement any requirements of the plugin class here!
+                    boolean classFound = true;
+
+                    if (!classFound) {
+                        Log.e(LOGTAG, "The plugin's class' " + serviceInfo.name + "' does not extend the appropriate class.");
+                        continue;
+                    }
+
+                } catch (NameNotFoundException e) {
+                    Log.e(LOGTAG, "Can't find plugin: " + serviceInfo.packageName);
+                    continue;
+                } catch (ClassNotFoundException e) {
+                    Log.e(LOGTAG, "Can't find plugin's class: " + serviceInfo.name);
+                    continue;
+                }
+
+                // if all checks have passed then make the plugin available
                 mPackageInfoCache.add(pkgInfo);
                 directories.add(directory);
             }
@@ -177,6 +225,7 @@ public class PluginManager {
         return directories.toArray(new String[directories.size()]);
     }
 
+    /* package */
     String getPluginsAPKName(String pluginLib) {
 
         // basic error checking on input params
@@ -199,5 +248,15 @@ public class PluginManager {
 
     String getPluginSharedDataDirectory() {
         return mContext.getDir("plugins", 0).getPath();
+    }
+
+    /* package */
+    Class<?> getPluginClass(String packageName, String className)
+            throws NameNotFoundException, ClassNotFoundException {
+        Context pluginContext = mContext.createPackageContext(packageName,
+                Context.CONTEXT_INCLUDE_CODE |
+                Context.CONTEXT_IGNORE_SECURITY);
+        ClassLoader pluginCL = pluginContext.getClassLoader();
+        return pluginCL.loadClass(className);
     }
 }

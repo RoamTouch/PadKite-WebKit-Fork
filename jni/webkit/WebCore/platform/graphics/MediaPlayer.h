@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,8 +37,25 @@
 #include <wtf/HashSet.h>
 #include <wtf/OwnPtr.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/PassOwnPtr.h>
+
+#ifdef __OBJC__
+@class QTMovie;
+#else
+class QTMovie;
+#endif
 
 namespace WebCore {
+
+// Structure that will hold every native
+// types supported by the current media player.
+// We have to do that has multiple media players
+// backend can live at runtime.
+typedef struct PlatformMedia {
+    QTMovie* qtMovie;
+} PlatformMedia;
+
+static const PlatformMedia NoPlatformMedia = { 0 };
 
 class ContentType;
 class FrameView;
@@ -48,6 +65,7 @@ class IntSize;
 class MediaPlayer;
 class MediaPlayerPrivateInterface;
 class String;
+class TimeRanges;
 
 #if USE(ACCELERATED_COMPOSITING)
 class GraphicsLayer;
@@ -63,8 +81,11 @@ public:
     // the ready state has changed
     virtual void mediaPlayerReadyStateChanged(MediaPlayer*) { }
 
-    // the volume or muted state has changed
+    // the volume state has changed
     virtual void mediaPlayerVolumeChanged(MediaPlayer*) { }
+
+    // the mute state has changed
+    virtual void mediaPlayerMuteChanged(MediaPlayer*) { }
 
     // time has jumped, eg. not as a result of normal playback
     virtual void mediaPlayerTimeChanged(MediaPlayer*) { }
@@ -98,7 +119,11 @@ public:
 
 class MediaPlayer : public Noncopyable {
 public:
-    MediaPlayer(MediaPlayerClient*);
+
+    static PassOwnPtr<MediaPlayer> create(MediaPlayerClient* client)
+    {
+        return new MediaPlayer(client);
+    }
     virtual ~MediaPlayer();
 
     // media engine support
@@ -109,8 +134,11 @@ public:
 
     bool supportsFullscreen() const;
     bool supportsSave() const;
+    PlatformMedia platformMedia() const;
+
     IntSize naturalSize();
-    bool hasVideo();
+    bool hasVideo() const;
+    bool hasAudio() const;
     
     void setFrameView(FrameView* frameView) { m_frameView = frameView; }
     FrameView* frameView() { return m_frameView; }
@@ -125,6 +153,7 @@ public:
     bool visible() const;
     void setVisible(bool);
     
+    void prepareToPlay();
     void play();
     void pause();    
     
@@ -137,25 +166,26 @@ public:
 
     float startTime() const;
     
-    void setEndTime(float time);
-    
     float rate() const;
     void setRate(float);
 
     bool preservesPitch() const;    
     void setPreservesPitch(bool);
     
-    float maxTimeBuffered();
+    PassRefPtr<TimeRanges> buffered();
     float maxTimeSeekable();
 
     unsigned bytesLoaded();
-    bool totalBytesKnown();
-    unsigned totalBytes();
     
     float volume() const;
     void setVolume(float);
-    
-    int dataRate() const;
+
+    bool supportsMuting() const;
+    bool muted() const;
+    void setMuted(bool);
+
+    bool hasClosedCaptions() const;
+    void setClosedCaptionsVisible(bool closedCaptionsVisible);
 
     bool autobuffer() const;    
     void setAutobuffer(bool);
@@ -174,7 +204,8 @@ public:
 
     void networkStateChanged();
     void readyStateChanged();
-    void volumeChanged();
+    void volumeChanged(float);
+    void muteChanged(bool);
     void timeChanged();
     void sizeChanged();
     void rateChanged();
@@ -184,14 +215,12 @@ public:
 
     MediaPlayerClient* mediaPlayerClient() const { return m_mediaPlayerClient; }
 
-#if PLATFORM(ANDROID)
+    bool hasAvailableVideoFrame() const;
+
     bool canLoadPoster() const;
     void setPoster(const String&);
-    void prepareToPlay();
-#endif
 
 #if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
-    void setPoster(const String& url);
     void deliverNotification(MediaPlayerProxyNotificationType notification);
     void setMediaPlayerProxy(WebMediaPlayerProxy* proxy);
 #endif
@@ -206,6 +235,8 @@ public:
     bool hasSingleSecurityOrigin() const;
 
 private:
+    MediaPlayer(MediaPlayerClient*);
+
     static void initializeMediaEngines();
 
     MediaPlayerClient* m_mediaPlayerClient;
@@ -216,6 +247,7 @@ private:
     bool m_visible;
     float m_rate;
     float m_volume;
+    bool m_muted;
     bool m_preservesPitch;
     bool m_autobuffer;
 #if ENABLE(PLUGIN_PROXY_FOR_VIDEO)

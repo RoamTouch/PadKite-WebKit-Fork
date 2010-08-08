@@ -27,6 +27,8 @@
 #include "config.h"
 #include "PluginView.h"
 
+#include "Bridge.h"
+#include "Chrome.h"
 #include "Document.h"
 #include "DocumentLoader.h"
 #include "Element.h"
@@ -45,12 +47,13 @@
 #include "Page.h"
 #include "FocusController.h"
 #include "PlatformMouseEvent.h"
-#if PLATFORM(WIN_OS) && !PLATFORM(WX) && ENABLE(NETSCAPE_PLUGIN_API)
+#if OS(WINDOWS) && ENABLE(NETSCAPE_PLUGIN_API)
 #include "PluginMessageThrottlerWin.h"
 #endif
 #include "PluginPackage.h"
 #include "ScriptController.h"
 #include "ScriptValue.h"
+#include "SecurityOrigin.h"
 #include "PluginDatabase.h"
 #include "PluginDebug.h"
 #include "PluginMainThreadScheduler.h"
@@ -59,23 +62,22 @@
 #include "RenderObject.h"
 #include "npruntime_impl.h"
 #include "Settings.h"
+#include <wtf/ASCIICType.h>
+
 #if defined(ANDROID_PLUGINS)
 #include "TouchEvent.h"
 #endif
 
+// ANDROID
+// TODO: Upstream to webkit.org
 #if USE(JSC)
 #include "JSDOMWindow.h"
 #include "JSDOMBinding.h"
 #include "c_instance.h"
 #include "runtime_root.h"
-#include "runtime.h"
 #include <runtime/JSLock.h>
 #include <runtime/JSValue.h>
-#endif
 
-#include <wtf/ASCIICType.h>
-
-#if USE(JSC)
 using JSC::ExecState;
 using JSC::JSLock;
 using JSC::JSObject;
@@ -92,6 +94,14 @@ namespace WebCore {
 using namespace HTMLNames;
 
 static int s_callingPlugin;
+
+typedef HashMap<NPP, PluginView*> InstanceMap;
+
+static InstanceMap& instanceMap()
+{
+    static InstanceMap& map = *new InstanceMap;
+    return map;
+}
 
 static String scriptStringIfJavaScriptURL(const KURL& url)
 {
@@ -127,24 +137,17 @@ void PluginView::setFrameRect(const IntRect& rect)
     if (m_element->document()->printing())
         return;
 
-#if defined(ANDROID_PLUGINS)
-    if (rect != frameRect()) {
-        Widget::setFrameRect(rect);
-        setNPWindowRect(rect);  // only call when it changes
-    }
-#else
     if (rect != frameRect())
         Widget::setFrameRect(rect);
-#endif
 
     updatePluginWidget();
 
-#if PLATFORM(WIN_OS)
-    // On Windows, always call plugin to change geometry.
+#if OS(WINDOWS) || OS(SYMBIAN)
+    // On Windows and Symbian, always call plugin to change geometry.
     setNPWindowRect(rect);
-#elif XP_UNIX
-    // On Unix, only call plugin if it's full-page.
-    if (m_mode == NP_FULL)
+#elif defined(XP_UNIX)
+    // On Unix, multiple calls to setNPWindow() in windowed mode causes Flash to crash
+    if (m_mode == NP_FULL || !m_isWindowed)
         setNPWindowRect(rect);
 #endif
 }
@@ -159,6 +162,9 @@ void PluginView::handleEvent(Event* event)
     if (!m_plugin || m_isWindowed)
         return;
 
+    // Protect the plug-in from deletion while dispatching the event.
+    RefPtr<PluginView> protect(this);
+
     if (event->isMouseEvent())
         handleMouseEvent(static_cast<MouseEvent*>(event));
     else if (event->isKeyboardEvent())
@@ -166,7 +172,62 @@ void PluginView::handleEvent(Event* event)
 #if defined(ANDROID_PLUGINS)
     else if (event->isTouchEvent())
         handleTouchEvent(static_cast<TouchEvent*>(event));
+    else if (event->type() == eventNames().DOMFocusOutEvent)
+        handleFocusEvent(false);
+    else if (event->type() == eventNames().DOMFocusInEvent)
+        handleFocusEvent(true);
 #endif
+#if defined(XP_UNIX) && ENABLE(NETSCAPE_PLUGIN_API)
+    else if (event->type() == eventNames().DOMFocusOutEvent)
+        handleFocusOutEvent();
+    else if (event->type() == eventNames().DOMFocusInEvent)
+        handleFocusInEvent();
+#endif
+}
+
+void PluginView::init()
+{
+    if (m_haveInitialized)
+        return;
+
+    m_haveInitialized = true;
+
+    if (!m_plugin) {
+        ASSERT(m_status == PluginStatusCanNotFindPlugin);
+        return;
+    }
+
+    LOG(Plugins, "PluginView::init(): Initializing plug-in '%s'", m_plugin->name().utf8().data());
+
+    if (!m_plugin->load()) {
+        m_plugin = 0;
+        m_status = PluginStatusCanNotLoadPlugin;
+        return;
+    }
+
+    if (!startOrAddToUnstartedList()) {
+        m_status = PluginStatusCanNotLoadPlugin;
+        return;
+    }
+
+    m_status = PluginStatusLoadedSuccessfully;
+}
+
+bool PluginView::startOrAddToUnstartedList()
+{
+    if (!m_parentFrame->page())
+        return false;
+
+    // We only delay starting the plug-in if we're going to kick off the load
+    // ourselves. Otherwise, the loader will try to deliver data before we've
+    // started the plug-in.
+    if (!m_loadManually && !m_parentFrame->page()->canStartPlugins()) {
+        m_parentFrame->page()->addUnstartedPlugin(this);
+        m_isWaitingToStart = true;
+        return true;
+    }
+
+    return start();
 }
 
 
@@ -207,20 +268,77 @@ bool PluginView::start()
         FrameLoadRequest frameLoadRequest;
         frameLoadRequest.resourceRequest().setHTTPMethod("GET");
         frameLoadRequest.resourceRequest().setURL(m_url);
+#ifdef ANDROID_PLUGINS
+        if (!SecurityOrigin::shouldHideReferrer(
+                m_url, m_parentFrame->loader()->outgoingReferrer()))
+          frameLoadRequest.resourceRequest().setHTTPReferrer(
+              m_parentFrame->loader()->outgoingReferrer());
+#endif
         load(frameLoadRequest, false, 0);
     }
 
     m_status = PluginStatusLoadedSuccessfully;
 
-    platformStart();
+    if (!platformStart())
+        m_status = PluginStatusCanNotLoadPlugin;
+
+    if (m_status != PluginStatusLoadedSuccessfully)
+        return false;
+
+    if (parentFrame()->page())
+        parentFrame()->page()->didStartPlugin(this);
 
     return true;
+}
+
+PluginView::~PluginView()
+{
+    LOG(Plugins, "PluginView::~PluginView()");
+
+    ASSERT(!m_lifeSupportTimer.isActive());
+
+    instanceMap().remove(m_instance);
+
+    removeFromUnstartedListIfNecessary();
+
+    stop();
+
+    deleteAllValues(m_requests);
+
+    freeStringArray(m_paramNames, m_paramCount);
+    freeStringArray(m_paramValues, m_paramCount);
+
+    platformDestroy();
+
+    m_parentFrame->script()->cleanupScriptObjectsForPlugin(this);
+
+#if PLATFORM(ANDROID)
+    // Since we have no legacy plugins to check, we ignore the quirks check.
+    if (m_plugin)
+#else
+    if (m_plugin && !(m_plugin->quirks().contains(PluginQuirkDontUnloadPlugin)))
+#endif
+        m_plugin->unload();
+}
+
+void PluginView::removeFromUnstartedListIfNecessary()
+{
+    if (!m_isWaitingToStart)
+        return;
+
+    if (!m_parentFrame->page())
+        return;
+
+    m_parentFrame->page()->removeUnstartedPlugin(this);
 }
 
 void PluginView::stop()
 {
     if (!m_isStarted)
         return;
+
+    if (parentFrame()->page())
+        parentFrame()->page()->didStopPlugin(this);
 
     LOG(Plugins, "PluginView::stop(): Stopping plug-in '%s'", m_plugin->name().utf8().data());
 
@@ -237,10 +355,12 @@ void PluginView::stop()
 #if USE(JSC)
     JSC::JSLock::DropAllLocks dropAllLocks(JSC::SilenceAssertionsOnly);
 #endif
+
+#if ENABLE(NETSCAPE_PLUGIN_API)
 #ifdef XP_WIN
     // Unsubclass the window
     if (m_isWindowed) {
-#if PLATFORM(WINCE)
+#if OS(WINCE)
         WNDPROC currentWndProc = (WNDPROC)GetWindowLong(platformPluginWidget(), GWL_WNDPROC);
 
         if (currentWndProc == PluginViewWndProc)
@@ -253,6 +373,7 @@ void PluginView::stop()
 #endif
     }
 #endif // XP_WIN
+#endif // ENABLE(NETSCAPE_PLUGIN_API)
 
 #if !defined(XP_MACOSX)
     // Clear the window
@@ -323,7 +444,7 @@ static bool getString(ScriptController* proxy, JSValue result, String& string)
         return false;
     JSLock lock(JSC::SilenceAssertionsOnly);
 
-    ExecState* exec = proxy->globalObject()->globalExec();
+    ExecState* exec = proxy->globalObject(pluginWorld())->globalExec();
     UString ustring = result.toString(exec);
     exec->clearException();
 
@@ -332,33 +453,11 @@ static bool getString(ScriptController* proxy, JSValue result, String& string)
 }
 #endif
 
-bool PluginView::startOrAddToUnstartedList()
-{
-    if (!m_parentFrame->page())
-        return false;
-
-    if (!m_parentFrame->page()->canStartPlugins()) {
-        m_parentFrame->page()->addUnstartedPlugin(this);
-        m_isWaitingToStart = true;
-        return true;
-    }
-
-    return start();
-}
-
-void PluginView::removeFromUnstartedListIfNecessary()
-{
-    if (!m_isWaitingToStart)
-        return;
-
-    if (!m_parentFrame->page())
-        return;
-
-    m_parentFrame->page()->removeUnstartedPlugin(this);
-}
-
 void PluginView::performRequest(PluginRequest* request)
 {
+    if (!m_isStarted)
+        return;
+
     // don't let a plugin start any loads if it is no longer part of a document that is being 
     // displayed unless the loads are in the same frame as the plugin.
     const String& targetFrameName = request->frameLoadRequest().frameName();
@@ -373,7 +472,7 @@ void PluginView::performRequest(PluginRequest* request)
         // if this is not a targeted request, create a stream for it. otherwise,
         // just pass it off to the loader
         if (targetFrameName.isEmpty()) {
-            RefPtr<PluginStream> stream = PluginStream::create(this, m_parentFrame, request->frameLoadRequest().resourceRequest(), request->sendNotification(), request->notifyData(), plugin()->pluginFuncs(), instance(), m_plugin->quirks());
+            RefPtr<PluginStream> stream = PluginStream::create(this, m_parentFrame.get(), request->frameLoadRequest().resourceRequest(), request->sendNotification(), request->notifyData(), plugin()->pluginFuncs(), instance(), m_plugin->quirks());
             m_streams.add(stream);
             stream->start();
         } else {
@@ -402,23 +501,31 @@ void PluginView::performRequest(PluginRequest* request)
     // and this has been made sure in ::load.
     ASSERT(targetFrameName.isEmpty() || m_parentFrame->tree()->find(targetFrameName) == m_parentFrame);
 
-#if USE(JSC)
     // Executing a script can cause the plugin view to be destroyed, so we keep a reference to the parent frame.
     RefPtr<Frame> parentFrame = m_parentFrame;
-    JSValue result = m_parentFrame->loader()->executeScript(jsString, request->shouldAllowPopups()).jsValue();
+    ScriptValue result = m_parentFrame->script()->executeScript(jsString, request->shouldAllowPopups());
 
     if (targetFrameName.isNull()) {
         String resultString;
 
         CString cstr;
-        if (getString(parentFrame->script(), result, resultString))
+#if USE(JSC)
+        if (getString(parentFrame->script(), result.jsValue(), resultString))
             cstr = resultString.utf8();
+#elif USE(V8)
+        // #if PLATFORM(ANDROID)
+        // TODO. When upstreaming this, we could re-visit whether the JSC getString function in this file
+        // could be removed, and this code re-factored to call ScriptValue::getString(ScriptState* scriptState, String& result)
+        // in both cases, thus getting rid of the #ifs
+        // #endif
+        if (result.getString(resultString))
+            cstr = resultString.utf8();
+#endif
 
-        RefPtr<PluginStream> stream = PluginStream::create(this, m_parentFrame, request->frameLoadRequest().resourceRequest(), request->sendNotification(), request->notifyData(), plugin()->pluginFuncs(), instance(), m_plugin->quirks());
+        RefPtr<PluginStream> stream = PluginStream::create(this, m_parentFrame.get(), request->frameLoadRequest().resourceRequest(), request->sendNotification(), request->notifyData(), plugin()->pluginFuncs(), instance(), m_plugin->quirks());
         m_streams.add(stream);
         stream->sendJavaScriptStream(requestURL, cstr);
     }
-#endif
 }
 
 void PluginView::requestTimerFired(Timer<PluginView>* timer)
@@ -473,9 +580,8 @@ NPError PluginView::load(const FrameLoadRequest& frameLoadRequest, bool sendNoti
         // For security reasons, only allow JS requests to be made on the frame that contains the plug-in.
         if (!targetFrameName.isNull() && m_parentFrame->tree()->find(targetFrameName) != m_parentFrame)
             return NPERR_INVALID_PARAM;
-    } else if (!FrameLoader::canLoad(url, String(), m_parentFrame->document())) {
+    } else if (!SecurityOrigin::canLoad(url, String(), m_parentFrame->document()))
             return NPERR_GENERIC_ERROR;
-    }
 
     PluginRequest* request = new PluginRequest(frameLoadRequest, sendNotification, notifyData, arePopupsAllowed());
     scheduleRequest(request);
@@ -501,6 +607,11 @@ NPError PluginView::getURLNotify(const char* url, const char* target, void* noti
     frameLoadRequest.setFrameName(target);
     frameLoadRequest.resourceRequest().setHTTPMethod("GET");
     frameLoadRequest.resourceRequest().setURL(makeURL(m_baseURL, url));
+#ifdef ANDROID_PLUGINS
+    if (!SecurityOrigin::shouldHideReferrer(
+            frameLoadRequest.resourceRequest().url(), m_url))
+        frameLoadRequest.resourceRequest().setHTTPReferrer(m_url);
+#endif
 
     return load(frameLoadRequest, true, notifyData);
 }
@@ -512,6 +623,11 @@ NPError PluginView::getURL(const char* url, const char* target)
     frameLoadRequest.setFrameName(target);
     frameLoadRequest.resourceRequest().setHTTPMethod("GET");
     frameLoadRequest.resourceRequest().setURL(makeURL(m_baseURL, url));
+#ifdef ANDROID_PLUGINS
+    if (!SecurityOrigin::shouldHideReferrer(
+            frameLoadRequest.resourceRequest().url(), m_url))
+        frameLoadRequest.resourceRequest().setHTTPReferrer(m_url);
+#endif
 
     return load(frameLoadRequest, false, 0);
 }
@@ -555,7 +671,7 @@ NPError PluginView::destroyStream(NPStream* stream, NPReason reason)
 void PluginView::status(const char* message)
 {
     if (Page* page = m_parentFrame->page())
-        page->chrome()->setStatusbarText(m_parentFrame, String(message));
+        page->chrome()->setStatusbarText(m_parentFrame.get(), String(message));
 }
 
 NPError PluginView::setValue(NPPVariable variable, void* value)
@@ -731,7 +847,9 @@ NPObject* PluginView::getNPObject() {
     if (npErr != NPERR_NO_ERROR || !object)
         return 0;
 
-    _NPN_ReleaseObject(object);
+    // Bindings::CInstance (used in JSC version) retains the object, so in ~PluginView() it calls
+    // cleanupScriptObjectsForPlugin() to releases the object. To maintain the reference count,
+    // don't call _NPN_ReleaseObject(object) here.
     return object;
 #else
     return 0;
@@ -783,6 +901,8 @@ PluginView::PluginView(Frame* parentFrame, const IntSize& size, PluginPackage* p
     , m_requestTimer(this, &PluginView::requestTimerFired)
     , m_invalidateTimer(this, &PluginView::invalidateTimerFired)
     , m_popPopupsStateTimer(this, &PluginView::popPopupsStateTimerFired)
+    , m_lifeSupportTimer(this, &PluginView::lifeSupportTimerFired)
+    , m_mode(loadManually ? NP_FULL : NP_EMBED)
     , m_paramNames(0)
     , m_paramValues(0)
     , m_mimeType(mimeType)
@@ -794,26 +914,37 @@ PluginView::PluginView(Frame* parentFrame, const IntSize& size, PluginPackage* p
     , m_isTransparent(false)
     , m_haveInitialized(false)
     , m_isWaitingToStart(false)
-#if PLATFORM(GTK) || defined(Q_WS_X11)
+#if defined(XP_UNIX)
     , m_needsXEmbed(false)
 #endif
-#if PLATFORM(WIN_OS) && !PLATFORM(WX) && ENABLE(NETSCAPE_PLUGIN_API)
+#if OS(WINDOWS) && ENABLE(NETSCAPE_PLUGIN_API)
     , m_pluginWndProc(0)
     , m_lastMessage(0)
     , m_isCallingPluginWndProc(false)
     , m_wmPrintHDC(0)
     , m_haveUpdatedPluginWidget(false)
 #endif
-#if (PLATFORM(QT) && PLATFORM(WIN_OS)) || defined(XP_MACOSX)
+#if (PLATFORM(QT) && OS(WINDOWS)) || defined(XP_MACOSX)
     , m_window(0)
 #endif
 #if defined(XP_MACOSX)
     , m_drawingModel(NPDrawingModel(-1))
     , m_eventModel(NPEventModel(-1))
+    , m_contextRef(0)
+    , m_fakeWindow(0)
+#endif
+#if defined(XP_UNIX) && ENABLE(NETSCAPE_PLUGIN_API)
+    , m_hasPendingGeometryChange(true)
+    , m_drawable(0)
+    , m_visual(0)
+    , m_colormap(0)
+    , m_pluginDisplay(0)
 #endif
     , m_loadManually(loadManually)
     , m_manualStream(0)
     , m_isJavaScriptPaused(false)
+    , m_isHalted(false)
+    , m_hasBeenHalted(false)
 {
 #if defined(ANDROID_PLUGINS)
     platformInit();
@@ -828,14 +959,14 @@ PluginView::PluginView(Frame* parentFrame, const IntSize& size, PluginPackage* p
     m_instance->ndata = this;
     m_instance->pdata = 0;
 
+    instanceMap().add(m_instance, this);
+
     setParameters(paramNames, paramValues);
 
     memset(&m_npWindow, 0, sizeof(m_npWindow));
 #if defined(XP_MACOSX)
     memset(&m_npCgContext, 0, sizeof(m_npCgContext));
 #endif
-
-    m_mode = m_loadManually ? NP_FULL : NP_EMBED;
 
     resize(size);
 }
@@ -856,7 +987,7 @@ void PluginView::didReceiveResponse(const ResourceResponse& response)
     ASSERT(m_loadManually);
     ASSERT(!m_manualStream);
 
-    m_manualStream = PluginStream::create(this, m_parentFrame, m_parentFrame->loader()->activeDocumentLoader()->request(), false, 0, plugin()->pluginFuncs(), instance(), m_plugin->quirks());
+    m_manualStream = PluginStream::create(this, m_parentFrame.get(), m_parentFrame->loader()->activeDocumentLoader()->request(), false, 0, plugin()->pluginFuncs(), instance(), m_plugin->quirks());
     m_manualStream->setLoadManually(true);
 
     m_manualStream->didReceiveResponse(0, response);
@@ -1184,9 +1315,8 @@ void PluginView::invalidateWindowlessPluginRect(const IntRect& rect)
 void PluginView::paintMissingPluginIcon(GraphicsContext* context, const IntRect& rect)
 {
     static RefPtr<Image> nullPluginImage;
-    if (!nullPluginImage) {
+    if (!nullPluginImage)
         nullPluginImage = Image::loadPlatformResource("nullPlugin");
-    }
 
     IntRect imageRect(frameRect().x(), frameRect().y(), nullPluginImage->width(), nullPluginImage->height());
 
@@ -1194,14 +1324,13 @@ void PluginView::paintMissingPluginIcon(GraphicsContext* context, const IntRect&
     int yOffset = (frameRect().height() - imageRect.height()) / 2;
 
     imageRect.move(xOffset, yOffset);
-    
-    if (!rect.intersects(imageRect)) {
+
+    if (!rect.intersects(imageRect))
         return;
-    }
-    
+
     context->save();
     context->clip(windowClipRect());
-    context->drawImage(nullPluginImage.get(), imageRect.location());
+    context->drawImage(nullPluginImage.get(), DeviceColorSpace, imageRect.location());
     context->restore();
 }
 
@@ -1211,7 +1340,12 @@ static const char* MozillaUserAgent = "Mozilla/5.0 ("
 #elif defined(XP_WIN)
         "Windows; U; Windows NT 5.1;"
 #elif defined(XP_UNIX)
-        "X11; U; Linux i686;"
+// The Gtk port uses X11 plugins in Mac.
+#if OS(DARWIN) && PLATFORM(GTK)
+    "X11; U; Intel Mac OS X;"
+#else
+    "X11; U; Linux i686;"
+#endif
 #endif
         " en-US; rv:1.8.1) Gecko/20061010 Firefox/2.0";
 
@@ -1221,8 +1355,10 @@ const char* PluginView::userAgent()
     if (m_plugin->quirks().contains(PluginQuirkWantsMozillaUserAgent))
         return MozillaUserAgent;
 #endif
+
     if (m_userAgent.isNull())
         m_userAgent = m_parentFrame->loader()->userAgent(m_url).utf8();
+
     return m_userAgent.data();
 }
 
@@ -1232,5 +1368,39 @@ const char* PluginView::userAgentStatic()
     return MozillaUserAgent;
 }
 #endif
+
+
+Node* PluginView::node() const
+{
+    return m_element;
+}
+
+String PluginView::pluginName() const
+{
+    return m_plugin->name();
+}
+
+void PluginView::lifeSupportTimerFired(Timer<PluginView>*)
+{
+    deref();
+}
+
+void PluginView::keepAlive()
+{
+    if (m_lifeSupportTimer.isActive())
+        return;
+
+    ref();
+    m_lifeSupportTimer.startOneShot(0);
+}
+
+void PluginView::keepAlive(NPP instance)
+{
+    PluginView* view = instanceMap().get(instance);
+    if (!view)
+        return;
+
+    view->keepAlive();
+}
 
 } // namespace WebCore

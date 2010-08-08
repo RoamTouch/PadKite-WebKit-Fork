@@ -26,6 +26,8 @@
 
 #include "KURLHash.h"
 #include "StringHash.h"
+#include <wtf/HashMap.h>
+#include <wtf/HashSet.h>
 
 namespace WebCore {
 
@@ -72,7 +74,6 @@ namespace WebCore {
         typedef HashMap<std::pair<String, KURL>, CrossOriginPreflightResultCacheItem*> CrossOriginPreflightResultHashMap;
 
         CrossOriginPreflightResultHashMap m_preflightHashMap;
-        Mutex m_mutex;
     };
 
 } // namespace WebCore

@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -102,24 +102,23 @@ namespace android {
     void JavaSharedClient::ServiceFunctionPtrQueue()
     {
         for (;;) {
-            void (*proc)(void*);
-            void* payload;
+            void (*proc)(void*) = 0;
+            void* payload = 0;
             const FuncPtrRec* rec;
             
             // we have to copy the proc/payload (if present). we do this so we
             // don't call the proc inside the mutex (possible deadlock!)
             gFuncPtrQMutex.acquire();
             rec = (const FuncPtrRec*)gFuncPtrQ.front();
-            if (NULL != rec) {
+            if (rec) {
                 proc = rec->fProc;
                 payload = rec->fPayload;
                 gFuncPtrQ.pop_front();
             }
             gFuncPtrQMutex.release();
             
-            if (NULL == rec) {
+            if (!rec)
                 break;
-            }
             proc(payload);
         }
     }

@@ -33,18 +33,23 @@
 #include "PageCache.h"
 #include "ResourceRequest.h"
 #include <stdio.h>
+#include <wtf/CurrentTime.h>
 
 namespace WebCore {
 
-#ifdef ANDROID_HISTORY_CLIENT
-void (*notifyHistoryItemChanged)(HistoryItem*);
-#else
-static void defaultNotifyHistoryItemChanged()
+static long long generateDocumentSequenceNumber()
+{
+    // Initialize to the current time to reduce the likelihood of generating
+    // identifiers that overlap with those from past/future browser sessions.
+    static long long next = static_cast<long long>(currentTime() * 1000000.0);
+    return ++next;
+}
+
+static void defaultNotifyHistoryItemChanged(HistoryItem*)
 {
 }
 
-void (*notifyHistoryItemChanged)() = defaultNotifyHistoryItemChanged;
-#endif
+void (*notifyHistoryItemChanged)(HistoryItem*) = defaultNotifyHistoryItemChanged;
 
 HistoryItem::HistoryItem()
     : m_lastVisitedTime(0)
@@ -52,6 +57,7 @@ HistoryItem::HistoryItem()
     , m_lastVisitWasFailure(false)
     , m_isTargetItem(false)
     , m_visitCount(0)
+    , m_documentSequenceNumber(generateDocumentSequenceNumber())
 {
 }
 
@@ -64,6 +70,7 @@ HistoryItem::HistoryItem(const String& urlString, const String& title, double ti
     , m_lastVisitWasFailure(false)
     , m_isTargetItem(false)
     , m_visitCount(0)
+    , m_documentSequenceNumber(generateDocumentSequenceNumber())
 {    
     iconDatabase()->retainIconForPageURL(m_urlString);
 }
@@ -78,6 +85,7 @@ HistoryItem::HistoryItem(const String& urlString, const String& title, const Str
     , m_lastVisitWasFailure(false)
     , m_isTargetItem(false)
     , m_visitCount(0)
+    , m_documentSequenceNumber(generateDocumentSequenceNumber())
 {
     iconDatabase()->retainIconForPageURL(m_urlString);
 }
@@ -93,6 +101,7 @@ HistoryItem::HistoryItem(const KURL& url, const String& target, const String& pa
     , m_lastVisitWasFailure(false)
     , m_isTargetItem(false)
     , m_visitCount(0)
+    , m_documentSequenceNumber(generateDocumentSequenceNumber())
 {    
     iconDatabase()->retainIconForPageURL(m_urlString);
 }
@@ -101,6 +110,10 @@ HistoryItem::~HistoryItem()
 {
     ASSERT(!m_cachedPage);
     iconDatabase()->releaseIconForPageURL(m_urlString);
+#if PLATFORM(ANDROID)
+    if (m_bridge)
+        m_bridge->detachHistoryItem();
+#endif
 }
 
 inline HistoryItem::HistoryItem(const HistoryItem& item)
@@ -120,10 +133,9 @@ inline HistoryItem::HistoryItem(const HistoryItem& item)
     , m_visitCount(item.m_visitCount)
     , m_dailyVisitCounts(item.m_dailyVisitCounts)
     , m_weeklyVisitCounts(item.m_weeklyVisitCounts)
+    , m_documentSequenceNumber(generateDocumentSequenceNumber())
     , m_formContentType(item.m_formContentType)
 {
-    ASSERT(!item.m_cachedPage);
-
     if (item.m_formData)
         m_formData = item.m_formData->copy();
         
@@ -176,12 +188,12 @@ double HistoryItem::lastVisitedTime() const
 
 KURL HistoryItem::url() const
 {
-    return KURL(m_urlString);
+    return KURL(ParsedURLString, m_urlString);
 }
 
 KURL HistoryItem::originalURL() const
 {
-    return KURL(m_originalURLString);
+    return KURL(ParsedURLString, m_originalURLString);
 }
 
 const String& HistoryItem::referrer() const
@@ -202,9 +214,7 @@ const String& HistoryItem::parent() const
 void HistoryItem::setAlternateTitle(const String& alternateTitle)
 {
     m_displayTitle = alternateTitle;
-#ifndef ANDROID_HISTORY_CLIENT
-    notifyHistoryItemChanged();
-#endif
+    notifyHistoryItemChanged(this);
 }
 
 void HistoryItem::setURLString(const String& urlString)
@@ -215,11 +225,7 @@ void HistoryItem::setURLString(const String& urlString)
         iconDatabase()->retainIconForPageURL(m_urlString);
     }
     
-#ifdef ANDROID_HISTORY_CLIENT
     notifyHistoryItemChanged(this);
-#else
-    notifyHistoryItemChanged();
-#endif
 }
 
 void HistoryItem::setURL(const KURL& url)
@@ -232,41 +238,25 @@ void HistoryItem::setURL(const KURL& url)
 void HistoryItem::setOriginalURLString(const String& urlString)
 {
     m_originalURLString = urlString;
-#ifdef ANDROID_HISTORY_CLIENT
     notifyHistoryItemChanged(this);
-#else
-    notifyHistoryItemChanged();
-#endif
 }
 
 void HistoryItem::setReferrer(const String& referrer)
 {
     m_referrer = referrer;
-#ifdef ANDROID_HISTORY_CLIENT
     notifyHistoryItemChanged(this);
-#else
-    notifyHistoryItemChanged();
-#endif
 }
 
 void HistoryItem::setTitle(const String& title)
 {
     m_title = title;
-#ifdef ANDROID_HISTORY_CLIENT
     notifyHistoryItemChanged(this);
-#else
-    notifyHistoryItemChanged();
-#endif
 }
 
 void HistoryItem::setTarget(const String& target)
 {
     m_target = target;
-#ifdef ANDROID_HISTORY_CLIENT
     notifyHistoryItemChanged(this);
-#else
-    notifyHistoryItemChanged();
-#endif
 }
 
 void HistoryItem::setParent(const String& parent)
@@ -382,7 +372,7 @@ void HistoryItem::clearScrollPoint()
 void HistoryItem::setDocumentState(const Vector<String>& state)
 {
     m_documentState = state;
-#ifdef ANDROID_HISTORY_CLIENT
+#if PLATFORM(ANDROID)
     notifyHistoryItemChanged(this);
 #endif
 }
@@ -395,7 +385,7 @@ const Vector<String>& HistoryItem::documentState() const
 void HistoryItem::clearDocumentState()
 {
     m_documentState.clear();
-#ifdef ANDROID_HISTORY_CLIENT
+#if PLATFORM(ANDROID)
     notifyHistoryItemChanged(this);
 #endif
 }
@@ -408,16 +398,21 @@ bool HistoryItem::isTargetItem() const
 void HistoryItem::setIsTargetItem(bool flag)
 {
     m_isTargetItem = flag;
-#ifdef ANDROID_HISTORY_CLIENT
+#if PLATFORM(ANDROID)
     notifyHistoryItemChanged(this);
 #endif
+}
+
+void HistoryItem::setStateObject(PassRefPtr<SerializedScriptValue> object)
+{
+    m_stateObject = object;
 }
 
 void HistoryItem::addChildItem(PassRefPtr<HistoryItem> child)
 {
     ASSERT(!childItemWithTarget(child->target()));
     m_children.append(child);
-#ifdef ANDROID_HISTORY_CLIENT
+#if PLATFORM(ANDROID)
     notifyHistoryItemChanged(this);
 #endif
 }
@@ -498,7 +493,7 @@ void HistoryItem::setFormInfoFromRequest(const ResourceRequest& request)
         m_formData = 0;
         m_formContentType = String();
     }
-#ifdef ANDROID_HISTORY_CLIENT
+#if PLATFORM(ANDROID)
     notifyHistoryItemChanged(this);
 #endif
 }

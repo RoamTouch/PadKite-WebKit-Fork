@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -24,15 +24,20 @@
  */
 
 #include "CachedPrefix.h"
+#include "android_graphics.h"
+#include "CachedFrame.h"
 #include "CachedHistory.h"
-#include "CachedRoot.h"
 #include "Node.h"
 #include "PlatformString.h"
 
-#include "android_graphics.h"
 #include "CachedNode.h"
 
 namespace android {
+
+WebCore::IntRect CachedNode::bounds(const CachedFrame* frame) const
+{
+    return mIsInLayer ? frame->adjustBounds(this, mBounds) : mBounds;
+}
 
 void CachedNode::clearCursor(CachedFrame* parent)
 {
@@ -76,16 +81,36 @@ bool CachedNode::clip(const WebCore::IntRect& bounds)
     return Clip(bounds, &mBounds, &mCursorRing);
 }
 
+
+void CachedNode::cursorRings(const CachedFrame* frame,
+    WTF::Vector<WebCore::IntRect>* rings) const
+{
+    rings->clear();
+    for (unsigned index = 0; index < mCursorRing.size(); index++)
+        rings->append(ring(frame, index));
+}
+
+WebCore::IntRect CachedNode::cursorRingBounds(const CachedFrame* frame) const
+{
+    int partMax = mNavableRects;
+    ASSERT(partMax > 0);
+    WebCore::IntRect bounds = mCursorRing[0];
+    for (int partIndex = 1; partIndex < partMax; partIndex++)
+        bounds.unite(mCursorRing[partIndex]);
+    bounds.inflate(CURSOR_RING_HIT_TEST_RADIUS);
+    return mIsInLayer ? frame->adjustBounds(this, bounds) : bounds;
+}
+
 #define OVERLAP 3
 
-void CachedNode::fixUpCursorRects(const CachedRoot* root)
+void CachedNode::fixUpCursorRects(const CachedFrame* frame)
 {
     if (mFixedUpCursorRects)
         return;
     mFixedUpCursorRects = true;
     // if the hit-test rect doesn't intersect any other rect, use it
     if (mHitBounds != mBounds && mHitBounds.contains(mBounds) &&
-            root->checkRings(mCursorRing, mHitBounds)) {
+            frame->checkRings(this, mCursorRing, mHitBounds)) {
         DBG_NAV_LOGD("use mHitBounds (%d,%d,%d,%d)", mHitBounds.x(),
             mHitBounds.y(), mHitBounds.width(), mHitBounds.height());
         mUseHitBounds = true;
@@ -95,7 +120,7 @@ void CachedNode::fixUpCursorRects(const CachedRoot* root)
         return;
     // if there is more than 1 rect, and the bounds doesn't intersect
     // any other cursor ring bounds, use it
-    if (root->checkRings(mCursorRing, mBounds)) {
+    if (frame->checkRings(this, mCursorRing, mBounds)) {
         DBG_NAV_LOGD("use mBounds (%d,%d,%d,%d)", mBounds.x(),
             mBounds.y(), mBounds.width(), mBounds.height());
         mUseBounds = true;
@@ -195,16 +220,6 @@ tryAgain:
 }
 
 
-void CachedNode::cursorRingBounds(WebCore::IntRect* bounds) const
-{
-    int partMax = mNavableRects;
-    ASSERT(partMax > 0);
-    *bounds = mCursorRing[0];
-    for (int partIndex = 1; partIndex < partMax; partIndex++)
-        bounds->unite(mCursorRing[partIndex]);
-    bounds->inflate(CURSOR_RING_HIT_TEST_RADIUS);
-}
-
 void CachedNode::hideCursor(CachedFrame* parent)
 {
     if (isFrame()) {
@@ -214,14 +229,49 @@ void CachedNode::hideCursor(CachedFrame* parent)
     mIsHidden = true;
 }
 
+WebCore::IntRect CachedNode::hitBounds(const CachedFrame* frame) const
+{
+    return mIsInLayer ? frame->adjustBounds(this, mHitBounds) : mHitBounds;
+}
+
 void CachedNode::init(WebCore::Node* node)
 {
     bzero(this, sizeof(CachedNode));
     mExport = WebCore::String();
-    mName = WebCore::String();
     mNode = node;
-    mParentIndex = mChildFrameIndex = -1;
+    mParentIndex = mDataIndex = -1;
     mType = android::NORMAL_CACHEDNODETYPE;
+}
+
+bool CachedNode::isTextField(const CachedFrame* frame) const
+{
+    const CachedInput* input = frame->textInput(this);
+    return input ? input->isTextField() : false;
+}
+
+void CachedNode::localCursorRings(const CachedFrame* frame,
+    WTF::Vector<WebCore::IntRect>* rings) const
+{
+    rings->clear();
+    for (unsigned index = 0; index < mCursorRing.size(); index++)
+        rings->append(localRing(frame, index));
+}
+
+WebCore::IntRect CachedNode::localBounds(const CachedFrame* frame) const
+{
+    return mIsInLayer ? frame->localBounds(this, mBounds) : mBounds;
+}
+
+WebCore::IntRect CachedNode::localHitBounds(const CachedFrame* frame) const
+{
+    return mIsInLayer ? frame->localBounds(this, mHitBounds) : mHitBounds;
+}
+
+WebCore::IntRect CachedNode::localRing(const CachedFrame* frame,
+    size_t part) const
+{
+    const WebCore::IntRect& rect = mCursorRing.at(part);
+    return mIsInLayer ? frame->localBounds(this, rect) : rect;
 }
 
 void CachedNode::move(int x, int y)
@@ -250,6 +300,12 @@ bool CachedNode::partRectsContains(const CachedNode* other) const
         } while (++innerIndex < innerMax);
     } while (++outerIndex < outerMax);
     return false;
+}
+
+WebCore::IntRect CachedNode::ring(const CachedFrame* frame, size_t part) const
+{
+    const WebCore::IntRect& rect = mCursorRing.at(part);
+    return mIsInLayer ? frame->adjustBounds(this, rect) : rect;
 }
 
 #if DUMP_NAV_CACHE
@@ -306,6 +362,11 @@ const char* CachedNode::Debug::type(android::CachedNodeType t) const
         case ADDRESS_CACHEDNODETYPE: return "ADDRESS"; break;
         case EMAIL_CACHEDNODETYPE: return "EMAIL"; break;
         case PHONE_CACHEDNODETYPE: return "PHONE"; break;
+        case ANCHOR_CACHEDNODETYPE: return "ANCHOR"; break;
+        case AREA_CACHEDNODETYPE: return "AREA"; break;
+        case FRAME_CACHEDNODETYPE: return "FRAME"; break;
+        case PLUGIN_CACHEDNODETYPE: return "PLUGIN"; break;
+        case TEXT_INPUT_CACHEDNODETYPE: return "INPUT"; break;
         default: return "???";
     }
 }
@@ -316,31 +377,30 @@ void CachedNode::Debug::print() const
     char scratch[256];
     size_t index = snprintf(scratch, sizeof(scratch), "// char* mExport=\"");
     const UChar* ch = b->mExport.characters();
-    while (ch && *ch && index < sizeof(scratch))
-        scratch[index++] = *ch++;
-    DUMP_NAV_LOGD("%.*s\"\n", index, scratch);
-    index = snprintf(scratch, sizeof(scratch), "// char* mName=\"");
-    ch = b->mName.characters();
-    while (ch && *ch && index < sizeof(scratch))
-        scratch[index++] = *ch++;
+    while (ch && *ch && index < sizeof(scratch)) {
+        UChar c = *ch++;
+        if (c < ' ' || c >= 0x7f) c = ' ';
+        scratch[index++] = c;
+    }
     DUMP_NAV_LOGD("%.*s\"\n", index, scratch);
     DEBUG_PRINT_RECT(mBounds);
     DEBUG_PRINT_RECT(mHitBounds);
-    const WTF::Vector<WebCore::IntRect>& rects = b->cursorRings();
-    size_t size = rects.size();
+    DEBUG_PRINT_RECT(mOriginalAbsoluteBounds);
+    const WTF::Vector<WebCore::IntRect>* rects = &b->mCursorRing;
+    size_t size = rects->size();
     DUMP_NAV_LOGD("// IntRect cursorRings={ // size=%d\n", size);
-    for (size_t i = 0; i < size; i++)
-        DUMP_NAV_LOGD("    // {%d, %d, %d, %d}, // %d\n", rects[i].x(), rects[i].y(),
-            rects[i].width(), rects[i].height(), i);
+    for (size_t i = 0; i < size; i++) {
+        const WebCore::IntRect& rect = (*rects)[i];
+        DUMP_NAV_LOGD("    // {%d, %d, %d, %d}, // %d\n", rect.x(), rect.y(),
+            rect.width(), rect.height(), i);
+    }
     DUMP_NAV_LOGD("// };\n");
     DUMP_NAV_LOGD("// void* mNode=%p; // (%d) \n", b->mNode, mNodeIndex);
     DUMP_NAV_LOGD("// void* mParentGroup=%p; // (%d) \n", b->mParentGroup, mParentGroupIndex);
-    DUMP_NAV_LOGD("// int mChildFrameIndex=%d;\n", b->mChildFrameIndex);
+    DUMP_NAV_LOGD("// int mDataIndex=%d;\n", b->mDataIndex);
     DUMP_NAV_LOGD("// int mIndex=%d;\n", b->mIndex);
-    DUMP_NAV_LOGD("// int mMaxLength=%d;\n", b->mMaxLength);
     DUMP_NAV_LOGD("// int mNavableRects=%d;\n", b->mNavableRects);
     DUMP_NAV_LOGD("// int mParentIndex=%d;\n", b->mParentIndex);
-    DUMP_NAV_LOGD("// int mTextSize=%d;\n", b->mTextSize);
     DUMP_NAV_LOGD("// int mTabIndex=%d;\n", b->mTabIndex);
     DUMP_NAV_LOGD("// Condition mCondition=%s;\n", condition(b->mCondition));
     DUMP_NAV_LOGD("// Type mType=%s;\n", type(b->mType));
@@ -349,22 +409,16 @@ void CachedNode::Debug::print() const
     DEBUG_PRINT_BOOL(mFixedUpCursorRects);
     DEBUG_PRINT_BOOL(mHasCursorRing);
     DEBUG_PRINT_BOOL(mHasMouseOver);
-    DEBUG_PRINT_BOOL(mIsAnchor);
-    DEBUG_PRINT_BOOL(mIsArea);
     DEBUG_PRINT_BOOL(mIsCursor);
     DEBUG_PRINT_BOOL(mIsFocus);
     DEBUG_PRINT_BOOL(mIsHidden);
+    DEBUG_PRINT_BOOL(mIsInLayer);
     DEBUG_PRINT_BOOL(mIsParentAnchor);
-    DEBUG_PRINT_BOOL(mIsPassword);
-    DEBUG_PRINT_BOOL(mIsRtlText);
-    DEBUG_PRINT_BOOL(mIsTextArea);
-    DEBUG_PRINT_BOOL(mIsTextField);
     DEBUG_PRINT_BOOL(mIsTransparent);
     DEBUG_PRINT_BOOL(mIsUnclipped);
     DEBUG_PRINT_BOOL(mLast);
     DEBUG_PRINT_BOOL(mUseBounds);
     DEBUG_PRINT_BOOL(mUseHitBounds);
-    DEBUG_PRINT_BOOL(mWantsKeyEvents);
     DUMP_NAV_LOGD("\n");
 }
 

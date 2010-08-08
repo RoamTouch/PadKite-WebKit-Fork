@@ -16,8 +16,9 @@
 
 package android.webkit;
 
-import android.content.Context;
+import android.view.SurfaceView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.AbsoluteLayout;
 
 import java.util.ArrayList;
@@ -26,6 +27,13 @@ class ViewManager {
     private final WebView mWebView;
     private final ArrayList<ChildView> mChildren = new ArrayList<ChildView>();
     private boolean mHidden;
+    private boolean mReadyToDraw;
+    private boolean mZoomInProgress = false;
+
+    // Threshold at which a surface is prevented from further increasing in size
+    private final int MAX_SURFACE_AREA;
+    // GPU Limit (hard coded for now)
+    private static final int MAX_SURFACE_DIMENSION = 2048;
 
     class ChildView {
         int x;
@@ -49,27 +57,28 @@ class ViewManager {
                 return;
             }
             setBounds(x, y, width, height);
-            final AbsoluteLayout.LayoutParams lp =
-                    new AbsoluteLayout.LayoutParams(ctvD(width), ctvD(height),
-                            ctvX(x), ctvY(y));
+
             mWebView.mPrivateHandler.post(new Runnable() {
                 public void run() {
                     // This method may be called multiple times. If the view is
                     // already attached, just set the new LayoutParams,
                     // otherwise attach the view and add it to the list of
                     // children.
-                    if (mView.getParent() != null) {
-                        mView.setLayoutParams(lp);
-                    } else {
-                        attachViewOnUIThread(lp);
+                    requestLayout(ChildView.this);
+
+                    if (mView.getParent() == null) {
+                        attachViewOnUIThread();
                     }
                 }
             });
         }
 
-        void attachViewOnUIThread(AbsoluteLayout.LayoutParams lp) {
-            mWebView.addView(mView, lp);
+        private void attachViewOnUIThread() {
+            mWebView.addView(mView);
             mChildren.add(this);
+            if (!mReadyToDraw) {
+                mView.setVisibility(View.GONE);
+            }
         }
 
         void removeView() {
@@ -83,7 +92,7 @@ class ViewManager {
             });
         }
 
-        void removeViewOnUIThread() {
+        private void removeViewOnUIThread() {
             mWebView.removeView(mView);
             mChildren.remove(this);
         }
@@ -91,6 +100,14 @@ class ViewManager {
 
     ViewManager(WebView w) {
         mWebView = w;
+
+        int pixelArea = w.getResources().getDisplayMetrics().widthPixels *
+                        w.getResources().getDisplayMetrics().heightPixels;
+        /* set the threshold to be 275% larger than the screen size. The
+           percentage is simply an estimation and is not based on anything but
+           basic trial-and-error tests run on multiple devices.
+         */
+        MAX_SURFACE_AREA = (int)(pixelArea * 2.75);
     }
 
     ChildView createView() {
@@ -98,40 +115,128 @@ class ViewManager {
     }
 
     /**
-     * Shorthand for calling mWebView.contentToViewDimension.  Used when
-     * obtaining a view dimension from a content dimension, whether it be in x
-     * or y.
+     * This should only be called from the UI thread.
      */
-    private int ctvD(int val) {
-        return mWebView.contentToViewDimension(val);
+    private void requestLayout(ChildView v) {
+
+        int width = mWebView.contentToViewDimension(v.width);
+        int height = mWebView.contentToViewDimension(v.height);
+        int x = mWebView.contentToViewX(v.x);
+        int y = mWebView.contentToViewY(v.y);
+
+        AbsoluteLayout.LayoutParams lp;
+        ViewGroup.LayoutParams layoutParams = v.mView.getLayoutParams();
+
+        if (layoutParams instanceof AbsoluteLayout.LayoutParams) {
+            lp = (AbsoluteLayout.LayoutParams) layoutParams;
+            lp.width = width;
+            lp.height = height;
+            lp.x = x;
+            lp.y = y;
+        } else {
+            lp = new AbsoluteLayout.LayoutParams(width, height, x, y);
+        }
+
+        // apply the layout to the view
+        v.mView.setLayoutParams(lp);
+
+        if(v.mView instanceof SurfaceView) {
+
+            final SurfaceView sView = (SurfaceView) v.mView;
+
+            if (sView.isFixedSize() && mZoomInProgress) {
+                /* If we're already fixed, and we're in a zoom, then do nothing
+                   about the size. Just wait until we get called at the end of
+                   the zoom session (with mZoomInProgress false) and we'll
+                   fixup our size then.
+                 */
+                return;
+            }
+
+            /* Compute proportional fixed width/height if necessary.
+             *
+             * NOTE: plugins (e.g. Flash) must not explicitly fix the size of
+             * their surface. The logic below will result in unexpected behavior
+             * for the plugin if they attempt to fix the size of the surface.
+             */
+            int fixedW = width;
+            int fixedH = height;
+            if (fixedW > MAX_SURFACE_DIMENSION || fixedH > MAX_SURFACE_DIMENSION) {
+                if (v.width > v.height) {
+                    fixedW = MAX_SURFACE_DIMENSION;
+                    fixedH = v.height * MAX_SURFACE_DIMENSION / v.width;
+                } else {
+                    fixedH = MAX_SURFACE_DIMENSION;
+                    fixedW = v.width * MAX_SURFACE_DIMENSION / v.height;
+                }
+            }
+            if (fixedW * fixedH > MAX_SURFACE_AREA) {
+                float area = MAX_SURFACE_AREA;
+                if (v.width > v.height) {
+                    fixedW = (int)Math.sqrt(area * v.width / v.height);
+                    fixedH = v.height * fixedW / v.width;
+                } else {
+                    fixedH = (int)Math.sqrt(area * v.height / v.width);
+                    fixedW = v.width * fixedH / v.height;
+                }
+            }
+
+            if (fixedW != width || fixedH != height) {
+                // if we get here, either our dimensions or area (or both)
+                // exeeded our max, so we had to compute fixedW and fixedH
+                sView.getHolder().setFixedSize(fixedW, fixedH);
+            } else if (!sView.isFixedSize() && mZoomInProgress) {
+                // just freeze where we were (view size) until we're done with
+                // the zoom progress
+                sView.getHolder().setFixedSize(sView.getWidth(),
+                                               sView.getHeight());
+            } else if (sView.isFixedSize() && !mZoomInProgress) {
+                /* The changing of visibility is a hack to get around a bug in
+                 * the framework that causes the surface to revert to the size
+                 * it was prior to being fixed before it redraws using the
+                 * values currently in its layout.
+                 *
+                 * The surface is destroyed when it is set to invisible and then
+                 * recreated at the new dimensions when it is made visible. The
+                 * same destroy/create step occurs without the change in
+                 * visibility, but then exhibits the behavior described in the
+                 * previous paragraph.
+                 */
+                if (sView.getVisibility() == View.VISIBLE) {
+                    sView.setVisibility(View.INVISIBLE);
+                    sView.getHolder().setSizeFromLayout();
+                    // setLayoutParams() only requests the layout. If we set it
+                    // to VISIBLE now, it will use the old dimension to set the
+                    // size. Post a message to ensure that it shows the new size.
+                    mWebView.mPrivateHandler.post(new Runnable() {
+                        public void run() {
+                            sView.setVisibility(View.VISIBLE);
+                        }
+                    });
+                } else {
+                    sView.getHolder().setSizeFromLayout();
+                }
+            }
+        }
     }
 
-    /**
-     * Shorthand for calling mWebView.contentToViewX.  Used when obtaining a
-     * view x coordinate from a content x coordinate.
-     */
-    private int ctvX(int val) {
-        return mWebView.contentToViewX(val);
+    void startZoom() {
+        mZoomInProgress = true;
+        for (ChildView v : mChildren) {
+            requestLayout(v);
+        }
     }
 
-    /**
-     * Shorthand for calling mWebView.contentToViewY.  Used when obtaining a
-     * view y coordinate from a content y coordinate.
-     */
-    private int ctvY(int val) {
-        return mWebView.contentToViewY(val);
+    void endZoom() {
+        mZoomInProgress = false;
+        for (ChildView v : mChildren) {
+            requestLayout(v);
+        }
     }
 
     void scaleAll() {
         for (ChildView v : mChildren) {
-            View view = v.mView;
-            AbsoluteLayout.LayoutParams lp =
-                    (AbsoluteLayout.LayoutParams) view.getLayoutParams();
-            lp.width = ctvD(v.width);
-            lp.height = ctvD(v.height);
-            lp.x = ctvX(v.x);
-            lp.y = ctvY(v.y);
-            view.setLayoutParams(lp);
+            requestLayout(v);
         }
     }
 
@@ -153,5 +258,39 @@ class ViewManager {
             v.mView.setVisibility(View.VISIBLE);
         }
         mHidden = false;
+    }
+
+    void postResetStateAll() {
+        mWebView.mPrivateHandler.post(new Runnable() {
+            public void run() {
+                mReadyToDraw = false;
+            }
+        });
+    }
+
+    void postReadyToDrawAll() {
+        mWebView.mPrivateHandler.post(new Runnable() {
+            public void run() {
+                mReadyToDraw = true;
+                for (ChildView v : mChildren) {
+                    v.mView.setVisibility(View.VISIBLE);
+                }
+            }
+        });
+    }
+
+    ChildView hitTest(int contentX, int contentY) {
+        if (mHidden) {
+            return null;
+        }
+        for (ChildView v : mChildren) {
+            if (v.mView.getVisibility() == View.VISIBLE) {
+                if (contentX >= v.x && contentX < (v.x + v.width)
+                        && contentY >= v.y && contentY < (v.y + v.height)) {
+                    return v;
+                }
+            }
+        }
+        return null;
     }
 }

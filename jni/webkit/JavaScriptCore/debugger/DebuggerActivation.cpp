@@ -71,24 +71,24 @@ bool DebuggerActivation::deleteProperty(ExecState* exec, const Identifier& prope
     return m_activation->deleteProperty(exec, propertyName);
 }
 
-void DebuggerActivation::getPropertyNames(ExecState* exec, PropertyNameArray& propertyNames)
+void DebuggerActivation::getOwnPropertyNames(ExecState* exec, PropertyNameArray& propertyNames, EnumerationMode mode)
 {
-    m_activation->getPropertyNames(exec, propertyNames);
+    m_activation->getPropertyNames(exec, propertyNames, mode);
 }
 
-bool DebuggerActivation::getPropertyAttributes(JSC::ExecState* exec, const Identifier& propertyName, unsigned& attributes) const
+bool DebuggerActivation::getOwnPropertyDescriptor(ExecState* exec, const Identifier& propertyName, PropertyDescriptor& descriptor)
 {
-    return m_activation->getPropertyAttributes(exec, propertyName, attributes);
+    return m_activation->getOwnPropertyDescriptor(exec, propertyName, descriptor);
 }
 
-void DebuggerActivation::defineGetter(ExecState* exec, const Identifier& propertyName, JSObject* getterFunction)
+void DebuggerActivation::defineGetter(ExecState* exec, const Identifier& propertyName, JSObject* getterFunction, unsigned attributes)
 {
-    m_activation->defineGetter(exec, propertyName, getterFunction);
+    m_activation->defineGetter(exec, propertyName, getterFunction, attributes);
 }
 
-void DebuggerActivation::defineSetter(ExecState* exec, const Identifier& propertyName, JSObject* setterFunction)
+void DebuggerActivation::defineSetter(ExecState* exec, const Identifier& propertyName, JSObject* setterFunction, unsigned attributes)
 {
-    m_activation->defineSetter(exec, propertyName, setterFunction);
+    m_activation->defineSetter(exec, propertyName, setterFunction, attributes);
 }
 
 JSValue DebuggerActivation::lookupGetter(ExecState* exec, const Identifier& propertyName)

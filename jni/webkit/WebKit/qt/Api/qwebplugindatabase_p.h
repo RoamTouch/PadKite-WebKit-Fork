@@ -17,30 +17,82 @@
     Boston, MA 02110-1301, USA.
 */
 
-#ifndef QWEBPLUGINDATABASE_P_H
-#define QWEBPLUGINDATABASE_P_H
+#ifndef QWEBPLUGINDATABASE_H
+#define QWEBPLUGINDATABASE_H
 
 #include "qwebkitglobal.h"
+#include "qwebpluginfactory.h"
 
-#include <wtf/RefPtr.h>
+#include <QtCore/qobject.h>
+#include <QtCore/qstringlist.h>
 
 namespace WebCore {
-    class PluginPackage;
     class PluginDatabase;
-};
+    class PluginPackage;
+}
 
-class QWebPluginInfoPrivate {
+class QWebPluginInfoPrivate;
+class QWEBKIT_EXPORT QWebPluginInfo {
 public:
-    QWebPluginInfoPrivate(RefPtr<WebCore::PluginPackage> pluginPackage);
+    QWebPluginInfo();
+    QWebPluginInfo(const QWebPluginInfo& other);
+    QWebPluginInfo &operator=(const QWebPluginInfo& other);
+    ~QWebPluginInfo();
 
-    RefPtr<WebCore::PluginPackage> plugin;
-};
+private:
+    QWebPluginInfo(WebCore::PluginPackage* package);
 
-class QWebPluginDatabasePrivate {
 public:
-    QWebPluginDatabasePrivate(WebCore::PluginDatabase* pluginDatabase);
+    typedef QWebPluginFactory::MimeType MimeType;
 
-    WebCore::PluginDatabase* database;
+    QString name() const;
+    QString description() const;
+    QList<MimeType> mimeTypes() const;
+    bool supportsMimeType(const QString& mimeType) const;
+    QString path() const;
+
+    bool isNull() const;
+
+    void setEnabled(bool enabled);
+    bool isEnabled() const;
+
+    bool operator==(const QWebPluginInfo& other) const;
+    bool operator!=(const QWebPluginInfo& other) const;
+
+    friend class QWebPluginDatabase;
+
+private:
+    QWebPluginInfoPrivate* d;
+    WebCore::PluginPackage* m_package;
+    mutable QList<MimeType> m_mimeTypes;
 };
 
-#endif // QWEBPLUGINDATABASE_P_H
+class QWebPluginDatabasePrivate;
+class QWEBKIT_EXPORT QWebPluginDatabase : public QObject {
+    Q_OBJECT
+
+private:
+    QWebPluginDatabase(QObject* parent = 0);
+    ~QWebPluginDatabase();
+
+public:
+    QList<QWebPluginInfo> plugins() const;
+
+    static QStringList defaultSearchPaths();
+    QStringList searchPaths() const;
+    void setSearchPaths(const QStringList& paths);
+    void addSearchPath(const QString& path);
+
+    void refresh();
+
+    QWebPluginInfo pluginForMimeType(const QString& mimeType);
+    void setPreferredPluginForMimeType(const QString& mimeType, const QWebPluginInfo& plugin);
+
+    friend class QWebSettings;
+
+private:
+    QWebPluginDatabasePrivate* d;
+    WebCore::PluginDatabase* m_database;
+};
+
+#endif // QWEBPLUGINDATABASE_H

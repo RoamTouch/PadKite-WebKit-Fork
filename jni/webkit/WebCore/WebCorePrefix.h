@@ -18,7 +18,7 @@
  *
  */
 
-/* This prefix file should contain only:
+/* This prefix file should contain only: 
  *    1) files to precompile for faster builds
  *    2) in one case at least: OS-X-specific performance bug workarounds
  *    3) the special trick to catch us using new or delete without including "config.h"
@@ -61,6 +61,19 @@
 #else
 #include <pthread.h>
 #endif // defined(WIN32) || defined(_WIN32)
+
+#if defined(ANDROID)
+#ifdef __cplusplus
+// Must come before include of algorithm.
+#define PREFIX_FOR_WEBCORE 1
+#define EXPORT __attribute__((visibility("default")))
+#endif
+// Android uses a single set of include directories when building WebKit and
+// JavaScriptCore. Since WebCore/ is included before JavaScriptCore/, Android
+// includes JavaScriptCore/config.h explicitly here to make sure it gets picked
+// up.
+#include <JavaScriptCore/config.h>
+#endif
 
 #include <sys/types.h>
 #include <fcntl.h>
@@ -105,7 +118,7 @@
 
 #include <time.h>
 
-#ifndef BUILDING_WX__
+#if !defined(BUILDING_WX__) && !defined(ANDROID)
 #include <CoreFoundation/CoreFoundation.h>
 #ifdef WIN_CAIRO
 #include <ConditionalMacros.h>
@@ -113,8 +126,15 @@
 #include <stdio.h>
 #else
 #include <CoreServices/CoreServices.h>
+
+#if defined(WIN32) || defined(_WIN32)
+/* Including CoreServices.h on Windows doesn't include CFNetwork.h, so we do
+   it explicitly here to make Windows more consistent with Mac. */
+#include <CFNetwork/CFNetwork.h>
 #endif
+
 #endif
+#endif  // !defined(BUILDING_WX__) && !defined(ANDROID)
 
 #ifdef __OBJC__
 #import <Cocoa/Cocoa.h>
@@ -125,8 +145,12 @@
 #define delete ("if you use new/delete make sure to include config.h at the top of the file"()) 
 #endif
 
-/* Work around a bug with C++ library that screws up Objective-C++ when exception support is disabled. */
-#if defined(__APPLE__)
+/* When C++ exceptions are disabled, the C++ library defines |try| and |catch|
+ * to allow C++ code that expects exceptions to build. These definitions
+ * interfere with Objective-C++ uses of Objective-C exception handlers, which
+ * use |@try| and |@catch|. As a workaround, undefine these macros. */
+#ifdef __OBJC__
 #undef try
 #undef catch
 #endif
+

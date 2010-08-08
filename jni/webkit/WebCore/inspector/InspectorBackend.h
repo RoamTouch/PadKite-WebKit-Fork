@@ -38,107 +38,110 @@
 namespace WebCore {
 
 class CachedResource;
-class InspectorClient;
+class Database;
 class InspectorDOMAgent;
+class InspectorFrontend;
 class JavaScriptCallFrame;
 class Node;
+class Storage;
 
 class InspectorBackend : public RefCounted<InspectorBackend>
 {
 public:
-    static PassRefPtr<InspectorBackend> create(InspectorController* inspectorController, InspectorClient* client)
+    static PassRefPtr<InspectorBackend> create(InspectorController* inspectorController)
     {
-        return adoptRef(new InspectorBackend(inspectorController, client));
+        return adoptRef(new InspectorBackend(inspectorController));
     }
 
     ~InspectorBackend();
 
     InspectorController* inspectorController() { return m_inspectorController; }
-    
     void disconnectController() { m_inspectorController = 0; }
 
-    void hideDOMNodeHighlight();
-
-    String localizedStringsURL();
-    String hiddenPanels();
-
-    void windowUnloading();
-
-    bool isWindowVisible();
-
-    void addResourceSourceToFrame(long identifier, Node* frame);
-    bool addSourceToFrame(const String& mimeType, const String& source, Node* frame);
-
-    void clearMessages();
-
-    void toggleNodeSearch();
-
-    void attach();
-    void detach();
-
-    void setAttachedWindowHeight(unsigned height);
+    void saveFrontendSettings(const String&);
 
     void storeLastActivePanel(const String& panelName);
 
+    void toggleNodeSearch();
     bool searchingForNode();
-
-    void loaded(bool enableDOMAgent);
 
     void enableResourceTracking(bool always);
     void disableResourceTracking(bool always);
     bool resourceTrackingEnabled() const;
+    void getResourceContent(long callId, unsigned long identifier);
 
-    void moveWindowBy(float x, float y) const;
-    void closeWindow();
+    void startTimelineProfiler();
+    void stopTimelineProfiler();
 
-    const String& platform() const;
-
-#if ENABLE(JAVASCRIPT_DEBUGGER)
-    const ProfilesArray& profiles() const;
-
-    void startProfiling();
-    void stopProfiling();
-
-    void enableProfiler(bool always);
-    void disableProfiler(bool always);
-    bool profilerEnabled();
-
+#if ENABLE(JAVASCRIPT_DEBUGGER) && USE(JSC)
+    bool debuggerEnabled() const;
     void enableDebugger(bool always);
     void disableDebugger(bool always);
-    bool debuggerEnabled() const;
 
-    JavaScriptCallFrame* currentCallFrame() const;
-
-    void addBreakpoint(const String& sourceID, unsigned lineNumber);
+    void addBreakpoint(const String& sourceID, unsigned lineNumber, const String& condition);
+    void updateBreakpoint(const String& sourceID, unsigned lineNumber, const String& condition);
     void removeBreakpoint(const String& sourceID, unsigned lineNumber);
-
-    bool pauseOnExceptions();
-    void setPauseOnExceptions(bool pause);
 
     void pauseInDebugger();
     void resumeDebugger();
 
+    long pauseOnExceptionsState();
+    void setPauseOnExceptionsState(long pauseState);
+
     void stepOverStatementInDebugger();
     void stepIntoStatementInDebugger();
     void stepOutOfFunctionInDebugger();
+
+    JavaScriptCallFrame* currentCallFrame() const;
+#endif
+#if ENABLE(JAVASCRIPT_DEBUGGER)
+    bool profilerEnabled();
+    void enableProfiler(bool always);
+    void disableProfiler(bool always);
+
+    void startProfiling();
+    void stopProfiling();
+
+    void getProfileHeaders(long callId);
+    void getProfile(long callId, unsigned uid);
 #endif
 
-    void getChildNodes(long callId, long elementId);
+    void setInjectedScriptSource(const String& source);
+    void dispatchOnInjectedScript(long callId, long injectedScriptId, const String& methodName, const String& arguments, bool async);
+    void getChildNodes(long callId, long nodeId);
     void setAttribute(long callId, long elementId, const String& name, const String& value);
     void removeAttribute(long callId, long elementId, const String& name);
-    void setTextNodeValue(long callId, long elementId, const String& value);
+    void setTextNodeValue(long callId, long nodeId, const String& value);
+    void getEventListenersForNode(long callId, long nodeId);
+    void copyNode(long nodeId);
+    void removeNode(long callId, long nodeId);
+    void highlightDOMNode(long nodeId);
+    void hideDOMNodeHighlight();
+
+    void getCookies(long callId);
+    void deleteCookie(const String& cookieName, const String& domain);
 
     // Generic code called from custom implementations.
-    void highlight(Node* node);
+    void releaseWrapperObjectGroup(long injectedScriptId, const String& objectGroup);
+    void didEvaluateForTestInFrontend(long callId, const String& jsonResult);
+
+#if ENABLE(DATABASE)
+    void getDatabaseTableNames(long callId, long databaseId);
+#endif
+
+#if ENABLE(DOM_STORAGE)
+    void getDOMStorageEntries(long callId, long storageId);
+    void setDOMStorageItem(long callId, long storageId, const String& key, const String& value);
+    void removeDOMStorageItem(long callId, long storageId, const String& key);
+#endif
 
 private:
-    InspectorBackend(InspectorController* inspectorController, InspectorClient* client);
+    InspectorBackend(InspectorController* inspectorController);
+    InspectorDOMAgent* inspectorDOMAgent();
+    InspectorFrontend* inspectorFrontend();
+    Node* nodeForId(long nodeId);
 
     InspectorController* m_inspectorController;
-    InspectorClient* m_client;
-#if ENABLE(JAVASCRIPT_DEBUGGER)
-    ProfilesArray m_emptyProfiles;
-#endif
 };
 
 } // namespace WebCore

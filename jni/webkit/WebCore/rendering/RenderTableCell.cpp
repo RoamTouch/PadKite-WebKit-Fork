@@ -168,6 +168,17 @@ void RenderTableCell::setOverrideSize(int size)
     RenderBlock::setOverrideSize(size);
 }
 
+IntSize RenderTableCell::offsetFromContainer(RenderObject* o) const
+{
+    ASSERT(o == container());
+
+    IntSize offset = RenderBlock::offsetFromContainer(o);
+    if (parent())
+        offset.expand(-parentBox()->x(), -parentBox()->y());
+
+    return offset;
+}
+
 IntRect RenderTableCell::clippedOverflowRectForRepaint(RenderBoxModelObject* repaintContainer)
 {
     // If the table grid is dirty, we cannot get reliable information about adjoining cells,
@@ -207,9 +218,9 @@ IntRect RenderTableCell::clippedOverflowRectForRepaint(RenderBoxModelObject* rep
             right = max(right, below->borderHalfRight(true));
         }
     }
-    left = max(left, -overflowLeft(false));
-    top = max(top, -overflowTop(false));
-    IntRect r(-left, - top, left + max(width() + right, overflowWidth(false)), top + max(height() + bottom, overflowHeight(false)));
+    left = max(left, -leftVisibleOverflow());
+    top = max(top, -topVisibleOverflow());
+    IntRect r(-left, - top, left + max(width() + right, rightVisibleOverflow()), top + max(height() + bottom, bottomVisibleOverflow()));
 
     if (RenderView* v = view()) {
         // FIXME: layoutDelta needs to be applied in parts before/after transforms and
@@ -226,33 +237,9 @@ void RenderTableCell::computeRectForRepaint(RenderBoxModelObject* repaintContain
         return;
     r.setY(r.y());
     RenderView* v = view();
-    if ((!v || !v->layoutStateEnabled()) && parent())
+    if ((!v || !v->layoutStateEnabled() || repaintContainer) && parent())
         r.move(-parentBox()->x(), -parentBox()->y()); // Rows are in the same coordinate space, so don't add their offset in.
     RenderBlock::computeRectForRepaint(repaintContainer, r, fixed);
-}
-
-void RenderTableCell::mapLocalToContainer(RenderBoxModelObject* repaintContainer, bool fixed, bool useTransforms, TransformState& transformState) const
-{
-    if (repaintContainer == this)
-        return;
-
-    RenderView* v = view();
-    if ((!v || !v->layoutStateEnabled()) && parent()) {
-        // Rows are in the same coordinate space, so don't add their offset in.
-        // FIXME: this is wrong with transforms
-        transformState.move(-parentBox()->x(), -parentBox()->y());
-    }
-    RenderBlock::mapLocalToContainer(repaintContainer, fixed, useTransforms, transformState);
-}
-
-void RenderTableCell::mapAbsoluteToLocalPoint(bool fixed, bool useTransforms, TransformState& transformState) const
-{
-    RenderBlock::mapAbsoluteToLocalPoint(fixed, useTransforms, transformState);
-    if (parent()) {
-        // Rows are in the same coordinate space, so add their offset back in.
-        // FIXME: this is wrong with transforms
-        transformState.move(parentBox()->x(), parentBox()->y());
-    }
 }
 
 int RenderTableCell::baselinePosition(bool firstLine, bool isRootLineBox) const
@@ -656,6 +643,9 @@ int RenderTableCell::borderHalfBottom(bool outer) const
 void RenderTableCell::paint(PaintInfo& paintInfo, int tx, int ty)
 {
     if (paintInfo.phase == PaintPhaseCollapsedTableBorders && style()->visibility() == VISIBLE) {
+        if (!shouldPaintWithinRoot(paintInfo))
+            return;
+
         tx += x();
         ty += y();
         int os = 2 * maximalOutlineSize(paintInfo.phase);
@@ -827,6 +817,9 @@ void RenderTableCell::paintCollapsedBorder(GraphicsContext* graphicsContext, int
 
 void RenderTableCell::paintBackgroundsBehindCell(PaintInfo& paintInfo, int tx, int ty, RenderObject* backgroundObject)
 {
+    if (!shouldPaintWithinRoot(paintInfo))
+        return;
+
     if (!backgroundObject)
         return;
 
@@ -858,7 +851,7 @@ void RenderTableCell::paintBackgroundsBehindCell(PaintInfo& paintInfo, int tx, i
             paintInfo.context->save();
             paintInfo.context->clip(clipRect);
         }
-        paintFillLayers(paintInfo, c, bgLayer, tx, ty, w, h);
+        paintFillLayers(paintInfo, c, bgLayer, tx, ty, w, h, CompositeSourceOver, backgroundObject);
         if (shouldClip)
             paintInfo.context->restore();
     }
@@ -866,6 +859,9 @@ void RenderTableCell::paintBackgroundsBehindCell(PaintInfo& paintInfo, int tx, i
 
 void RenderTableCell::paintBoxDecorations(PaintInfo& paintInfo, int tx, int ty)
 {
+    if (!shouldPaintWithinRoot(paintInfo))
+        return;
+
     RenderTable* tableElt = table();
     if (!tableElt->collapseBorders() && style()->emptyCells() == HIDE && !firstChild())
         return;

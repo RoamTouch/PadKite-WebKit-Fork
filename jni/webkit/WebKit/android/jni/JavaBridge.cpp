@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -25,31 +25,34 @@
 
 #define LOG_TAG "webcoreglue"
 
-#include <config.h>
-#include <wtf/Platform.h>
+#include "config.h"
 
+#include "AtomicString.h"
 #include "Cache.h"
+#include "Connection.h"
 #include "CookieClient.h"
 #include "JavaSharedClient.h"
 #include "KeyGeneratorClient.h"
 #include "KURL.h"
 #include "NetworkStateNotifier.h"
+#include "PackageNotifier.h"
 #include "Page.h"
 #include "PluginClient.h"
 #include "PluginDatabase.h"
 #include "Timer.h"
 #include "TimerClient.h"
-#include "jni_utility.h"
-#include "WebCoreJni.h"
-
 #ifdef ANDROID_INSTRUMENT
 #include "TimeCounter.h"
 #endif
+#include "WebCoreJni.h"
 
-#include <jni.h>
 #include <JNIHelp.h>
+#include <JNIUtility.h>
 #include <SkUtils.h>
+#include <jni.h>
 #include <utils/misc.h>
+#include <wtf/Platform.h>
+#include <wtf/StdLibExtras.h>
 
 namespace android {
 
@@ -96,12 +99,17 @@ public:
     static void SharedTimerFired(JNIEnv* env, jobject);
     static void SetCacheSize(JNIEnv* env, jobject obj, jint bytes);
     static void SetNetworkOnLine(JNIEnv* env, jobject obj, jboolean online);
+    static void SetNetworkType(JNIEnv* env, jobject obj, jstring type, jstring subtype);
     static void SetDeferringTimers(JNIEnv* env, jobject obj, jboolean defer);
     static void ServiceFuncPtrQueue(JNIEnv*);
     static void UpdatePluginDirectories(JNIEnv* env, jobject obj, jobjectArray array, jboolean reload);
+    static void AddPackageNames(JNIEnv* env, jobject obj, jobject packageNames);
+    static void AddPackageName(JNIEnv* env, jobject obj, jstring packageName);
+    static void RemovePackageName(JNIEnv* env, jobject obj, jstring packageName);
+
 
 private:
-    jobject     mJavaObject;
+    jweak       mJavaObject;
     jmethodID   mSetSharedTimer;
     jmethodID   mStopSharedTimer;
     jmethodID   mSetCookies;
@@ -118,7 +126,7 @@ static void (*sSharedTimerFiredCallback)();
 
 JavaBridge::JavaBridge(JNIEnv* env, jobject obj)
 {
-    mJavaObject = adoptGlobalRef(env, obj);
+    mJavaObject = env->NewWeakGlobalRef(obj);
     jclass clazz = env->GetObjectClass(obj);
 
     mSetSharedTimer = env->GetMethodID(clazz, "setSharedTimer", "(J)V");
@@ -152,7 +160,7 @@ JavaBridge::~JavaBridge()
 {
     if (mJavaObject) {
         JNIEnv* env = JSC::Bindings::getJNIEnv();
-        env->DeleteGlobalRef(mJavaObject);
+        env->DeleteWeakGlobalRef(mJavaObject);
         mJavaObject = 0;
     }
     
@@ -167,8 +175,6 @@ JavaBridge::setSharedTimer(long long timemillis)
 {
     JNIEnv* env = JSC::Bindings::getJNIEnv();
     AutoJObject obj = getRealObject(env, mJavaObject);
-    if (!obj.get())
-        return;
     env->CallVoidMethod(obj.get(), mSetSharedTimer, timemillis);
 }
 
@@ -177,8 +183,6 @@ JavaBridge::stopSharedTimer()
 {    
     JNIEnv* env = JSC::Bindings::getJNIEnv();
     AutoJObject obj = getRealObject(env, mJavaObject);
-    if (!obj.get())
-        return;
     env->CallVoidMethod(obj.get(), mStopSharedTimer);
 }
 
@@ -186,13 +190,11 @@ void
 JavaBridge::setCookies(WebCore::KURL const& url, WebCore::String const& value)
 {
     JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = getRealObject(env, mJavaObject);
-    if (!obj.get())
-        return;
     const WebCore::String& urlStr = url.string();
     jstring jUrlStr = env->NewString(urlStr.characters(), urlStr.length());
     jstring jValueStr = env->NewString(value.characters(), value.length());
 
+    AutoJObject obj = getRealObject(env, mJavaObject);
     env->CallVoidMethod(obj.get(), mSetCookies, jUrlStr, jValueStr);
     env->DeleteLocalRef(jUrlStr);
     env->DeleteLocalRef(jValueStr);
@@ -203,10 +205,9 @@ JavaBridge::cookies(WebCore::KURL const& url)
 {
     JNIEnv* env = JSC::Bindings::getJNIEnv();
     const WebCore::String& urlStr = url.string();
-    AutoJObject obj = getRealObject(env, mJavaObject);
-    if (!obj.get())
-        return WebCore::String();
     jstring jUrlStr = env->NewString(urlStr.characters(), urlStr.length());
+
+    AutoJObject obj = getRealObject(env, mJavaObject);
     jstring string = (jstring)(env->CallObjectMethod(obj.get(), mCookies, jUrlStr));
     
     WebCore::String ret = to_string(env, string);
@@ -220,8 +221,6 @@ JavaBridge::cookiesEnabled()
 {
     JNIEnv* env = JSC::Bindings::getJNIEnv();
     AutoJObject obj = getRealObject(env, mJavaObject);
-    if (!obj.get())
-        return false;
     jboolean ret = env->CallBooleanMethod(obj.get(), mCookiesEnabled);
     return (ret != 0);
 }
@@ -232,8 +231,6 @@ JavaBridge::getPluginDirectories()
     WTF::Vector<WebCore::String> directories;
     JNIEnv* env = JSC::Bindings::getJNIEnv();
     AutoJObject obj = getRealObject(env, mJavaObject);
-    if (!obj.get())
-        return directories;
     jobjectArray array = (jobjectArray)
             env->CallObjectMethod(obj.get(), mGetPluginDirectories);
     int count = env->GetArrayLength(array);
@@ -252,8 +249,6 @@ JavaBridge::getPluginSharedDataDirectory()
 {
     JNIEnv* env = JSC::Bindings::getJNIEnv();
     AutoJObject obj = getRealObject(env, mJavaObject);
-    if (!obj.get())
-        return WebCore::String();
     jstring ret = (jstring)env->CallObjectMethod(obj.get(), mGetPluginSharedDataDirectory);
     WebCore::String path = to_string(env, ret);
     checkException(env);
@@ -276,8 +271,6 @@ void JavaBridge::signalServiceFuncPtrQueue()
     // environment is setup.
     JNIEnv* env = JSC::Bindings::getJNIEnv();
     AutoJObject obj = getRealObject(env, mJavaObject);
-    if (!obj.get())
-        return;
     env->CallVoidMethod(obj.get(), mSignalFuncPtrQueue);
 }
 
@@ -285,8 +278,6 @@ WTF::Vector<WebCore::String>JavaBridge::getSupportedKeyStrengthList() {
     WTF::Vector<WebCore::String> list;
     JNIEnv* env = JSC::Bindings::getJNIEnv();
     AutoJObject obj = getRealObject(env, mJavaObject);
-    if (!obj.get())
-        return list;
     jobjectArray array = (jobjectArray) env->CallObjectMethod(obj.get(),
             mGetKeyStrengthList);
     int count = env->GetArrayLength(array);
@@ -361,6 +352,29 @@ void JavaBridge::SetNetworkOnLine(JNIEnv* env, jobject obj, jboolean online)
 	WebCore::networkStateNotifier().networkStateChange(online);
 }
 
+void JavaBridge::SetNetworkType(JNIEnv* env, jobject obj, jstring javatype, jstring javasubtype)
+{
+    DEFINE_STATIC_LOCAL(AtomicString, wifi, ("wifi"));
+    DEFINE_STATIC_LOCAL(AtomicString, mobile, ("mobile"));
+    DEFINE_STATIC_LOCAL(AtomicString, mobileSupl, ("mobile_supl"));
+    DEFINE_STATIC_LOCAL(AtomicString, gprs, ("gprs"));
+    DEFINE_STATIC_LOCAL(AtomicString, edge, ("edge"));
+    DEFINE_STATIC_LOCAL(AtomicString, umts, ("umts"));
+
+    String type = to_string(env, javatype);
+    String subtype = to_string(env, javasubtype);
+    Connection::ConnectionType connectionType = Connection::Unknown;
+    if (type == wifi)
+        connectionType = Connection::WiFi;
+    else if (type == mobile || type == mobileSupl) {
+        if (subtype == edge || subtype == gprs)
+            connectionType = Connection::Cell_2G;
+        else if (subtype == umts)
+            connectionType = Connection::Cell_3G;
+    }
+    WebCore::networkStateNotifier().networkTypeChange(connectionType);
+}
+
 void JavaBridge::ServiceFuncPtrQueue(JNIEnv*)
 {
     JavaSharedClient::ServiceFunctionPtrQueue();
@@ -383,6 +397,46 @@ void JavaBridge::UpdatePluginDirectories(JNIEnv* env, jobject obj,
     WebCore::Page::refreshPlugins(reload);
 }
 
+void JavaBridge::AddPackageNames(JNIEnv* env, jobject obj, jobject packageNames)
+{
+    if (!packageNames)
+        return;
+
+    // dalvikvm will raise exception if any of these fail
+    jclass setClass = env->FindClass("java/util/Set");
+    jmethodID iterator = env->GetMethodID(setClass, "iterator",
+            "()Ljava/util/Iterator;");
+    jobject iter = env->CallObjectMethod(packageNames, iterator);
+
+    jclass iteratorClass = env->FindClass("java/util/Iterator");
+    jmethodID hasNext = env->GetMethodID(iteratorClass, "hasNext", "()Z");
+    jmethodID next = env->GetMethodID(iteratorClass, "next", "()Ljava/lang/Object;");
+
+    HashSet<WebCore::String> namesSet;
+    while (env->CallBooleanMethod(iter, hasNext)) {
+        jstring name = static_cast<jstring>(env->CallObjectMethod(iter, next));
+        namesSet.add(to_string(env, name));
+        env->DeleteLocalRef(name);
+    }
+
+    packageNotifier().addPackageNames(namesSet);
+
+    env->DeleteLocalRef(iteratorClass);
+    env->DeleteLocalRef(iter);
+    env->DeleteLocalRef(setClass);
+}
+
+void JavaBridge::AddPackageName(JNIEnv* env, jobject obj, jstring packageName)
+{
+    packageNotifier().addPackageName(to_string(env, packageName));
+}
+
+void JavaBridge::RemovePackageName(JNIEnv* env, jobject obj, jstring packageName)
+{
+    packageNotifier().removePackageName(to_string(env, packageName));
+}
+
+
 // ----------------------------------------------------------------------------
 
 /*
@@ -400,10 +454,18 @@ static JNINativeMethod gWebCoreJavaBridgeMethods[] = {
         (void*) JavaBridge::SetCacheSize },
     { "setNetworkOnLine", "(Z)V",
         (void*) JavaBridge::SetNetworkOnLine },
+    { "setNetworkType", "(Ljava/lang/String;Ljava/lang/String;)V",
+        (void*) JavaBridge::SetNetworkType },
     { "nativeServiceFuncPtrQueue", "()V",
         (void*) JavaBridge::ServiceFuncPtrQueue },
     { "nativeUpdatePluginDirectories", "([Ljava/lang/String;Z)V",
-        (void*) JavaBridge::UpdatePluginDirectories }
+        (void*) JavaBridge::UpdatePluginDirectories },
+    { "addPackageNames", "(Ljava/util/Set;)V",
+        (void*) JavaBridge::AddPackageNames },
+    { "addPackageName", "(Ljava/lang/String;)V",
+        (void*) JavaBridge::AddPackageName },
+    { "removePackageName", "(Ljava/lang/String;)V",
+        (void*) JavaBridge::RemovePackageName }
 };
 
 int register_javabridge(JNIEnv* env)

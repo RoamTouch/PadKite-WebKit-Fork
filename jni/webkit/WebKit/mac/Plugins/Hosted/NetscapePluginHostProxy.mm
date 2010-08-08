@@ -39,6 +39,7 @@
 #import <WebCore/Frame.h>
 #import <WebCore/IdentifierRep.h>
 #import <WebCore/ScriptController.h>
+#import <string>
 
 extern "C" {
 #import "WebKitPluginHost.h"
@@ -94,6 +95,7 @@ NetscapePluginHostProxy::NetscapePluginHostProxy(mach_port_t clientPort, mach_po
     , m_pluginHostPort(pluginHostPort)
     , m_isModal(false)
     , m_menuBarIsVisible(true)
+    , m_fullScreenWindowIsShowing(false)
     , m_pluginHostPSN(pluginHostPSN)
     , m_processingRequests(0)
     , m_shouldCacheMissingPropertiesAndMethods(shouldCacheMissingPropertiesAndMethods)
@@ -187,7 +189,8 @@ NetscapePluginInstanceProxy* NetscapePluginHostProxy::pluginInstance(uint32_t pl
 
 void NetscapePluginHostProxy::deadNameNotificationCallback(CFMachPortRef port, void *msg, CFIndex size, void *info)
 {
-    ASSERT(msg && static_cast<mach_msg_header_t*>(msg)->msgh_id == MACH_NOTIFY_DEAD_NAME);
+    ASSERT(msg);
+    ASSERT(static_cast<mach_msg_header_t*>(msg)->msgh_id == MACH_NOTIFY_DEAD_NAME);
     
     static_cast<NetscapePluginHostProxy*>(info)->pluginHostDied();
 }
@@ -195,14 +198,42 @@ void NetscapePluginHostProxy::deadNameNotificationCallback(CFMachPortRef port, v
 void NetscapePluginHostProxy::setMenuBarVisible(bool visible)
 {
     m_menuBarIsVisible = visible;
-    
+
     [NSMenu setMenuBarVisible:visible];
-    if (visible) {
-        // Make ourselves the front app
-        ProcessSerialNumber psn;
-        GetCurrentProcess(&psn);
-        SetFrontProcess(&psn);
-    }
+}
+
+void NetscapePluginHostProxy::didEnterFullScreen() const
+{
+    SetFrontProcess(&m_pluginHostPSN);
+}
+
+void NetscapePluginHostProxy::didExitFullScreen() const
+{
+    // If the plug-in host is the current application then we should bring ourselves to the front when it exits full-screen mode.
+
+    ProcessSerialNumber frontProcess;
+    GetFrontProcess(&frontProcess);
+    Boolean isSameProcess = 0;
+    SameProcess(&frontProcess, &m_pluginHostPSN, &isSameProcess);
+    if (!isSameProcess)
+        return;
+
+    ProcessSerialNumber currentProcess;
+    GetCurrentProcess(&currentProcess);
+    SetFrontProcess(&currentProcess);
+}
+
+void NetscapePluginHostProxy::setFullScreenWindowIsShowing(bool isShowing)
+{
+    if (m_fullScreenWindowIsShowing == isShowing)
+        return;
+
+    m_fullScreenWindowIsShowing = isShowing;
+    if (m_fullScreenWindowIsShowing)
+        didEnterFullScreen();
+    else
+        didExitFullScreen();
+
 }
 
 void NetscapePluginHostProxy::applicationDidBecomeActive()
@@ -538,10 +569,8 @@ kern_return_t WKPCEvaluate(mach_port_t clientPort, uint32_t pluginID, uint32_t r
         return KERN_FAILURE;
     
     NetscapePluginInstanceProxy* instanceProxy = hostProxy->pluginInstance(pluginID);
-    if (!instanceProxy) {
-        _WKPHBooleanAndDataReply(hostProxy->port(), pluginID, requestID, false, 0, 0);
-        return KERN_SUCCESS;
-    }
+    if (!instanceProxy)
+        return KERN_FAILURE;
 
     PluginDestroyDeferrer deferrer(instanceProxy);
     
@@ -595,18 +624,14 @@ kern_return_t WKPCInvoke(mach_port_t clientPort, uint32_t pluginID, uint32_t req
         return KERN_FAILURE;
     
     NetscapePluginInstanceProxy* instanceProxy = hostProxy->pluginInstance(pluginID);
-    if (!instanceProxy) {
-        _WKPHBooleanAndDataReply(hostProxy->port(), pluginID, requestID, false, 0, 0);
-        return KERN_SUCCESS;
-    }
+    if (!instanceProxy)
+        return KERN_FAILURE;
 
     PluginDestroyDeferrer deferrer(instanceProxy);
     
     IdentifierRep* identifier = reinterpret_cast<IdentifierRep*>(serverIdentifier);
-    if (!IdentifierRep::isValid(identifier)) {
-        _WKPHBooleanAndDataReply(hostProxy->port(), instanceProxy->pluginID(), requestID, false, 0, 0);
-        return KERN_SUCCESS;
-    }
+    if (!IdentifierRep::isValid(identifier))
+        return KERN_FAILURE;
 
     Identifier methodNameIdentifier = identifierFromIdentifierRep(identifier);
 
@@ -631,10 +656,8 @@ kern_return_t WKPCInvokeDefault(mach_port_t clientPort, uint32_t pluginID, uint3
         return KERN_FAILURE;
     
     NetscapePluginInstanceProxy* instanceProxy = hostProxy->pluginInstance(pluginID);
-    if (!instanceProxy) {
-        _WKPHBooleanAndDataReply(hostProxy->port(), pluginID, requestID, false, 0, 0);
-        return KERN_SUCCESS;
-    }
+    if (!instanceProxy)
+        return KERN_FAILURE;
 
     PluginDestroyDeferrer deferrer(instanceProxy);
 
@@ -677,16 +700,12 @@ kern_return_t WKPCGetProperty(mach_port_t clientPort, uint32_t pluginID, uint32_
         return KERN_FAILURE;
     
     NetscapePluginInstanceProxy* instanceProxy = hostProxy->pluginInstance(pluginID);
-    if (!instanceProxy) {
-        _WKPHBooleanAndDataReply(hostProxy->port(), pluginID, requestID, false, 0, 0);
-        return KERN_SUCCESS;
-    }
+    if (!instanceProxy)
+        return KERN_FAILURE;
     
     IdentifierRep* identifier = reinterpret_cast<IdentifierRep*>(serverIdentifier);
-    if (!IdentifierRep::isValid(identifier)) {
-        _WKPHBooleanAndDataReply(hostProxy->port(), pluginID, requestID, false, 0, 0);
-        return KERN_SUCCESS;
-    }
+    if (!IdentifierRep::isValid(identifier))
+        return KERN_FAILURE;
     
     PluginDestroyDeferrer deferrer(instanceProxy);
 
@@ -707,7 +726,7 @@ kern_return_t WKPCGetProperty(mach_port_t clientPort, uint32_t pluginID, uint32_
     return KERN_SUCCESS;
 }
 
-kern_return_t WKPCSetProperty(mach_port_t clientPort, uint32_t pluginID, uint32_t objectID, uint64_t serverIdentifier, data_t valueData, mach_msg_type_number_t valueLength, boolean_t* returnValue)
+kern_return_t WKPCSetProperty(mach_port_t clientPort, uint32_t pluginID, uint32_t requestID, uint32_t objectID, uint64_t serverIdentifier, data_t valueData, mach_msg_type_number_t valueLength)
 {
     DataDeallocator deallocator(valueData, valueLength);
 
@@ -723,18 +742,21 @@ kern_return_t WKPCSetProperty(mach_port_t clientPort, uint32_t pluginID, uint32_
 
     IdentifierRep* identifier = reinterpret_cast<IdentifierRep*>(serverIdentifier);
     if (!IdentifierRep::isValid(identifier))
-        *returnValue = false;
-    
+        return KERN_FAILURE;
+
+    bool result;
     if (identifier->isString()) {
         Identifier propertyNameIdentifier = identifierFromIdentifierRep(identifier);        
-        *returnValue = instanceProxy->setProperty(objectID, propertyNameIdentifier, valueData, valueLength);
+        result = instanceProxy->setProperty(objectID, propertyNameIdentifier, valueData, valueLength);
     } else 
-        *returnValue = instanceProxy->setProperty(objectID, identifier->number(), valueData, valueLength);
-    
+        result = instanceProxy->setProperty(objectID, identifier->number(), valueData, valueLength);
+
+    _WKPHBooleanReply(hostProxy->port(), instanceProxy->pluginID(), requestID, result);
+
     return KERN_SUCCESS;
 }
 
-kern_return_t WKPCRemoveProperty(mach_port_t clientPort, uint32_t pluginID, uint32_t objectID, uint64_t serverIdentifier, boolean_t* returnValue)
+kern_return_t WKPCRemoveProperty(mach_port_t clientPort, uint32_t pluginID, uint32_t requestID, uint32_t objectID, uint64_t serverIdentifier)
 {
     NetscapePluginHostProxy* hostProxy = pluginProxyMap().get(clientPort);
     if (!hostProxy)
@@ -749,13 +771,16 @@ kern_return_t WKPCRemoveProperty(mach_port_t clientPort, uint32_t pluginID, uint
     IdentifierRep* identifier = reinterpret_cast<IdentifierRep*>(serverIdentifier);
     if (!IdentifierRep::isValid(identifier))
         return KERN_FAILURE;
-        
+
+    bool result;
     if (identifier->isString()) {
         Identifier propertyNameIdentifier = identifierFromIdentifierRep(identifier);        
-        *returnValue = instanceProxy->removeProperty(objectID, propertyNameIdentifier);
+        result = instanceProxy->removeProperty(objectID, propertyNameIdentifier);
     } else 
-        *returnValue = instanceProxy->removeProperty(objectID, identifier->number());
-    
+        result = instanceProxy->removeProperty(objectID, identifier->number());
+
+    _WKPHBooleanReply(hostProxy->port(), instanceProxy->pluginID(), requestID, result);
+
     return KERN_SUCCESS;
 }
 
@@ -766,18 +791,14 @@ kern_return_t WKPCHasProperty(mach_port_t clientPort, uint32_t pluginID, uint32_
         return KERN_FAILURE;
     
     NetscapePluginInstanceProxy* instanceProxy = hostProxy->pluginInstance(pluginID);
-    if (!instanceProxy) {
-        _WKPHBooleanReply(hostProxy->port(), pluginID, requestID, false);
-        return KERN_SUCCESS;
-    }
+    if (!instanceProxy)
+        return KERN_FAILURE;
     
     PluginDestroyDeferrer deferrer(instanceProxy);
 
     IdentifierRep* identifier = reinterpret_cast<IdentifierRep*>(serverIdentifier);
-    if (!IdentifierRep::isValid(identifier)) {
-        _WKPHBooleanReply(hostProxy->port(), instanceProxy->pluginID(), requestID, false);
-        return KERN_SUCCESS;
-    }    
+    if (!IdentifierRep::isValid(identifier))
+        return KERN_FAILURE;
     
     boolean_t returnValue;
     if (identifier->isString()) {
@@ -798,18 +819,14 @@ kern_return_t WKPCHasMethod(mach_port_t clientPort, uint32_t pluginID, uint32_t 
         return KERN_FAILURE;
     
     NetscapePluginInstanceProxy* instanceProxy = hostProxy->pluginInstance(pluginID);
-    if (!instanceProxy) {
-        _WKPHBooleanReply(hostProxy->port(), pluginID, requestID, false);
-        return KERN_SUCCESS;
-    }
+    if (!instanceProxy)
+        return KERN_FAILURE;
     
     PluginDestroyDeferrer deferrer(instanceProxy);
 
     IdentifierRep* identifier = reinterpret_cast<IdentifierRep*>(serverIdentifier);
-    if (!IdentifierRep::isValid(identifier)) {
-        _WKPHBooleanReply(hostProxy->port(), instanceProxy->pluginID(), requestID, false);
-        return KERN_SUCCESS;
-    }
+    if (!IdentifierRep::isValid(identifier))
+        return KERN_FAILURE;
     
     Identifier methodNameIdentifier = identifierFromIdentifierRep(identifier);        
     boolean_t returnValue = instanceProxy->hasMethod(objectID, methodNameIdentifier);
@@ -850,10 +867,8 @@ kern_return_t WKPCEnumerate(mach_port_t clientPort, uint32_t pluginID, uint32_t 
         return KERN_FAILURE;
     
     NetscapePluginInstanceProxy* instanceProxy = hostProxy->pluginInstance(pluginID);
-    if (!instanceProxy) {
-        _WKPHBooleanAndDataReply(hostProxy->port(), pluginID, requestID, false, 0, 0);
-        return KERN_SUCCESS;
-    }
+    if (!instanceProxy)
+        return KERN_FAILURE;
     
     data_t resultData = 0;
     mach_msg_type_number_t resultLength = 0;
@@ -874,7 +889,18 @@ kern_return_t WKPCSetMenuBarVisible(mach_port_t clientPort, boolean_t menuBarVis
         return KERN_FAILURE;
 
     hostProxy->setMenuBarVisible(menuBarVisible);
-    
+
+    return KERN_SUCCESS;
+}
+
+kern_return_t WKPCSetFullScreenWindowIsShowing(mach_port_t clientPort, boolean_t fullScreenWindowIsShowing)
+{
+    NetscapePluginHostProxy* hostProxy = pluginProxyMap().get(clientPort);
+    if (!hostProxy)
+        return KERN_FAILURE;
+
+    hostProxy->setFullScreenWindowIsShowing(fullScreenWindowIsShowing);
+
     return KERN_SUCCESS;
 }
 
@@ -1054,6 +1080,67 @@ kern_return_t WKPCResolveURL(mach_port_t clientPort, uint32_t pluginID, data_t u
         return KERN_FAILURE;
     
     instanceProxy->resolveURL(urlData, targetData, *resolvedURLData, *resolvedURLLength);
+    return KERN_SUCCESS;
+}
+
+#if !defined(BUILDING_ON_SNOW_LEOPARD)
+kern_return_t WKPCRunSyncOpenPanel(mach_port_t clientPort, data_t panelData, mach_msg_type_number_t panelDataLength)
+{
+    DataDeallocator panelDataDeallocator(panelData, panelDataLength);
+
+    NetscapePluginHostProxy* hostProxy = pluginProxyMap().get(clientPort);
+    if (!hostProxy)
+        return KERN_FAILURE;
+    
+    NSOpenPanel *sheet = [NSOpenPanel openPanel];
+    NSDictionary *panelState = [NSPropertyListSerialization propertyListFromData:[NSData dataWithBytes:panelData length:panelDataLength]
+                                                                mutabilityOption:NSPropertyListImmutable
+                                                                          format:NULL
+                                                                errorDescription:nil];
+    
+    [sheet setCanChooseFiles:[[panelState objectForKey:@"canChooseFiles"] boolValue]];
+    [sheet setCanChooseDirectories:[[panelState objectForKey:@"canChooseDirectories"] boolValue]];
+    [sheet setResolvesAliases:[[panelState objectForKey:@"resolvesAliases"] boolValue]];
+    [sheet setAllowsMultipleSelection:[[panelState objectForKey:@"allowsMultipleSelection"] boolValue]];
+    [sheet setCanCreateDirectories:[[panelState objectForKey:@"canCreateDirectories"] boolValue]];
+    [sheet setShowsHiddenFiles:[[panelState objectForKey:@"showsHiddenFiles"] boolValue]];
+    [sheet setExtensionHidden:[[panelState objectForKey:@"isExtensionHidden"] boolValue]];
+    [sheet setCanSelectHiddenExtension:[[panelState objectForKey:@"canSelectHiddenExtension"] boolValue]];
+    [sheet setAllowsOtherFileTypes:[[panelState objectForKey:@"allowsOtherFileTypes"] boolValue]];
+    [sheet setTreatsFilePackagesAsDirectories:[[panelState objectForKey:@"treatsFilePackagesAsDirectories"] boolValue]];
+    [sheet setPrompt:[panelState objectForKey:@"prompt"]];
+    [sheet setNameFieldLabel:[panelState objectForKey:@"nameFieldLabel"]];
+    [sheet setMessage:[panelState objectForKey:@"message"]];
+    [sheet setAllowedFileTypes:[panelState objectForKey:@"allowedFileTypes"]];
+    [sheet setRequiredFileType:[panelState objectForKey:@"requiredFileType"]];    
+    [sheet setTitle:[panelState objectForKey:@"title"]];
+    [sheet runModal];
+    
+    NSDictionary *ret = [NSDictionary dictionaryWithObjectsAndKeys:
+                         [sheet filenames], @"filenames",
+                         WKNoteOpenPanelFiles([sheet filenames]), @"extensions",
+                         nil];
+    
+    RetainPtr<NSData*> data = [NSPropertyListSerialization dataFromPropertyList:ret format:NSPropertyListBinaryFormat_v1_0 errorDescription:0];
+    ASSERT(data);
+
+    _WKPHSyncOpenPanelReply(hostProxy->port(), const_cast<char *>(static_cast<const char*>([data.get() bytes])), [data.get() length]);
+    return KERN_SUCCESS;
+}
+#else
+kern_return_t WKPCRunSyncOpenPanel(mach_port_t clientPort, data_t panelData, mach_msg_type_number_t panelDataLength)
+{
+    return KERN_FAILURE;
+}
+#endif // !defined(BUILDING_ON_SNOW_LEOPARD)
+
+kern_return_t WKPCSetException(mach_port_t clientPort, data_t message, mach_msg_type_number_t messageCnt)
+{
+    DataDeallocator deallocator(message, messageCnt);
+
+    string str(message, messageCnt);
+    NetscapePluginInstanceProxy::setGlobalException(str.c_str());
+
     return KERN_SUCCESS;
 }
 

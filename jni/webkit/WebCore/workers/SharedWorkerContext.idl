@@ -32,11 +32,11 @@ module threads {
 
     interface [
         Conditional=SHARED_WORKERS,
-        CustomMarkFunction,
         ExtendsDOMGlobalObject,
         IsWorkerContext,
         GenerateNativeConverter,
-        NoStaticTables
+        NoStaticTables,
+        OmitConstructor
     ] SharedWorkerContext : WorkerContext {
 
         readonly attribute DOMString name;

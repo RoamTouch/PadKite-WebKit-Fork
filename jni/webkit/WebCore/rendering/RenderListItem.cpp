@@ -1,9 +1,7 @@
 /**
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2010 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Andrew Wellington (proton@wiretapped.net)
  *
  * This library is free software; you can redistribute it and/or
@@ -53,8 +51,8 @@ void RenderListItem::styleDidChange(StyleDifference diff, const RenderStyle* old
 {
     RenderBlock::styleDidChange(diff, oldStyle);
 
-    if (style()->listStyleType() != LNONE ||
-        (style()->listStyleImage() && !style()->listStyleImage()->errorOccurred())) {
+    if (style()->listStyleType() != NoneListStyle
+        || (style()->listStyleImage() && !style()->listStyleImage()->errorOccurred())) {
         RefPtr<RenderStyle> newStyle = RenderStyle::create();
         // The marker always inherits from the list item, regardless of where it might end
         // up (e.g., in some deeply nested line box). See CSS3 spec.
@@ -77,11 +75,16 @@ void RenderListItem::destroy()
     RenderBlock::destroy();
 }
 
+static bool isList(Node* node)
+{
+    return (node->hasTagName(ulTag) || node->hasTagName(olTag));
+}
+
 static Node* enclosingList(Node* node)
 {
     Node* parent = node->parentNode();
     for (Node* n = parent; n; n = n->parentNode())
-        if (n->hasTagName(ulTag) || n->hasTagName(olTag))
+        if (isList(n))
             return n;
     // If there's no actual <ul> or <ol> list element, then our parent acts as
     // our list for purposes of determining what other list items should be
@@ -89,22 +92,38 @@ static Node* enclosingList(Node* node)
     return parent;
 }
 
+static Node* enclosingList(const RenderObject* renderer)
+{
+    Node* node = renderer->node();
+    if (node)
+        return enclosingList(node);
+
+    renderer = renderer->parent();
+    while (renderer && !renderer->node())
+        renderer = renderer->parent();
+
+    node = renderer->node();
+    if (isList(node))
+        return node;
+
+    return enclosingList(node);
+}
+
 static RenderListItem* previousListItem(Node* list, const RenderListItem* item)
 {
-    for (Node* node = item->node()->traversePreviousNode(); node != list; node = node->traversePreviousNode()) {
-        RenderObject* renderer = node->renderer();
-        if (!renderer || !renderer->isListItem())
+    for (RenderObject* renderer = item->previousInPreOrder(); renderer != list->renderer(); renderer = renderer->previousInPreOrder()) {
+        if (!renderer->isListItem())
             continue;
-        Node* otherList = enclosingList(node);
+        Node* otherList = enclosingList(renderer);
         // This item is part of our current list, so it's what we're looking for.
         if (list == otherList)
             return toRenderListItem(renderer);
         // We found ourself inside another list; lets skip the rest of it.
-        // Use traverseNextNode() here because the other list itself may actually
+        // Use nextInPreOrder() here because the other list itself may actually
         // be a list item itself. We need to examine it, so we do this to counteract
-        // the traversePreviousNode() that will be done by the loop.
+        // the previousInPreOrder() that will be done by the loop.
         if (otherList)
-            node = otherList->traverseNextNode();
+            renderer = otherList->renderer()->nextInPreOrder();
     }
     return 0;
 }
@@ -113,7 +132,7 @@ inline int RenderListItem::calcValue() const
 {
     if (m_hasExplicitValue)
         return m_explicitValue;
-    Node* list = enclosingList(node());
+    Node* list = enclosingList(this);
     // FIXME: This recurses to a possible depth of the length of the list.
     // That's not good -- we need to change this to an iterative algorithm.
     if (RenderListItem* previousItem = previousListItem(list, this))
@@ -247,21 +266,30 @@ void RenderListItem::positionListMarker()
         int markerXPos;
         RootInlineBox* root = m_marker->inlineBoxWrapper()->root();
 
+        // FIXME: Inline flows in the line box hierarchy that have self-painting layers should act as cutoff points
+        // and really shouldn't keep propagating overflow up.  This won't really break anything other than repainting
+        // not being as tight as it could be though.
         if (style()->direction() == LTR) {
             int leftLineOffset = leftRelOffset(yOffset, leftOffset(yOffset, false), false);
             markerXPos = leftLineOffset - xOffset - paddingLeft() - borderLeft() + m_marker->marginLeft();
             m_marker->inlineBoxWrapper()->adjustPosition(markerXPos - markerOldX, 0);
-            if (markerXPos < root->leftOverflow()) {
-                root->setHorizontalOverflowPositions(markerXPos, root->rightOverflow());
-                adjustOverflow = true;
+            for (InlineFlowBox* box = m_marker->inlineBoxWrapper()->parent(); box; box = box->parent()) {
+                if (markerXPos < box->leftLayoutOverflow()) {
+                    box->setHorizontalOverflowPositions(markerXPos, box->rightLayoutOverflow(), box->leftVisualOverflow(), box->rightVisualOverflow());
+                    if (box == root)
+                        adjustOverflow = true;
+                }
             }
         } else {
             int rightLineOffset = rightRelOffset(yOffset, rightOffset(yOffset, false), false);
             markerXPos = rightLineOffset - xOffset + paddingRight() + borderRight() + m_marker->marginLeft();
             m_marker->inlineBoxWrapper()->adjustPosition(markerXPos - markerOldX, 0);
-            if (markerXPos + m_marker->width() > root->rightOverflow()) {
-                root->setHorizontalOverflowPositions(root->leftOverflow(), markerXPos + m_marker->width());
-                adjustOverflow = true;
+            for (InlineFlowBox* box = m_marker->inlineBoxWrapper()->parent(); box; box = box->parent()) {
+                if (markerXPos + m_marker->width() > box->rightLayoutOverflow()) {
+                    box->setHorizontalOverflowPositions(box->leftLayoutOverflow(), markerXPos + m_marker->width(), box->leftVisualOverflow(), box->rightVisualOverflow());
+                    if (box == root)
+                        adjustOverflow = true;
+                }
             }
         }
 
@@ -271,9 +299,9 @@ void RenderListItem::positionListMarker()
             do {
                 o = o->parentBox();
                 if (o->isRenderBlock())
-                    toRenderBlock(o)->addVisualOverflow(markerRect);
+                    toRenderBlock(o)->addLayoutOverflow(markerRect);
                 markerRect.move(-o->x(), -o->y());
-            } while (o != this);
+            } while (o != this && !o->hasSelfPaintingLayer());
         }
     }
 }
@@ -315,6 +343,8 @@ void RenderListItem::explicitValueChanged()
 
 void RenderListItem::setExplicitValue(int value)
 {
+    ASSERT(node());
+
     if (m_hasExplicitValue && m_explicitValue == value)
         return;
     m_explicitValue = value;
@@ -325,6 +355,8 @@ void RenderListItem::setExplicitValue(int value)
 
 void RenderListItem::clearExplicitValue()
 {
+    ASSERT(node());
+
     if (!m_hasExplicitValue)
         return;
     m_hasExplicitValue = false;

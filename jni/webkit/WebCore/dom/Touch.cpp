@@ -25,7 +25,7 @@
 
 #include "config.h"
 
-#if ENABLE(TOUCH_EVENTS) // Android
+#if ENABLE(TOUCH_EVENTS)
 
 #include "Touch.h"
 
@@ -40,7 +40,7 @@ static int contentsX(Frame* frame)
     FrameView* frameView = frame->view();
     if (!frameView)
         return 0;
-    return frameView->scrollX();
+    return frameView->scrollX() / frame->pageZoomFactor();
 }
 
 static int contentsY(Frame* frame)
@@ -50,31 +50,20 @@ static int contentsY(Frame* frame)
     FrameView* frameView = frame->view();
     if (!frameView)
         return 0;
-    return frameView->scrollY();
+    return frameView->scrollY() / frame->pageZoomFactor();
 }
 
 Touch::Touch(Frame* frame, EventTarget* target, unsigned identifier, 
         int screenX, int screenY, int pageX, int pageY)
-    : m_frame(frame)
-    , m_target(target)
+    : m_target(target)
     , m_identifier(identifier)
-    , m_clientX(pageX - contentsX(m_frame.get()))
-    , m_clientY(pageY - contentsY(m_frame.get()))
+    , m_clientX(pageX - contentsX(frame))
+    , m_clientY(pageY - contentsY(frame))
     , m_screenX(screenX)
     , m_screenY(screenY)
     , m_pageX(pageX)
     , m_pageY(pageY)
 {
-}
-
-void Touch::updateLocation(int screenX, int screenY, int pageX, int pageY)
-{
-    m_clientX = pageX - contentsX(m_frame.get());
-    m_clientY = pageY - contentsY(m_frame.get());
-    m_screenX = screenX;
-    m_screenY = screenY;
-    m_pageX = pageX;
-    m_pageY = pageY;
 }
 
 } // namespace WebCore

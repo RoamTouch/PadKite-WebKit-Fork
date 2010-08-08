@@ -28,6 +28,7 @@
 
 #include "IntPoint.h"
 #include "PlatformString.h"
+#include "SerializedScriptValue.h"
 #include <wtf/OwnPtr.h>
 #include <wtf/PassOwnPtr.h>
 
@@ -36,14 +37,14 @@
 typedef struct objc_object* id;
 #endif
 
-#ifdef ANDROID_HISTORY_CLIENT
-#include "WebHistory.h"
-#endif
-
 #if PLATFORM(QT)
 #include <QVariant>
 #include <QByteArray>
 #include <QDataStream>
+#endif
+
+#if PLATFORM(ANDROID)
+#include "AndroidWebHistoryBridge.h"
 #endif
 
 namespace WebCore {
@@ -54,15 +55,11 @@ class FormData;
 class HistoryItem;
 class Image;
 class KURL;
-struct ResourceRequest;
+class ResourceRequest;
 
 typedef Vector<RefPtr<HistoryItem> > HistoryItemVector;
 
-#ifdef ANDROID_HISTORY_CLIENT
 extern void (*notifyHistoryItemChanged)(HistoryItem*);
-#else
-extern void (*notifyHistoryItemChanged)();
-#endif
 
 enum VisitCountBehavior {
     IncreaseVisitCount,
@@ -136,6 +133,12 @@ public:
     void setTitle(const String&);
     void setIsTargetItem(bool);
     
+    void setStateObject(PassRefPtr<SerializedScriptValue> object);
+    SerializedScriptValue* stateObject() const { return m_stateObject.get(); }
+
+    void setDocumentSequenceNumber(long long number) { m_documentSequenceNumber = number; }
+    long long documentSequenceNumber() const { return m_documentSequenceNumber; }
+    
     void setFormInfoFromRequest(const ResourceRequest&);
     void setFormData(PassRefPtr<FormData>);
     void setFormContentType(const String&);
@@ -183,14 +186,14 @@ public:
     QDataStream& saveState(QDataStream& out, int version) const;
 #endif
 
+#if PLATFORM(ANDROID)
+    void setBridge(AndroidWebHistoryBridge* bridge);
+    AndroidWebHistoryBridge* bridge() const;
+#endif
+
 #ifndef NDEBUG
     int showTree() const;
     int showTreeWithIndent(unsigned indentLevel) const;
-#endif
-    
-#ifdef ANDROID_HISTORY_CLIENT
-    void setBridge(android::WebHistoryItem* bridge) { m_bridge = adoptRef(bridge); }
-    android::WebHistoryItem* bridge() const { return m_bridge.get(); }
 #endif
 
     void adoptVisitCounts(Vector<int>& dailyCounts, Vector<int>& weeklyCounts);
@@ -239,6 +242,10 @@ private:
 
     OwnPtr<Vector<String> > m_redirectURLs;
 
+    // Support for HTML5 History
+    RefPtr<SerializedScriptValue> m_stateObject;
+    long long m_documentSequenceNumber;
+    
     // info used to repost form data
     RefPtr<FormData> m_formData;
     String m_formContentType;
@@ -252,14 +259,15 @@ private:
     RetainPtr<id> m_viewState;
     OwnPtr<HashMap<String, RetainPtr<id> > > m_transientProperties;
 #endif
-        
-#ifdef ANDROID_HISTORY_CLIENT
-    RefPtr<android::WebHistoryItem> m_bridge;
-#endif
 
 #if PLATFORM(QT)
     QVariant m_userData;
 #endif
+
+#if PLATFORM(ANDROID)
+    RefPtr<AndroidWebHistoryBridge> m_bridge;
+#endif
+
 }; //class HistoryItem
 
 } //namespace WebCore

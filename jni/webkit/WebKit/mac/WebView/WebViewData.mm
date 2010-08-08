@@ -57,6 +57,7 @@ int pluginDatabaseClientCount = 0;
     allowsUndo = YES;
     usesPageCache = YES;
     shouldUpdateWhileOffscreen = YES;
+    cssAnimationsSuspended = NO;
 
     zoomMultiplier = 1;
 
@@ -80,6 +81,9 @@ int pluginDatabaseClientCount = 0;
     ASSERT(applicationIsTerminating || !page);
     ASSERT(applicationIsTerminating || !preferences);
     ASSERT(!insertionPasteboard);
+#if ENABLE(VIDEO)
+    ASSERT(!fullscreenController);
+#endif
 
     [applicationNameForUserAgent release];
     [backgroundColor release];
@@ -99,6 +103,9 @@ int pluginDatabaseClientCount = 0;
 {
     ASSERT_MAIN_THREAD();
     ASSERT(!insertionPasteboard);
+#if ENABLE(VIDEO)
+    ASSERT(!fullscreenController);
+#endif
 
     [super finalize];
 }

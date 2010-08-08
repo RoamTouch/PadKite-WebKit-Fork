@@ -32,6 +32,7 @@
 #include "GraphicsContextPlatformPrivateCairo.h"
 #endif
 
+#include "AffineTransform.h"
 #include "BitmapInfo.h"
 #include "TransformationMatrix.h"
 #include "NotImplemented.h"
@@ -189,12 +190,12 @@ void GraphicsContextPlatformPrivate::translate(float x , float y)
     ModifyWorldTransform(m_hdc, &xform, MWT_LEFTMULTIPLY);
 }
 
-void GraphicsContextPlatformPrivate::concatCTM(const TransformationMatrix& transform)
+void GraphicsContextPlatformPrivate::concatCTM(const AffineTransform& transform)
 {
     if (!m_hdc)
         return;
 
-    XFORM xform = transform;
+    XFORM xform = transform.toTransformationMatrix();
     ModifyWorldTransform(m_hdc, &xform, MWT_LEFTMULTIPLY);
 }
 

@@ -1,268 +1,30 @@
-## 
 ##
-## Copyright 2007, The Android Open Source Project
+## Copyright 2009, The Android Open Source Project
 ##
-## Licensed under the Apache License, Version 2.0 (the "License");
-## you may not use this file except in compliance with the License.
-## You may obtain a copy of the License at
+## Redistribution and use in source and binary forms, with or without
+## modification, are permitted provided that the following conditions
+## are met:
+##  * Redistributions of source code must retain the above copyright
+##    notice, this list of conditions and the following disclaimer.
+##  * Redistributions in binary form must reproduce the above copyright
+##    notice, this list of conditions and the following disclaimer in the
+##    documentation and/or other materials provided with the distribution.
 ##
-##     http://www.apache.org/licenses/LICENSE-2.0
-##
-## Unless required by applicable law or agreed to in writing, software
-## distributed under the License is distributed on an "AS IS" BASIS,
-## WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-## See the License for the specific language governing permissions and
-## limitations under the License.
+## THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
+## EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+## IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+## PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+## CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+## EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+## PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+## PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+## OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+## (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+## OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ##
 
-# This comment block is read by tools/webkitsync/diff.cpp
-# Don't remove it or move it. 
-#
-# The following files are intentionally not included
-# LOCAL_SRC_FILES_EXCLUDED := \
-#	DerivedSources.cpp \
-#	WebCorePrefix.cpp \
-# accessibility/*.cpp \
-#	bindings/js/JSCustomVersionChangeCallback.cpp \
-#	bindings/js/JSInspectorControllerCustom.cpp \
-#	bindings/js/JSXSLTProcessor*.cpp \
-#	bindings/js/*Gtk.cpp \
-#	bindings/js/*Qt.cpp \
-#	bindings/js/*Win.cpp \
-#	bindings/js/*Wx.cpp \
-#	bridge/test*.cpp \
-#	css/CSSGrammar.y \
-#	dom/Worker*.cpp \
-#	dom/XMLTokenizerQt.cpp \
-#	editing/BackForwardListChromium.cpp \
-#	editing/SmartReplace*.cpp \
-#	history/BackForwardListChromium.cpp \
-#	html/FileList.cpp \
-#   html/HTMLElementsAllInOne.cpp \
-#	loader/CachedXBLDocument.cpp \
-#	loader/CachedXSLStyleSheet.cpp \
-#	loader/FTP*.cpp \
-#	loader/UserStyleSheetLoader.cpp \
-#	loader/icon/IconDatabaseNone.cpp \
-#	page/AXObjectCache.cpp \
-#	page/Accessibility*.cpp \
-#	page/InspectorController.cpp \
-#	page/JavaScript*.cpp \
-#	platform/text/TextEncodingDetectorNone.cpp \
-#	platform/ThreadingNone.cpp \
-#	platform/graphics/FloatPoint3D.cpp \
-#	plugins/PluginDataNone.cpp \
-#	plugins/PluginPackageNone.cpp \
-#	plugins/PluginViewNone.cpp \
-#	rendering/RenderThemeChromium*.cpp \
-#	rendering/RenderThemeSafari.cpp \
-#	rendering/RenderThemeWin.cpp \
-#	svg/SVGAllInOne.cpp \
-#	xml/Access*.cpp \
-#	xml/NativeXPathNSResolver.cpp \
-#	xml/XPath* \
-#	xml/XSL*.cpp \
-
-# This comment block is read by tools/webkitsync/diff.cpp
-# Don't remove it or move it. 
-#
-# The following directory wildcard matches are intentionally not included
-# If an entry starts with '/', any subdirectory may match
-# If an entry starts with '^', the first directory must match
-# LOCAL_DIR_WILDCARD_EXCLUDED := \
-#	/cairo/* \
-#	/cf/* \
-#	/cg/* \
-#	/chromium/* \
-#	/curl/* \
-#	/gtk/* \
-#	/haiku/* \
-#	/image-decoders/* \
-#	^inspector/* \
-#	^ksvg2/* \
-#	^loader\/archive/* \
-#	/mac/* \
-#	^manual-tests/* \
-#	/objc/* \
-#	^platform\/graphics\/filters/* \
-#	^platform\/network\/soup/* \
-#	/qt/* \
-#	/skia/* \
-#	/symbian/* \
-#	/v8/* \
-#	/win/* \
-#	/wince/* \
-#	^wml/* \
-#	/wx/* \
-
-# This comment block is read by tools/webkitsync/diff.cpp
-# Don't remove it or move it. 
-# If you edit it, keep it in alphabetical order
-#
-# These files are Android extensions, or exclusion exceptions
-# LOCAL_ANDROID_SRC_FILES_INCLUDED := \
-#	dom/Touch*.cpp \
-#	platform/graphics/skia/NativeImageSkia.cpp \
-#	platform/image-decoders/skia/GIFImage*.cpp \
-
-# The remainder of the file is read by tools/webkitsync/diff.cpp
-# If you edit it, keep it in alphabetical order
 LOCAL_SRC_FILES := \
-	accessibility/AXObjectCache.cpp \
-	accessibility/AccessibilityARIAGrid.cpp \
-	accessibility/AccessibilityARIAGridCell.cpp \
-	accessibility/AccessibilityARIAGridRow.cpp \
-	accessibility/AccessibilityImageMapLink.cpp \
-	accessibility/AccessibilityList.cpp \
-	accessibility/AccessibilityListBox.cpp \
-	accessibility/AccessibilityListBoxOption.cpp \
-	accessibility/AccessibilityObject.cpp \
-	accessibility/AccessibilityRenderObject.cpp \
-	accessibility/AccessibilitySlider.cpp \
-	accessibility/AccessibilityTable.cpp \
-	accessibility/AccessibilityTableCell.cpp \
-	accessibility/AccessibilityTableColumn.cpp \
-	accessibility/AccessibilityTableHeaderContainer.cpp \
-	accessibility/AccessibilityTableRow.cpp \
-	bindings/js/GCController.cpp \
-	bindings/js/JSAbstractWorkerCustom.cpp \
-	bindings/js/JSAttrCustom.cpp \
-	bindings/js/JSAudioConstructor.cpp \
-	bindings/js/JSCDATASectionCustom.cpp \
-	bindings/js/JSCSSRuleCustom.cpp \
-	bindings/js/JSCSSStyleDeclarationCustom.cpp \
-	bindings/js/JSCSSValueCustom.cpp \
-	bindings/js/JSCanvasRenderingContext2DCustom.cpp \
-	bindings/js/JSClipboardCustom.cpp \
-	bindings/js/JSConsoleCustom.cpp \
-	bindings/js/JSCoordinatesCustom.cpp \
-	bindings/js/JSCustomPositionCallback.cpp \
-	bindings/js/JSCustomPositionErrorCallback.cpp \
-	bindings/js/JSCustomSQLStatementCallback.cpp \
-	bindings/js/JSCustomSQLStatementErrorCallback.cpp \
-	bindings/js/JSCustomSQLTransactionCallback.cpp \
-	bindings/js/JSCustomSQLTransactionErrorCallback.cpp \
-	bindings/js/JSCustomVoidCallback.cpp \
-	bindings/js/JSCustomXPathNSResolver.cpp \
-	bindings/js/JSDOMApplicationCacheCustom.cpp \
-	bindings/js/JSDOMBinding.cpp \
-	bindings/js/JSDOMGlobalObject.cpp \
-	bindings/js/JSDOMWindowBase.cpp \
-	bindings/js/JSDOMWindowCustom.cpp \
-	bindings/js/JSDOMWindowShell.cpp \
-	bindings/js/JSDataGridColumnListCustom.cpp \
-	bindings/js/JSDataGridDataSource.cpp \
-	bindings/js/JSDatabaseCustom.cpp \
-	bindings/js/JSDedicatedWorkerContextCustom.cpp \
-	bindings/js/JSDocumentCustom.cpp \
-	bindings/js/JSDocumentFragmentCustom.cpp \
-	bindings/js/JSElementCustom.cpp \
-	bindings/js/JSEventCustom.cpp \
-	bindings/js/JSEventListener.cpp \
-	bindings/js/JSEventTarget.cpp \
-	bindings/js/JSGeolocationCustom.cpp \
-	bindings/js/JSHTMLAllCollection.cpp \
-	bindings/js/JSHTMLAppletElementCustom.cpp \
-	bindings/js/JSHTMLCollectionCustom.cpp \
-	bindings/js/JSHTMLDataGridElementCustom.cpp \
-	bindings/js/JSHTMLDocumentCustom.cpp \
-	bindings/js/JSHTMLElementCustom.cpp \
-	bindings/js/JSHTMLEmbedElementCustom.cpp \
-	bindings/js/JSHTMLFormElementCustom.cpp \
-	bindings/js/JSHTMLFrameElementCustom.cpp \
-	bindings/js/JSHTMLFrameSetElementCustom.cpp \
-	bindings/js/JSHTMLIFrameElementCustom.cpp \
-	bindings/js/JSHTMLInputElementCustom.cpp \
-	bindings/js/JSHTMLObjectElementCustom.cpp \
-	bindings/js/JSHTMLOptionsCollectionCustom.cpp \
-	bindings/js/JSHTMLSelectElementCustom.cpp \
-	bindings/js/JSHistoryCustom.cpp \
-	bindings/js/JSImageConstructor.cpp \
-	bindings/js/JSImageDataCustom.cpp \
-	bindings/js/JSInspectedObjectWrapper.cpp \
-	bindings/js/JSInspectorBackendCustom.cpp \
-	bindings/js/JSInspectorCallbackWrapper.cpp \
-	bindings/js/JSJavaScriptCallFrameCustom.cpp \
-	bindings/js/JSLazyEventListener.cpp \
-	bindings/js/JSLocationCustom.cpp \
-	bindings/js/JSMessageChannelConstructor.cpp \
-	bindings/js/JSMessageChannelCustom.cpp \
-	bindings/js/JSMessagePortCustom.cpp \
-	bindings/js/JSMimeTypeArrayCustom.cpp \
-	bindings/js/JSNamedNodeMapCustom.cpp \
-	bindings/js/JSNamedNodesCollection.cpp \
-	bindings/js/JSNavigatorCustom.cpp \
-	bindings/js/JSNodeCustom.cpp \
-	bindings/js/JSNodeFilterCondition.cpp \
-	bindings/js/JSNodeFilterCustom.cpp \
-	bindings/js/JSNodeIteratorCustom.cpp \
-	bindings/js/JSNodeListCustom.cpp \
-	bindings/js/JSOptionConstructor.cpp \
-	bindings/js/JSPluginArrayCustom.cpp \
-	bindings/js/JSPluginCustom.cpp \
-	bindings/js/JSPluginElementFunctions.cpp \
-	bindings/js/JSQuarantinedObjectWrapper.cpp \
-	bindings/js/JSSQLResultSetRowListCustom.cpp \
-	bindings/js/JSSQLTransactionCustom.cpp \
-	bindings/js/JSSVGElementInstanceCustom.cpp \
-	bindings/js/JSSVGLengthCustom.cpp \
-	bindings/js/JSSVGMatrixCustom.cpp \
-	bindings/js/JSSVGPathSegCustom.cpp \
-	bindings/js/JSSVGPathSegListCustom.cpp \
-	bindings/js/JSSVGPointListCustom.cpp \
-	bindings/js/JSSVGTransformListCustom.cpp \
-	bindings/js/JSSharedWorkerConstructor.cpp \
-	bindings/js/JSSharedWorkerContextCustom.cpp \
-	bindings/js/JSSharedWorkerCustom.cpp \
-	bindings/js/JSStorageCustom.cpp \
-	bindings/js/JSStyleSheetCustom.cpp \
-	bindings/js/JSStyleSheetListCustom.cpp \
-	bindings/js/JSTextCustom.cpp \
-	bindings/js/JSTreeWalkerCustom.cpp \
-	bindings/js/JSWebKitCSSMatrixConstructor.cpp \
-	bindings/js/JSWebKitPointConstructor.cpp \
-	bindings/js/JSWebSocketConstructor.cpp \
-	bindings/js/JSWebSocketCustom.cpp \
-	bindings/js/JSWorkerConstructor.cpp \
-	bindings/js/JSWorkerContextBase.cpp \
-	bindings/js/JSWorkerContextCustom.cpp \
-	bindings/js/JSWorkerCustom.cpp \
-	bindings/js/JSXMLHttpRequestConstructor.cpp \
-	bindings/js/JSXMLHttpRequestCustom.cpp \
-	bindings/js/JSXMLHttpRequestUploadCustom.cpp \
-	bindings/js/JSXSLTProcessorConstructor.cpp \
-	bindings/js/JSXSLTProcessorCustom.cpp \
-	bindings/js/ScheduledAction.cpp \
-	bindings/js/ScriptArray.cpp \
-	bindings/js/ScriptCachedFrameData.cpp \
-	bindings/js/ScriptCallFrame.cpp \
-	bindings/js/ScriptCallStack.cpp \
-	bindings/js/ScriptController.cpp \
-	bindings/js/ScriptControllerAndroid.cpp \
-	bindings/js/ScriptEventListener.cpp \
-	bindings/js/ScriptFunctionCall.cpp \
-	bindings/js/ScriptObject.cpp \
-	bindings/js/ScriptObjectQuarantine.cpp \
-	bindings/js/ScriptState.cpp \
-	bindings/js/ScriptValue.cpp \
-	bindings/js/WorkerScriptController.cpp \
-	\
-	bridge/IdentifierRep.cpp \
-	bridge/NP_jsobject.cpp \
-	bridge/c/c_class.cpp \
-	bridge/c/c_instance.cpp \
-	bridge/c/c_runtime.cpp \
-	bridge/c/c_utility.cpp \
-	bridge/jni/jni_class.cpp \
-	bridge/jni/jni_instance.cpp \
-	bridge/jni/jni_runtime.cpp \
-	bridge/jni/jni_utility.cpp \
-	bridge/npruntime.cpp \
-	bridge/runtime.cpp \
-	bridge/runtime_array.cpp \
-	bridge/runtime_method.cpp \
-	bridge/runtime_object.cpp \
-	bridge/runtime_root.cpp \
+	bindings/generic/BindingSecurityBase.cpp \
 	\
 	css/CSSBorderImageValue.cpp \
 	css/CSSCanvasValue.cpp \
@@ -344,13 +106,13 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	dom/CharacterData.cpp \
 	dom/CheckedRadioButtons.cpp \
 	dom/ChildNodeList.cpp \
-	dom/ClassNames.cpp \
 	dom/ClassNodeList.cpp \
 	dom/ClientRect.cpp \
 	dom/ClientRectList.cpp \
 	dom/Clipboard.cpp \
 	dom/ClipboardEvent.cpp \
 	dom/Comment.cpp \
+	dom/CompositionEvent.cpp \
 	dom/ContainerNode.cpp \
 	dom/DOMImplementation.cpp \
 	dom/Document.cpp \
@@ -388,6 +150,8 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	dom/OptionElement.cpp \
 	dom/OptionGroupElement.cpp \
 	dom/OverflowEvent.cpp \
+	dom/PageTransitionEvent.cpp \
+	dom/PopStateEvent.cpp \
 	dom/Position.cpp \
 	dom/PositionIterator.cpp \
 	dom/ProcessingInstruction.cpp \
@@ -399,6 +163,7 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	dom/ScriptExecutionContext.cpp \
 	dom/SelectElement.cpp \
 	dom/SelectorNodeList.cpp \
+	dom/SpaceSplitString.cpp \
 	dom/StaticNodeList.cpp \
 	dom/StyleElement.cpp \
 	dom/StyledElement.cpp \
@@ -474,14 +239,17 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	history/HistoryItem.cpp \
 	history/PageCache.cpp \
 	\
+	history/android/HistoryItemAndroid.cpp \
+	\
+	html/Blob.cpp \
 	html/CollectionCache.cpp \
-	html/DOMDataGridDataSource.cpp \
-	html/DataGridColumn.cpp \
-	html/DataGridColumnList.cpp \
+	html/DateComponents.cpp \
 	html/File.cpp \
 	html/FileList.cpp \
 	html/FormDataList.cpp \
+	html/HTMLAllCollection.cpp \
 	html/HTMLCollection.cpp \
+	html/HTMLDataListElement.cpp \
 	html/HTMLDocument.cpp \
 	html/HTMLElementsAllInOne.cpp \
 	html/HTMLFormCollection.cpp \
@@ -499,8 +267,11 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	html/ValidityState.cpp \
 	\
 	html/canvas/CanvasGradient.cpp \
+	html/canvas/CanvasNumberArray.cpp \
+	html/canvas/CanvasObject.cpp \
 	html/canvas/CanvasPattern.cpp \
 	html/canvas/CanvasPixelArray.cpp \
+	html/canvas/CanvasRenderingContext.cpp \
 	html/canvas/CanvasRenderingContext2D.cpp \
 	html/canvas/CanvasStyle.cpp \
 	\
@@ -512,17 +283,14 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	loader/CachedResourceClientWalker.cpp \
 	loader/CachedResourceHandle.cpp \
 	loader/CachedScript.cpp \
-	loader/CachedXBLDocument.cpp \
-	loader/CachedXSLStyleSheet.cpp \
 	loader/CrossOriginAccessControl.cpp \
 	loader/CrossOriginPreflightResultCache.cpp \
 	loader/DocLoader.cpp \
 	loader/DocumentLoader.cpp \
 	loader/DocumentThreadableLoader.cpp \
-	loader/FTPDirectoryDocument.cpp \
-	loader/FTPDirectoryParser.cpp \
 	loader/FormState.cpp \
 	loader/FrameLoader.cpp \
+	loader/HistoryController.cpp \
 	loader/ImageDocument.cpp \
 	loader/ImageLoader.cpp \
 	loader/MainResourceLoader.cpp \
@@ -531,8 +299,12 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	loader/NetscapePlugInStreamLoader.cpp \
 	loader/PlaceholderDocument.cpp \
 	loader/PluginDocument.cpp \
+	loader/PolicyCallback.cpp \
+	loader/PolicyChecker.cpp \
 	loader/ProgressTracker.cpp \
+	loader/RedirectScheduler.cpp \
 	loader/Request.cpp \
+	loader/ResourceLoadNotifier.cpp \
 	loader/ResourceLoader.cpp \
 	loader/SubresourceLoader.cpp \
 	loader/TextDocument.cpp \
@@ -557,6 +329,7 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	\
 	page/BarInfo.cpp \
 	page/Chrome.cpp \
+	page/Connection.cpp \
 	page/Console.cpp \
 	page/ContextMenuController.cpp \
 	page/DOMSelection.cpp \
@@ -569,25 +342,28 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	page/FrameTree.cpp \
 	page/FrameView.cpp \
 	page/Geolocation.cpp \
+	page/GeolocationPositionCache.cpp \
 	page/History.cpp \
 	page/Location.cpp \
 	page/MouseEventWithHitTestResults.cpp \
 	page/Navigator.cpp \
 	page/NavigatorBase.cpp \
+	page/OriginAccessEntry.cpp \
 	page/Page.cpp \
 	page/PageGroup.cpp \
 	page/PageGroupLoadDeferrer.cpp \
+	page/PluginHalter.cpp \
 	page/PrintContext.cpp \
 	page/Screen.cpp \
 	page/SecurityOrigin.cpp \
 	page/Settings.cpp \
+	page/UserContentURLPattern.cpp \
 	page/WindowFeatures.cpp \
 	page/WorkerNavigator.cpp \
 	page/XSSAuditor.cpp \
 	\
 	page/android/DragControllerAndroid.cpp \
 	page/android/EventHandlerAndroid.cpp \
-	page/android/InspectorControllerAndroid.cpp \
 	\
 	page/animation/AnimationBase.cpp \
 	page/animation/AnimationController.cpp \
@@ -627,10 +403,14 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	platform/android/FileChooserAndroid.cpp \
 	platform/android/FileSystemAndroid.cpp \
 	platform/android/GeolocationServiceAndroid.cpp \
+	platform/android/GeolocationServiceBridge.cpp \
 	platform/android/KeyEventAndroid.cpp \
 	platform/android/LocalizedStringsAndroid.cpp \
+	platform/android/PlatformTouchEventAndroid.cpp \
+	platform/android/PlatformTouchPointAndroid.cpp \
 	platform/android/PopupMenuAndroid.cpp \
 	platform/android/RenderThemeAndroid.cpp \
+	platform/android/PackageNotifier.cpp \
 	platform/android/ScreenAndroid.cpp \
 	platform/android/ScrollViewAndroid.cpp \
 	platform/android/SearchPopupMenuAndroid.cpp \
@@ -666,7 +446,6 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	platform/graphics/GraphicsLayer.cpp \
 	platform/graphics/GraphicsTypes.cpp \
 	platform/graphics/Image.cpp \
-	platform/graphics/ImageBuffer.cpp \
 	platform/graphics/IntRect.cpp \
 	platform/graphics/MediaPlayer.cpp \
 	platform/graphics/Path.cpp \
@@ -678,6 +457,7 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	platform/graphics/StringTruncator.cpp \
 	platform/graphics/WidthIterator.cpp \
 	\
+	platform/graphics/android/AndroidAnimation.cpp \
 	platform/graphics/android/BitmapAllocatorAndroid.cpp \
 	platform/graphics/android/FontAndroid.cpp \
 	platform/graphics/android/FontCacheAndroid.cpp \
@@ -687,9 +467,11 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	platform/graphics/android/GlyphMapAndroid.cpp \
 	platform/graphics/android/GradientAndroid.cpp \
 	platform/graphics/android/GraphicsContextAndroid.cpp \
+	platform/graphics/android/GraphicsLayerAndroid.cpp \
 	platform/graphics/android/ImageAndroid.cpp \
 	platform/graphics/android/ImageBufferAndroid.cpp \
 	platform/graphics/android/ImageSourceAndroid.cpp \
+	platform/graphics/android/LayerAndroid.cpp \
 	platform/graphics/android/PathAndroid.cpp \
 	platform/graphics/android/PatternAndroid.cpp \
 	platform/graphics/android/PlatformGraphicsContext.cpp \
@@ -713,6 +495,7 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	platform/graphics/skia/SkiaUtils.cpp \
 	platform/graphics/skia/TransformationMatrixSkia.cpp \
 	\
+	platform/graphics/transforms/AffineTransform.cpp \
 	platform/graphics/transforms/Matrix3DTransformOperation.cpp \
 	platform/graphics/transforms/MatrixTransformOperation.cpp \
 	platform/graphics/transforms/PerspectiveTransformOperation.cpp \
@@ -723,6 +506,7 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	platform/graphics/transforms/TransformationMatrix.cpp \
 	platform/graphics/transforms/TranslateTransformOperation.cpp \
 	\
+	platform/image-decoders/ImageDecoder.cpp \
 	platform/image-decoders/skia/ImageDecoderSkia.cpp \
 	platform/image-decoders/gif/GIFImageDecoder.cpp \
 	platform/image-decoders/gif/GIFImageReader.cpp \
@@ -731,6 +515,7 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	\
 	platform/network/AuthenticationChallengeBase.cpp \
 	platform/network/Credential.cpp \
+	platform/network/CredentialStorage.cpp \
 	platform/network/FormData.cpp \
 	platform/network/FormDataBuilder.cpp \
 	platform/network/HTTPHeaderMap.cpp \
@@ -742,9 +527,10 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	platform/network/ResourceRequestBase.cpp \
 	platform/network/ResourceResponseBase.cpp \
 	\
-	platform/network/android/Cookie.cpp \
-	platform/network/android/ResourceHandleAndroid.cpp \
+	platform/network/android/CookieJarAndroid.cpp \
 	platform/network/android/NetworkStateNotifierAndroid.cpp \
+	platform/network/android/ResourceHandleAndroid.cpp \
+	platform/network/android/ResourceRequestAndroid.cpp \
 	\
 	platform/posix/FileSystemPOSIX.cpp \
 	\
@@ -764,7 +550,7 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	platform/text/String.cpp \
 	platform/text/StringBuilder.cpp \
 	platform/text/StringImpl.cpp \
-	platform/text/TextBoundariesICU.cpp \
+	platform/text/TextBoundaries.cpp \
 	platform/text/TextBreakIteratorICU.cpp \
 	platform/text/TextCodec.cpp \
 	platform/text/TextCodecICU.cpp \
@@ -785,7 +571,6 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	plugins/PluginArray.cpp \
 	plugins/PluginData.cpp \
 	plugins/PluginDatabase.cpp \
-	plugins/PluginDebug.cpp \
 	plugins/PluginInfoStore.cpp \
 	plugins/PluginMainThreadScheduler.cpp \
 	plugins/PluginPackage.cpp \
@@ -798,6 +583,7 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	plugins/android/PluginViewAndroid.cpp \
 	\
 	rendering/AutoTableLayout.cpp \
+	rendering/BidiRun.cpp \
 	rendering/CounterNode.cpp \
 	rendering/EllipsisBox.cpp \
 	rendering/FixedTableLayout.cpp \
@@ -817,7 +603,7 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	rendering/RenderBoxModelObject.cpp \
 	rendering/RenderButton.cpp \
 	rendering/RenderCounter.cpp \
-	rendering/RenderDataGrid.cpp \
+	rendering/RenderEmbeddedObject.cpp \
 	rendering/RenderFieldset.cpp \
 	rendering/RenderFileUploadControl.cpp \
 	rendering/RenderFlexibleBox.cpp \
@@ -845,6 +631,10 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	rendering/RenderPath.cpp \
 	rendering/RenderReplaced.cpp \
 	rendering/RenderReplica.cpp \
+	rendering/RenderRuby.cpp \
+	rendering/RenderRubyBase.cpp \
+	rendering/RenderRubyRun.cpp \
+	rendering/RenderRubyText.cpp
 
 ifeq ($(ENABLE_SVG), true)
 LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
@@ -857,6 +647,7 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	rendering/RenderSVGInlineText.cpp \
 	rendering/RenderSVGModelObject.cpp \
 	rendering/RenderSVGRoot.cpp \
+	rendering/RenderSVGShadowTreeRootContainer.cpp \
 	rendering/RenderSVGTSpan.cpp \
 	rendering/RenderSVGText.cpp \
 	rendering/RenderSVGTextPath.cpp \
@@ -892,9 +683,11 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	rendering/SVGCharacterLayoutInfo.cpp \
 	rendering/SVGInlineFlowBox.cpp \
 	rendering/SVGInlineTextBox.cpp \
+	rendering/SVGMarkerLayoutInfo.cpp \
 	rendering/SVGRenderSupport.cpp \
 	rendering/SVGRenderTreeAsText.cpp \
-	rendering/SVGRootInlineBox.cpp
+	rendering/SVGRootInlineBox.cpp \
+	rendering/SVGShadowTreeElements.cpp
 endif
 
 LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
@@ -947,10 +740,13 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	storage/SQLResultSetRowList.cpp \
 	storage/SQLStatement.cpp \
 	storage/SQLTransaction.cpp \
+	storage/SQLTransactionClient.cpp \
+	storage/SQLTransactionCoordinator.cpp \
 	storage/Storage.cpp \
 	storage/StorageAreaImpl.cpp \
 	storage/StorageAreaSync.cpp \
 	storage/StorageEvent.cpp \
+	storage/StorageEventDispatcher.cpp \
 	storage/StorageMap.cpp \
 	storage/StorageNamespace.cpp \
 	storage/StorageNamespaceImpl.cpp \
@@ -975,7 +771,6 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	svg/SVGColor.cpp \
 	svg/SVGComponentTransferFunctionElement.cpp \
 	svg/SVGCursorElement.cpp \
-	svg/SVGDefinitionSrcElement.cpp \
 	svg/SVGDefsElement.cpp \
 	svg/SVGDescElement.cpp \
 	svg/SVGDocument.cpp \
@@ -1112,7 +907,6 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	svg/graphics/filters/SVGFEDiffuseLighting.cpp \
 	svg/graphics/filters/SVGFEDisplacementMap.cpp \
 	svg/graphics/filters/SVGFEFlood.cpp \
-	svg/graphics/filters/SVGFEGaussianBlur.cpp \
 	svg/graphics/filters/SVGFEImage.cpp \
 	svg/graphics/filters/SVGFEMerge.cpp \
 	svg/graphics/filters/SVGFEMorphology.cpp \
@@ -1126,8 +920,6 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 endif
 
 LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
-	websockets/WebSocket.cpp \
-	\
 	workers/AbstractWorker.cpp \
 	workers/DedicatedWorkerContext.cpp \
 	workers/DedicatedWorkerThread.cpp \
@@ -1144,7 +936,6 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	workers/WorkerThread.cpp \
 	\
 	xml/DOMParser.cpp \
-	xml/NativeXPathNSResolver.cpp \
 	xml/XMLHttpRequest.cpp \
 	xml/XMLHttpRequestUpload.cpp \
 	xml/XMLSerializer.cpp

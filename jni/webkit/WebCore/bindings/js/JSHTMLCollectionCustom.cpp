@@ -23,12 +23,14 @@
 #include "AtomicString.h"
 #include "HTMLCollection.h"
 #include "HTMLOptionsCollection.h"
+#include "HTMLAllCollection.h"
+#include "JSDOMBinding.h"
 #include "JSHTMLAllCollection.h"
 #include "JSHTMLOptionsCollection.h"
-#include "JSNamedNodesCollection.h"
 #include "JSNode.h"
+#include "JSNodeList.h"
 #include "Node.h"
-#include "JSDOMBinding.h"
+#include "StaticNodeList.h"
 #include <wtf/Vector.h>
 
 using namespace JSC;
@@ -42,11 +44,13 @@ static JSValue getNamedItems(ExecState* exec, JSHTMLCollection* collection, cons
 
     if (namedItems.isEmpty())
         return jsUndefined();
-
     if (namedItems.size() == 1)
         return toJS(exec, collection->globalObject(), namedItems[0].get());
 
-    return new (exec) JSNamedNodesCollection(exec, collection->globalObject(), namedItems);
+    // FIXME: HTML5 specifies that this should be a DynamicNodeList.
+    // FIXME: HTML5 specifies that non-HTMLOptionsCollection collections should return
+    // the first matching item instead of a NodeList.
+    return toJS(exec, collection->globalObject(), StaticNodeList::adopt(namedItems).get());
 }
 
 // HTMLCollections are strange objects, they support both get and call,
@@ -130,7 +134,7 @@ JSValue toJS(ExecState* exec, JSDOMGlobalObject* globalObject, HTMLCollection* c
     if (!collection)
         return jsNull();
 
-    DOMObject* wrapper = getCachedDOMObjectWrapper(exec->globalData(), collection);
+    DOMObject* wrapper = getCachedDOMObjectWrapper(exec, collection);
 
     if (wrapper)
         return wrapper;
@@ -140,7 +144,6 @@ JSValue toJS(ExecState* exec, JSDOMGlobalObject* globalObject, HTMLCollection* c
             wrapper = CREATE_DOM_OBJECT_WRAPPER(exec, globalObject, HTMLOptionsCollection, collection);
             break;
         case DocAll:
-            typedef HTMLCollection HTMLAllCollection;
             wrapper = CREATE_DOM_OBJECT_WRAPPER(exec, globalObject, HTMLAllCollection, collection);
             break;
         default:

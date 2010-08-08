@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -44,6 +44,7 @@ class Document;
 class Frame;
 class HTMLAreaElement;
 class InlineTextBox;
+class LayerAndroid;
 class Node;
 class PlatformGraphicsContext;
 class RenderFlow;
@@ -77,19 +78,20 @@ public:
         FOUND_COMPLETE
     };
     CacheBuilder();
-    void allowAllTextDetection() { mAllowableTypes = ALL_CACHEDNODETYPES; }
+    void allowAllTextDetection() { mAllowableTypes = ALL_CACHEDNODE_BITS; }
     void buildCache(CachedRoot* root);
     static bool ConstructPartRects(Node* node, const IntRect& bounds, 
         IntRect* focusBounds, int x, int y, WTF::Vector<IntRect>* result);
     Node* currentFocus() const;
-    void disallowAddressDetection() { mAllowableTypes = (CachedNodeType) (
-        mAllowableTypes & ~ADDRESS_CACHEDNODETYPE); }
-    void disallowEmailDetection() { mAllowableTypes = (CachedNodeType) (
-        mAllowableTypes & ~EMAIL_CACHEDNODETYPE); }
-    void disallowPhoneDetection() { mAllowableTypes = (CachedNodeType) (
-        mAllowableTypes & ~PHONE_CACHEDNODETYPE); }
+    void disallowAddressDetection() { mAllowableTypes = (CachedNodeBits) (
+        mAllowableTypes & ~ADDRESS_CACHEDNODE_BIT); }
+    void disallowEmailDetection() { mAllowableTypes = (CachedNodeBits) (
+        mAllowableTypes & ~EMAIL_CACHEDNODE_BIT); }
+    void disallowPhoneDetection() { mAllowableTypes = (CachedNodeBits) (
+        mAllowableTypes & ~PHONE_CACHEDNODE_BIT); }
     static FoundState FindAddress(const UChar* , unsigned length, int* start,
         int* end, bool caseInsensitive);
+    static IntRect getAreaRect(const HTMLAreaElement* area);
     static void GetGlobalOffset(Frame* , int* x, int * y);
     static void GetGlobalOffset(Node* , int* x, int * y);
     static bool validNode(Frame* startFrame, void* framePtr, void* nodePtr);
@@ -126,7 +128,6 @@ private:
         BoundsPart mPart;
         WTF::Vector<BoundsPart> mParts;   
         char mStore[NAVIGATION_MAX_PHONE_LENGTH + 1];
-        CachedNodeType mStoreType;
         int mPartIndex;
         Node* mNode;
         Node* mFinalNode;
@@ -146,6 +147,7 @@ private:
         const UChar* mZipStart;
         const UChar* mBases[16]; // FIXME: random guess, maybe too small, maybe too big
         const UChar* mWords[16];
+        const UChar* mEnds[16];
         const UChar* mStarts[16]; // text is not necessarily contiguous
         const char* mStates;
         int mEndWord;
@@ -165,25 +167,43 @@ private:
         bool mInitialized;
         bool mContinuationNode;
         bool mCaseInsensitive;
+        void shiftWords(int shift) {
+            memmove(mBases, &mBases[shift], (sizeof(mBases) /
+                sizeof(mBases[0]) - shift) * sizeof(mBases[0]));
+            memmove(mWords, &mWords[shift], (sizeof(mWords) /
+                sizeof(mWords[0]) - shift) * sizeof(mWords[0]));
+            memmove(mEnds, &mEnds[shift], (sizeof(mEnds) /
+                sizeof(mEnds[0]) - shift) * sizeof(mEnds[0]));
+            memmove(mStarts, &mStarts[shift], (sizeof(mStarts) /
+                sizeof(mStarts[0]) - shift) * sizeof(mStarts[0]));
+        }
+        void newWord(const UChar* baseChars, const UChar* chars) {
+            mBases[mWordCount] = baseChars;
+            mWords[mWordCount] = chars;
+            mEnds[mWordCount] = mEnd;
+            mStarts[mWordCount] = mCurrentStart;
+        }
     };
-    struct ClipColumnTracker {
-        IntRect mBounds;
+    struct Tracker {
         Node* mLastChild;
+    };
+    struct ClipColumnTracker : Tracker {
         Node* mNode;
+        IntRect mBounds;
         WTF::Vector<IntRect>* mColumns;
         int mColumnGap;
         TextDirection mDirection;
         bool mHasClip;
     };
-    struct TabIndexTracker {
-        int mTabIndex;
-        Node* mLastChild;
+    struct LayerTracker : Tracker {
+        LayerAndroid* mLayer;
+        IntRect mBounds;
     };
-    struct Tracker {
-        int mCachedNodeIndex;
+    struct TabIndexTracker : Tracker {
         int mTabIndex;
-        Node* mLastChild;
-        Node* mParentLastChild;
+    };
+    struct FocusTracker : TabIndexTracker {
+        int mCachedNodeIndex;
         bool mSomeParentTakesFocus;
     };
     void adjustForColumns(const ClipColumnTracker& track, 
@@ -196,7 +216,7 @@ private:
     void BuildFrame(Frame* root, Frame* frame,
         CachedRoot* cachedRoot, CachedFrame* cachedFrame);
     bool CleanUpContainedNodes(CachedFrame* cachedFrame, 
-        const Tracker* last, int lastChildIndex);
+        const FocusTracker* last, int lastChildIndex);
     static bool ConstructTextRect(Text* textNode,
         InlineTextBox* textBox, int start, int relEnd, int x, int y, 
         IntRect* focusBounds, const IntRect& clip, WTF::Vector<IntRect>* result);
@@ -212,7 +232,6 @@ private:
     static Frame* FrameAnd(CacheBuilder* focusNav);
     static Frame* FrameAnd(const CacheBuilder* focusNav);
     static CacheBuilder* Builder(Frame* );
-    static IntRect getAreaRect(const HTMLAreaElement* area);
     static Frame* HasFrame(Node* );
     static bool HasOverOrOut(Node* );
     static bool HasTriggerEvent(Node* );
@@ -223,9 +242,13 @@ private:
     static bool IsRealNode(Frame* , Node* );
     int overlap(int left, int right); // returns distance scale factor as 16.16 scalar
     bool setData(CachedFrame* );
+#if USE(ACCELERATED_COMPOSITING)
+    void TrackLayer(WTF::Vector<LayerTracker>& layerTracker,
+        RenderObject* nodeRenderer, Node* lastChild, int offsetX, int offsetY);
+#endif
     Node* tryFocus(Direction direction);
     Node* trySegment(Direction direction, int mainStart, int mainEnd);
-    CachedNodeType mAllowableTypes;
+    CachedNodeBits mAllowableTypes;
 #if DUMP_NAV_CACHE
 public:
     class Debug {

@@ -131,10 +131,10 @@ SkColor SkPMColorToColor(SkPMColor pm)
 {
     if (0 == pm)
         return 0;
-
+    
     unsigned a = SkGetPackedA32(pm);
     uint32_t scale = (255 << 16) / a;
-
+    
     return SkColorSetARGB(a,
                           InvScaleByte(SkGetPackedR32(pm), scale),
                           InvScaleByte(SkGetPackedG32(pm), scale),
@@ -200,8 +200,13 @@ bool SkPathContainsPoint(SkPath* originalPath, const FloatPoint& point, SkPath::
 
     SkRect bounds = originalPath->getBounds();
 
-    // We can immediately return false if the point is outside the bounding rect
-    if (!bounds.contains(SkFloatToScalar(point.x()), SkFloatToScalar(point.y())))
+    // We can immediately return false if the point is outside the bounding
+    // rect.  We don't use bounds.contains() here, since it would exclude
+    // points on the right and bottom edges of the bounding rect, and we want
+    // to include them.
+    SkScalar fX = SkFloatToScalar(point.x());
+    SkScalar fY = SkFloatToScalar(point.y());
+    if (fX < bounds.fLeft || fX > bounds.fRight || fY < bounds.fTop || fY > bounds.fBottom)
         return false;
 
     originalPath->setFillType(ft);
@@ -225,7 +230,7 @@ bool SkPathContainsPoint(SkPath* originalPath, const FloatPoint& point, SkPath::
 
     int x = static_cast<int>(floorf(point.x() / scale));
     int y = static_cast<int>(floorf(point.y() / scale));
-    clip.setRect(x, y, x + 1, y + 1);
+    clip.setRect(x - 1, y - 1, x + 1, y + 1);
 
     bool contains = rgn.setPath(*path, clip);
 

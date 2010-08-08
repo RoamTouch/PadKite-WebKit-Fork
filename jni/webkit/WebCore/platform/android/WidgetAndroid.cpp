@@ -49,9 +49,8 @@ Widget::~Widget()
 
 IntRect Widget::frameRect() const
 {
-    // FIXME: use m_frame instead?
     if (!platformWidget())
-        return IntRect(0, 0, 0, 0);
+        return m_frame;
     return platformWidget()->getBounds();
 }
 
@@ -95,8 +94,8 @@ void Widget::hide()
 
 void Widget::setFrameRect(const IntRect& rect)
 {
-    // FIXME: set m_frame instead?
-    // platformWidget() is NULL when called from Scrollbar
+    m_frame = rect;
+    // platformWidget() is 0 when called from Scrollbar
     if (!platformWidget())
         return;
     platformWidget()->setLocation(rect.x(), rect.y());

@@ -28,36 +28,34 @@
 
 #include "NPV8Object.h"
 
-#if PLATFORM(CHROMIUM)
-// TODO(andreip): upstream
-#include "ChromiumBridge.h"
-#endif
+#include "PlatformBridge.h"
 #include "DOMWindow.h"
 #include "Frame.h"
 #include "OwnArrayPtr.h"
 #include "PlatformString.h"
 #include "ScriptController.h"
-#include "V8CustomBinding.h"
 #include "V8GCController.h"
 #include "V8Helpers.h"
+#include "V8Index.h"
 #include "V8NPUtils.h"
 #include "V8Proxy.h"
-#if PLATFORM(CHROMIUM)
-#include "bindings/npruntime.h"
-#else
-#include "bridge/npruntime.h"
-#endif
 #include "npruntime_impl.h"
 #include "npruntime_priv.h"
+
+#if PLATFORM(CHROMIUM)
+#include <bindings/npruntime.h>
+#else
+#include "npruntime.h"
+#endif
 
 #include <stdio.h>
 #include <v8.h>
 #include <wtf/StringExtras.h>
 
+using WebCore::npObjectInternalFieldCount;
 using WebCore::toV8Context;
 using WebCore::toV8Proxy;
 using WebCore::V8ClassIndex;
-using WebCore::V8Custom;
 using WebCore::V8DOMWrapper;
 using WebCore::V8GCController;
 using WebCore::V8Proxy;
@@ -100,6 +98,11 @@ static v8::Local<v8::String> npIdentifierToV8Identifier(NPIdentifier name)
     return v8::String::New(buffer);
 }
 
+NPObject* v8ObjectToNPObject(v8::Handle<v8::Object> object)
+{
+    return reinterpret_cast<NPObject*>(object->GetPointerFromInternalField(WebCore::v8DOMWrapperObjectIndex)); 
+}
+
 static NPClass V8NPObjectClass = { NP_CLASS_STRUCT_VERSION,
                                    allocV8NPObject,
                                    freeV8NPObject,
@@ -111,11 +114,11 @@ NPClass* npScriptObjectClass = &V8NPObjectClass;
 NPObject* npCreateV8ScriptObject(NPP npp, v8::Handle<v8::Object> object, WebCore::DOMWindow* root)
 {
     // Check to see if this object is already wrapped.
-    if (object->InternalFieldCount() == V8Custom::kNPObjectInternalFieldCount) {
-        v8::Local<v8::Value> typeIndex = object->GetInternalField(V8Custom::kDOMWrapperTypeIndex);
+    if (object->InternalFieldCount() == npObjectInternalFieldCount) {
+        v8::Local<v8::Value> typeIndex = object->GetInternalField(WebCore::v8DOMWrapperTypeIndex);
         if (typeIndex->IsNumber() && typeIndex->Uint32Value() == V8ClassIndex::NPOBJECT) {
 
-            NPObject* returnValue = V8DOMWrapper::convertToNativeObject<NPObject>(V8ClassIndex::NPOBJECT, object);
+            NPObject* returnValue = v8ObjectToNPObject(object);
             _NPN_RetainObject(returnValue);
             return returnValue;
         }
@@ -242,13 +245,7 @@ bool _NPN_InvokeDefault(NPP npp, NPObject* npObject, const NPVariant* arguments,
 
 bool _NPN_Evaluate(NPP npp, NPObject* npObject, NPString* npScript, NPVariant* result)
 {
-#if PLATFORM(CHROMIUM)
-    bool popupsAllowed = WebCore::ChromiumBridge::popupsAllowed(npp);
-#else
-    // TODO(andreip): Some of the binding code is specific to Chromium
-    // and we don't want it to Android. What is the preferred way to handle this?
-    bool popupsAllowed = false;
-#endif
+    bool popupsAllowed = WebCore::PlatformBridge::popupsAllowed(npp);
     return _NPN_EvaluateHelper(npp, popupsAllowed, npObject, npScript, result);
 }
 
@@ -276,7 +273,7 @@ bool _NPN_EvaluateHelper(NPP npp, bool popupsAllowed, NPObject* npObject, NPStri
         filename = "npscript";
 
     WebCore::String script = WebCore::String::fromUTF8(npScript->UTF8Characters, npScript->UTF8Length);
-    v8::Local<v8::Value> v8result = proxy->evaluate(WebCore::ScriptSourceCode(script, WebCore::KURL(filename)), 0);
+    v8::Local<v8::Value> v8result = proxy->evaluate(WebCore::ScriptSourceCode(script, WebCore::KURL(WebCore::ParsedURLString, filename)), 0);
 
     if (v8result.IsEmpty())
         return false;
@@ -413,8 +410,16 @@ bool _NPN_HasMethod(NPP npp, NPObject* npObject, NPIdentifier methodName)
 
 void _NPN_SetException(NPObject* npObject, const NPUTF8 *message)
 {
-    if (npObject->_class != npScriptObjectClass)
+    if (!npObject || npObject->_class != npScriptObjectClass) {
+        // We won't be able to find a proper scope for this exception, so just throw it.
+        // This is consistent with JSC, which throws a global exception all the time.
+#if PLATFORM(ANDROID)
+        // However, if there isn't a v8 context, throw the error away as there really isn't anything useful to do with it.
+        if (v8::Context::InContext())
+            V8Proxy::throwError(V8Proxy::GeneralError, message);
+#endif
         return;
+    }
     v8::HandleScope handleScope;
     v8::Handle<v8::Context> context = toV8Context(0, npObject);
     if (context.IsEmpty())
@@ -457,12 +462,7 @@ bool _NPN_Enumerate(NPP npp, NPObject* npObject, NPIdentifier** identifier, uint
         v8::Handle<v8::Value> enumeratorObj = script->Run();
         v8::Handle<v8::Function> enumerator = v8::Handle<v8::Function>::Cast(enumeratorObj);
         v8::Handle<v8::Value> argv[] = { obj };
-#if PLATFORM(ANDROID)
-// TODO(benm): implement an arry size function on android
-        v8::Local<v8::Value> propsObj = enumerator->Call(v8::Handle<v8::Object>::Cast(enumeratorObj), 1, argv);
-#else
         v8::Local<v8::Value> propsObj = enumerator->Call(v8::Handle<v8::Object>::Cast(enumeratorObj), ARRAYSIZE_UNSAFE(argv), argv);
-#endif
         if (propsObj.IsEmpty())
             return false;
 

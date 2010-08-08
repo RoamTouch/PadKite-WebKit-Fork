@@ -33,22 +33,11 @@
 
 #include "Document.h"
 #include "V8Binding.h"
-#include "V8CustomBinding.h"
 #include "V8Proxy.h"
 
 #if ENABLE(DATAGRID)
 
 namespace WebCore {
-
-INDEXED_PROPERTY_GETTER(DataGridColumnList)
-{
-    INC_STATS("DataGridColumnList.IndexedPropertyGetter");
-    DataGridColumnList* imp = V8DOMWrapper::convertToNativeObject<DataGridColumnList>(V8ClassIndex::DATAGRIDCOLUMNLIST, info.Holder());
-    DataGridColumn* result = imp->item(index);
-    if (!result)
-        return notHandledByInterceptor();
-    return V8DOMWrapper::convertToV8Object(V8ClassIndex::DATAGRIDCOLUMN, result);
-}
 
 NAMED_PROPERTY_GETTER(DataGridColumnList)
 {
@@ -63,11 +52,11 @@ NAMED_PROPERTY_GETTER(DataGridColumnList)
         return notHandledByInterceptor();
     
     // Finally, look up a column by name.
-    DataGridColumnList* imp = V8DOMWrapper::convertToNativeObject<DataGridColumnList>(V8ClassIndex::DATAGRIDCOLUMNLIST, info.Holder());
+    DataGridColumnList* imp = V8DataGridColumnList::toNative(info.Holder());
     DataGridColumn* result = imp->itemWithName(toWebCoreString(name));
     if (!result)
         return notHandledByInterceptor();
-    return V8DOMWrapper::convertToV8Object(V8ClassIndex::DATAGRIDCOLUMN, result);
+    return toV8(result);
 }
     
 } // namespace WebCore

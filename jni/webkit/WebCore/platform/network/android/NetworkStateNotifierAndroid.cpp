@@ -1,5 +1,5 @@
 /*
- * Copyright 2008, The Android Open Source Project
+ * Copyright 2009, The Android Open Source Project
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -34,6 +34,18 @@ void NetworkStateNotifier::networkStateChange(bool online)
         return;
     
     m_isOnLine = online;
+
+    if (m_networkStateChangedFunction)
+        m_networkStateChangedFunction();
+}
+
+// TODO: Upstream to webkit.org
+void NetworkStateNotifier::networkTypeChange(Connection::ConnectionType type)
+{
+    if (m_type == type)
+        return;
+
+    m_type = type;
 
     if (m_networkStateChangedFunction)
         m_networkStateChangedFunction();

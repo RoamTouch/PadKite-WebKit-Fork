@@ -45,13 +45,17 @@ QT_END_NAMESPACE
 #elif PLATFORM(CAIRO)
 struct _cairo_surface;
 typedef struct _cairo_surface cairo_surface_t;
-#elif PLATFORM(ANDROID) && PLATFORM(SGL)
+#elif PLATFORM(SKIA)
+#if PLATFORM(ANDROID)
 #include "SkString.h"
 class SkBitmapRef;
 class PrivateAndroidImageSourceRec;
-#elif PLATFORM(SKIA)
+#else
 class NativeImageSkia;
-#elif PLATFORM(WINCE)
+#endif
+#elif PLATFORM(HAIKU)
+class BBitmap;
+#elif OS(WINCE)
 #include "SharedBitmap.h"
 #endif
 
@@ -61,30 +65,21 @@ class IntSize;
 class SharedBuffer;
 class String;
 
-#if PLATFORM(WX)
-class ImageDecoder;
-typedef ImageDecoder* NativeImageSourcePtr;
-typedef const Vector<char>* NativeBytePtr;
-#if USE(WXGC)
-typedef wxGraphicsBitmap* NativeImagePtr;
-#else
-typedef wxBitmap* NativeImagePtr;
-#endif
-#elif PLATFORM(CG)
+#if PLATFORM(CG)
 typedef CGImageSourceRef NativeImageSourcePtr;
 typedef CGImageRef NativeImagePtr;
 #elif PLATFORM(QT)
 class ImageDecoderQt;
 typedef ImageDecoderQt* NativeImageSourcePtr;
 typedef QPixmap* NativeImagePtr;
-#elif PLATFORM(ANDROID)
-#if PLATFORM(SGL)
+#elif PLATFORM(SKIA)
+#if PLATFORM(ANDROID)
 class String;
 #ifdef ANDROID_ANIMATED_GIF
 class ImageDecoder;
 #endif
 struct NativeImageSourcePtr {
-    SkString m_url; 
+    SkString m_url;
     PrivateAndroidImageSourceRec* m_image;
 #ifdef ANDROID_ANIMATED_GIF
     ImageDecoder* m_gifDecoder;
@@ -92,23 +87,27 @@ struct NativeImageSourcePtr {
 };
 typedef const Vector<char>* NativeBytePtr;
 typedef SkBitmapRef* NativeImagePtr;
-#elif PLATFORM(SKIA) // ANDROID
+#else
 class ImageDecoder;
 typedef ImageDecoder* NativeImageSourcePtr;
 typedef NativeImageSkia* NativeImagePtr;
 #endif
+#else
+class ImageDecoder;
+typedef ImageDecoder* NativeImageSourcePtr;
+#if PLATFORM(WX)
+#if USE(WXGC)
+typedef wxGraphicsBitmap* NativeImagePtr;
+#else
+typedef wxBitmap* NativeImagePtr;
+#endif
 #elif PLATFORM(CAIRO)
-class ImageDecoder;
-typedef ImageDecoder* NativeImageSourcePtr;
 typedef cairo_surface_t* NativeImagePtr;
-#elif PLATFORM(SKIA)
-class ImageDecoder;
-typedef ImageDecoder* NativeImageSourcePtr;
-typedef NativeImageSkia* NativeImagePtr;
-#elif PLATFORM(WINCE)
-class ImageDecoder;
-typedef ImageDecoder* NativeImageSourcePtr;
+#elif PLATFORM(HAIKU)
+typedef BBitmap* NativeImagePtr;
+#elif OS(WINCE)
 typedef RefPtr<SharedBitmap> NativeImagePtr;
+#endif
 #endif
 
 const int cAnimationLoopOnce = -1;
@@ -167,10 +166,8 @@ public:
     bool frameIsCompleteAtIndex(size_t); // Whether or not the frame is completely decoded.
 
 #if PLATFORM(ANDROID)
-#if PLATFORM(SGL)
     void clearURL();
     void setURL(const String& url);
-#endif
 #endif
 private:
 #if PLATFORM(ANDROID)

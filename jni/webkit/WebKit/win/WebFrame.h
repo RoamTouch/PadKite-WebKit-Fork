@@ -158,6 +158,10 @@ public:
     virtual HRESULT STDMETHODCALLTYPE renderTreeAsExternalRepresentation(
         /* [retval][out] */ BSTR *result);
 
+    virtual HRESULT STDMETHODCALLTYPE counterValueForElementById(
+        /* [in] */ BSTR id,
+        /* [retval][out] */ BSTR *result);
+
     virtual HRESULT STDMETHODCALLTYPE scrollOffset(
         /* [retval][out] */ SIZE* offset);
 
@@ -224,6 +228,8 @@ public:
     virtual HRESULT STDMETHODCALLTYPE setExcludeFromTextSearch(
         /* [in] */ BOOL flag);
 
+    virtual HRESULT STDMETHODCALLTYPE reloadFromOrigin();
+
     virtual HRESULT STDMETHODCALLTYPE paintDocumentRectToContext(
         /* [in] */ RECT rect,
         /* [in] */ OLE_HANDLE deviceContext);
@@ -234,9 +240,17 @@ public:
 
     virtual HRESULT STDMETHODCALLTYPE pauseAnimation(BSTR animationName, IDOMNode*, double secondsFromNow, BOOL* animationWasRunning);
     virtual HRESULT STDMETHODCALLTYPE pauseTransition(BSTR propertyName, IDOMNode*, double secondsFromNow, BOOL* transitionWasRunning);
+    virtual HRESULT STDMETHODCALLTYPE pauseSVGAnimation(BSTR elementId, IDOMNode*, double secondsFromNow, BOOL* animationWasRunning);
     virtual HRESULT STDMETHODCALLTYPE numberOfActiveAnimations(UINT*);
 
     virtual HRESULT STDMETHODCALLTYPE isDisplayingStandaloneImage(BOOL*);
+
+    virtual HRESULT STDMETHODCALLTYPE allowsFollowingLink(
+        /* [in] */ BSTR url,
+        /* [retval][out] */ BOOL* result);
+
+    virtual HRESULT STDMETHODCALLTYPE stringByEvaluatingJavaScriptInScriptWorld(IWebScriptWorld*, JSObjectRef globalObjectRef, BSTR script, BSTR* evaluationResult);
+    virtual JSGlobalContextRef STDMETHODCALLTYPE globalContextForScriptWorld(IWebScriptWorld*);
 
     // IWebDocumentText
     virtual HRESULT STDMETHODCALLTYPE supportsTextEncoding( 
@@ -299,7 +313,7 @@ public:
     virtual WebCore::ObjectContentType objectContentType(const WebCore::KURL& url, const WebCore::String& mimeType);
     virtual WebCore::String overrideMediaType() const;
 
-    virtual void windowObjectCleared();
+    virtual void dispatchDidClearWindowObjectInWorld(WebCore::DOMWrapperWorld*);
     virtual void documentElementAvailable();
     virtual void didPerformFirstNavigation() const;
 
@@ -322,7 +336,7 @@ public:
     HRESULT formForElement(IDOMElement* element, IDOMElement** form);
     HRESULT controlsInForm(IDOMElement* form, IDOMElement** controls, int* cControls);
     HRESULT elementIsPassword(IDOMElement* element, bool* result);
-    HRESULT searchForLabelsBeforeElement(const BSTR* labels, int cLabels, IDOMElement* beforeElement, BSTR* result);
+    HRESULT searchForLabelsBeforeElement(const BSTR* labels, unsigned cLabels, IDOMElement* beforeElement, unsigned* resultDistance, BOOL* resultIsInCellAbove, BSTR* result);
     HRESULT matchLabelsAgainstElement(const BSTR* labels, int cLabels, IDOMElement* againstElement, BSTR* result);
     HRESULT canProvideDocumentSource(bool* result);
 

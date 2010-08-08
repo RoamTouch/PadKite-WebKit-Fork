@@ -136,6 +136,7 @@ bool parseXMLDocumentFragment(const String&, DocumentFragment*, Element* parent 
 
 #include "CachedResourceClient.h"
 #include "CachedResourceHandle.h"
+#include "MappedAttributeEntry.h"
 #include "SegmentedString.h"
 #include "StringHash.h"
 #include "Tokenizer.h"
@@ -143,7 +144,7 @@ bool parseXMLDocumentFragment(const String&, DocumentFragment*, Element* parent 
 #include <wtf/OwnPtr.h>
 
 #if USE(QXMLSTREAM)
-#include <QtXml/qxmlstream.h>
+#include <qxmlstream.h>
 #else
 #include <libxml/tree.h>
 #include <libxml/xmlstring.h>
@@ -161,10 +162,27 @@ namespace WebCore {
     class PendingCallbacks;
     class ScriptElement;
 
+#if !USE(QXMLSTREAM)
+    class XMLParserContext : public RefCounted<XMLParserContext> {
+    public:
+        static PassRefPtr<XMLParserContext> createMemoryParser(xmlSAXHandlerPtr, void*, const char*);
+        static PassRefPtr<XMLParserContext> createStringParser(xmlSAXHandlerPtr, void*);
+        ~XMLParserContext();
+        xmlParserCtxtPtr context() const { return m_context; }
+
+    private:
+        XMLParserContext(xmlParserCtxtPtr context)
+            : m_context(context)
+        {
+        }
+        xmlParserCtxtPtr m_context;
+    };
+#endif
+
     class XMLTokenizer : public Tokenizer, public CachedResourceClient {
     public:
         XMLTokenizer(Document*, FrameView* = 0);
-        XMLTokenizer(DocumentFragment*, Element*);
+        XMLTokenizer(DocumentFragment*, Element*, FragmentScriptingPermission);
         ~XMLTokenizer();
 
         enum ErrorType { warning, nonFatal, fatal };
@@ -230,10 +248,13 @@ public:
         void endDocument();
 #endif
     private:
-        friend bool parseXMLDocumentFragment(const String& chunk, DocumentFragment* fragment, Element* parent);
+        friend bool parseXMLDocumentFragment(const String&, DocumentFragment*, Element*, FragmentScriptingPermission);
 
         void initializeParserContext(const char* chunk = 0);
-        void setCurrentNode(Node*);
+
+        void pushCurrentNode(Node*);
+        void popCurrentNode();
+        void clearCurrentNodeStack();
 
         void insertErrorMessageBlock();
 
@@ -252,12 +273,13 @@ public:
         QXmlStreamReader m_stream;
         bool m_wroteText;
 #else
-        xmlParserCtxtPtr m_context;
+        xmlParserCtxtPtr context() const { return m_context ? m_context->context() : 0; };
+        RefPtr<XMLParserContext> m_context;
         OwnPtr<PendingCallbacks> m_pendingCallbacks;
         Vector<xmlChar> m_bufferedText;
 #endif
         Node* m_currentNode;
-        bool m_currentNodeIsReferenced;
+        Vector<Node*> m_currentNodeStack;
 
         bool m_sawError;
         bool m_sawXSLTransform;
@@ -287,6 +309,7 @@ public:
         typedef HashMap<String, String> PrefixForNamespaceMap;
         PrefixForNamespaceMap m_prefixToNamespaceMap;
         SegmentedString m_pendingSrc;
+        FragmentScriptingPermission m_scriptingPermission;
     };
 
 #if ENABLE(XSLT)
@@ -294,7 +317,7 @@ void* xmlDocPtrForString(DocLoader*, const String& source, const String& url);
 #endif
 
 HashMap<String, String> parseAttributes(const String&, bool& attrsOK);
-bool parseXMLDocumentFragment(const String&, DocumentFragment*, Element* parent = 0);
+bool parseXMLDocumentFragment(const String&, DocumentFragment*, Element* parent = 0, FragmentScriptingPermission = FragmentScriptingAllowed);
 
 } // namespace WebCore
 

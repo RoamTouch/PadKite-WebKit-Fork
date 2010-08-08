@@ -22,7 +22,7 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Message;
-import android.provider.Checkin;
+import android.util.EventLog;
 import java.lang.SecurityException;
 import java.util.Locale;
 
@@ -120,6 +120,21 @@ public class WebSettings {
         LOW
     }
 
+    /**
+     * The plugin state effects how plugins are treated on a page. ON means
+     * that any object will be loaded even if a plugin does not exist to handle
+     * the content. ON_DEMAND means that if there is a plugin installed that
+     * can handle the content, a placeholder is shown until the user clicks on
+     * the placeholder. Once clicked, the plugin will be enabled on the page.
+     * OFF means that all plugins will be turned off and any fallback content
+     * will be used.
+     */
+    public enum PluginState {
+        ON,
+        ON_DEMAND,
+        OFF
+    }
+
     // WebView associated with this WebSettings.
     private WebView mWebView;
     // BrowserFrame used to access the native frame pointer.
@@ -152,11 +167,12 @@ public class WebSettings {
     private int             mMinimumLogicalFontSize = 8;
     private int             mDefaultFontSize = 16;
     private int             mDefaultFixedFontSize = 13;
+    private int             mPageCacheCapacity = 0;
     private boolean         mLoadsImagesAutomatically = true;
     private boolean         mBlockNetworkImage = false;
     private boolean         mBlockNetworkLoads;
     private boolean         mJavaScriptEnabled = false;
-    private boolean         mPluginsEnabled = false;
+    private PluginState     mPluginState = PluginState.OFF;
     private boolean         mJavaScriptCanOpenWindowsAutomatically = false;
     private boolean         mUseDoubleTree = false;
     private boolean         mUseWideViewport = false;
@@ -172,6 +188,9 @@ public class WebSettings {
     private long            mAppCacheMaxSize = Long.MAX_VALUE;
     private String          mAppCachePath = "";
     private String          mDatabasePath = "";
+    // The WebCore DatabaseTracker only allows the database path to be set
+    // once. Keep track of when the path has been set.
+    private boolean         mDatabasePathHasBeenSet = false;
     private String          mGeolocationDatabasePath = "";
     // Don't need to synchronize the get/set methods as they
     // are basic types, also none of these values are used in
@@ -500,8 +519,8 @@ public class WebSettings {
      */
     public synchronized void setTextSize(TextSize t) {
         if (WebView.mLogEvent && mTextSize != t ) {
-            Checkin.updateStats(mContext.getContentResolver(),
-                    Checkin.Stats.Tag.BROWSER_TEXT_SIZE_CHANGE, 1, 0.0);
+            EventLog.writeEvent(EventLogTags.BROWSER_TEXT_SIZE_CHANGE,
+                    mTextSize.value, t.value);
         }
         mTextSize = t;
         postSync();
@@ -881,6 +900,20 @@ public class WebSettings {
     }
 
     /**
+     * Set the number of pages cached by the WebKit for the history navigation.
+     * @param size A non-negative integer between 0 (no cache) and 20 (max).
+     * @hide
+     */
+    public synchronized void setPageCacheCapacity(int size) {
+        if (size < 0) size = 0;
+        if (size > 20) size = 20;
+        if (mPageCacheCapacity != size) {
+            mPageCacheCapacity = size;
+            postSync();
+        }
+    }
+
+    /**
      * Tell the WebView to load image resources automatically.
      * @param flag True if the WebView should load images automatically.
      */
@@ -901,9 +934,12 @@ public class WebSettings {
     }
 
     /**
-     * Tell the WebView to block network image. This is only checked when
-     * getLoadsImagesAutomatically() is true.
-     * @param flag True if the WebView should block network image
+     * Tell the WebView to block network images. This is only checked when
+     * {@link #getLoadsImagesAutomatically} is true. If you set the value to
+     * false, images will automatically be loaded. Use this api to reduce
+     * bandwidth only. Use {@link #setBlockNetworkLoads} if possible.
+     * @param flag True if the WebView should block network images.
+     * @see #setBlockNetworkLoads
      */
     public synchronized void setBlockNetworkImage(boolean flag) {
         if (mBlockNetworkImage != flag) {
@@ -913,17 +949,21 @@ public class WebSettings {
     }
 
     /**
-     * Return true if the WebView will block network image. The default is false.
-     * @return True if the WebView blocks network image.
+     * Return true if the WebView will block network images. The default is
+     * false.
+     * @return True if the WebView blocks network images.
      */
     public synchronized boolean getBlockNetworkImage() {
         return mBlockNetworkImage;
     }
 
     /**
-     * @hide
-     * Tell the WebView to block all network load requests.
-     * @param flag True if the WebView should block all network loads
+     * Tell the WebView to block all network load requests. If you set the
+     * value to false, you must call {@link android.webkit.WebView#reload} to
+     * fetch remote resources. This flag supercedes the value passed to
+     * {@link #setBlockNetworkImage}.
+     * @param flag True if the WebView should block all network loads.
+     * @see android.webkit.WebView#reload
      */
     public synchronized void setBlockNetworkLoads(boolean flag) {
         if (mBlockNetworkLoads != flag) {
@@ -933,9 +973,8 @@ public class WebSettings {
     }
 
     /**
-     * @hide
-     * Return true if the WebView will block all network loads.
-     * The default is false.
+     * Return true if the WebView will block all network loads. The default is
+     * false.
      * @return True if the WebView blocks all network loads.
      */
     public synchronized boolean getBlockNetworkLoads() {
@@ -969,10 +1008,23 @@ public class WebSettings {
     /**
      * Tell the WebView to enable plugins.
      * @param flag True if the WebView should load plugins.
+     * @deprecated This method has been deprecated in favor of
+     *             {@link #setPluginState}
      */
     public synchronized void setPluginsEnabled(boolean flag) {
-        if (mPluginsEnabled != flag) {
-            mPluginsEnabled = flag;
+        setPluginState(PluginState.ON);
+    }
+
+    /**
+     * Tell the WebView to enable, disable, or have plugins on demand. On
+     * demand mode means that if a plugin exists that can handle the embedded
+     * content, a placeholder icon will be shown instead of the plugin. When
+     * the placeholder is clicked, the plugin will be enabled.
+     * @param state One of the PluginState values.
+     */
+    public synchronized void setPluginState(PluginState state) {
+        if (mPluginState != state) {
+            mPluginState = state;
             postSync();
         }
     }
@@ -985,13 +1037,15 @@ public class WebSettings {
 
     /**
      * Set the path to where database storage API databases should be saved.
+     * Nota that the WebCore Database Tracker only allows the path to be set once.
      * This will update WebCore when the Sync runs in the C++ side.
      * @param databasePath String path to the directory where databases should
      *     be saved. May be the empty string but should never be null.
      */
     public synchronized void setDatabasePath(String databasePath) {
-        if (databasePath != null && !databasePath.equals(mDatabasePath)) {
+        if (databasePath != null && !mDatabasePathHasBeenSet) {
             mDatabasePath = databasePath;
+            mDatabasePathHasBeenSet = true;
             postSync();
         }
     }
@@ -1004,7 +1058,8 @@ public class WebSettings {
      *     should never be null.
      */
     public synchronized void setGeolocationDatabasePath(String databasePath) {
-        if (databasePath != null && !databasePath.equals(mDatabasePath)) {
+        if (databasePath != null
+                && !databasePath.equals(mGeolocationDatabasePath)) {
             mGeolocationDatabasePath = databasePath;
             postSync();
         }
@@ -1131,9 +1186,18 @@ public class WebSettings {
     /**
      * Return true if plugins are enabled.
      * @return True if plugins are enabled.
+     * @deprecated This method has been replaced by {@link #getPluginState}
      */
     public synchronized boolean getPluginsEnabled() {
-        return mPluginsEnabled;
+        return mPluginState == PluginState.ON;
+    }
+
+    /**
+     * Return the current plugin state.
+     * @return A value corresponding to the enum PluginState.
+     */
+    public synchronized PluginState getPluginState() {
+        return mPluginState;
     }
 
     /**
@@ -1339,8 +1403,6 @@ public class WebSettings {
             junit.framework.Assert.assertTrue(frame.mNativeFrame != 0);
         }
 
-        GoogleLocationSettingManager.getInstance().start(mContext);
-
         SharedPreferences sp = mContext.getSharedPreferences(PREF_FILE,
                 Context.MODE_PRIVATE);
         if (mDoubleTapToastCount > 0) {
@@ -1357,7 +1419,6 @@ public class WebSettings {
      */
     /*package*/
     synchronized void onDestroyed() {
-        GoogleLocationSettingManager.getInstance().stop();
     }
 
     private int pin(int size) {

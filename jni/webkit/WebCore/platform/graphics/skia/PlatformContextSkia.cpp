@@ -45,6 +45,12 @@
 #include "SkDashPathEffect.h"
 
 #include <wtf/MathExtras.h>
+#include <wtf/Vector.h>
+
+namespace WebCore 
+{
+extern bool isPathSkiaSafe(const SkMatrix& transform, const SkPath& path);
+}
 
 // State -----------------------------------------------------------------------
 
@@ -83,12 +89,16 @@ struct PlatformContextSkia::State {
     // color to produce a new output color.
     SkColor applyAlpha(SkColor) const;
 
-#if defined(__linux__) || PLATFORM(WIN_OS)
+#if OS(LINUX) || OS(WINDOWS)
     // If non-empty, the current State is clipped to this image.
     SkBitmap m_imageBufferClip;
     // If m_imageBufferClip is non-empty, this is the region the image is clipped to.
     WebCore::FloatRect m_clip;
 #endif
+
+    // This is a list of clipping paths which are currently active, in the
+    // order in which they were pushed.
+    WTF::Vector<SkPath> m_antiAliasClipPaths;
 
 private:
     // Not supported.
@@ -105,8 +115,8 @@ PlatformContextSkia::State::State()
     , m_fillShader(0)
     , m_strokeStyle(WebCore::SolidStroke)
     , m_strokeColor(WebCore::Color::black)
-    , m_strokeThickness(0)
     , m_strokeShader(0)
+    , m_strokeThickness(0)
     , m_dashRatio(3)
     , m_miterLimit(4)
     , m_lineCap(SkPaint::kDefault_Cap)
@@ -125,15 +135,15 @@ PlatformContextSkia::State::State(const State& other)
     , m_fillShader(other.m_fillShader)
     , m_strokeStyle(other.m_strokeStyle)
     , m_strokeColor(other.m_strokeColor)
-    , m_strokeThickness(other.m_strokeThickness)
     , m_strokeShader(other.m_strokeShader)
+    , m_strokeThickness(other.m_strokeThickness)
     , m_dashRatio(other.m_dashRatio)
     , m_miterLimit(other.m_miterLimit)
     , m_lineCap(other.m_lineCap)
     , m_lineJoin(other.m_lineJoin)
     , m_dash(other.m_dash)
     , m_textDrawingMode(other.m_textDrawingMode)
-#if defined(__linux__) || PLATFORM(WIN_OS)
+#if OS(LINUX) || OS(WINDOWS)
     , m_imageBufferClip(other.m_imageBufferClip)
     , m_clip(other.m_clip)
 #endif
@@ -170,7 +180,7 @@ SkColor PlatformContextSkia::State::applyAlpha(SkColor c) const
 // Danger: canvas can be NULL.
 PlatformContextSkia::PlatformContextSkia(skia::PlatformCanvas* canvas)
     : m_canvas(canvas)
-#if PLATFORM(WIN_OS)
+#if OS(WINDOWS)
     , m_drawingToImageBuffer(false)
 #endif
 {
@@ -187,7 +197,7 @@ void PlatformContextSkia::setCanvas(skia::PlatformCanvas* canvas)
     m_canvas = canvas;
 }
 
-#if PLATFORM(WIN_OS)
+#if OS(WINDOWS)
 void PlatformContextSkia::setDrawingToImageBuffer(bool value)
 {
     m_drawingToImageBuffer = value;
@@ -204,7 +214,7 @@ void PlatformContextSkia::save()
     m_stateStack.append(*m_state);
     m_state = &m_stateStack.last();
 
-#if defined(__linux__) || PLATFORM(WIN_OS)
+#if OS(LINUX) || OS(WINDOWS)
     // The clip image only needs to be applied once. Reset the image so that we
     // don't attempt to clip multiple times.
     m_state->m_imageBufferClip.reset();
@@ -214,7 +224,7 @@ void PlatformContextSkia::save()
     canvas()->save();
 }
 
-#if defined(__linux__) || PLATFORM(WIN_OS)
+#if OS(LINUX) || OS(WINDOWS)
 void PlatformContextSkia::beginLayerClippedToImage(const WebCore::FloatRect& rect,
                                                    const WebCore::ImageBuffer* imageBuffer)
 {
@@ -224,7 +234,8 @@ void PlatformContextSkia::beginLayerClippedToImage(const WebCore::FloatRect& rec
     m_state->m_clip = rect;
     SkRect bounds = { SkFloatToScalar(rect.x()), SkFloatToScalar(rect.y()),
                       SkFloatToScalar(rect.right()), SkFloatToScalar(rect.bottom()) };
-                      
+
+    canvas()->clipRect(bounds);
     canvas()->saveLayerAlpha(&bounds, 255,
                              static_cast<SkCanvas::SaveFlags>(SkCanvas::kHasAlphaLayer_SaveFlag | SkCanvas::kFullColorLayer_SaveFlag));
     // Copy off the image as |imageBuffer| may be deleted before restore is invoked.
@@ -244,14 +255,32 @@ void PlatformContextSkia::beginLayerClippedToImage(const WebCore::FloatRect& rec
 }
 #endif
 
+void PlatformContextSkia::clipPathAntiAliased(const SkPath& clipPath)
+{
+    // If we are currently tracking any anti-alias clip paths, then we already
+    // have a layer in place and don't need to add another.
+    bool haveLayerOutstanding = m_state->m_antiAliasClipPaths.size();
+
+    // See comments in applyAntiAliasedClipPaths about how this works.
+    m_state->m_antiAliasClipPaths.append(clipPath);
+
+    if (!haveLayerOutstanding) {
+        SkRect bounds = clipPath.getBounds();
+        canvas()->saveLayerAlpha(&bounds, 255, static_cast<SkCanvas::SaveFlags>(SkCanvas::kHasAlphaLayer_SaveFlag | SkCanvas::kFullColorLayer_SaveFlag | SkCanvas::kClipToLayer_SaveFlag));
+    }
+}
+
 void PlatformContextSkia::restore()
 {
-#if defined(__linux__) || PLATFORM(WIN_OS)
+#if OS(LINUX) || OS(WINDOWS)
     if (!m_state->m_imageBufferClip.empty()) {
         applyClipFromImage(m_state->m_clip, m_state->m_imageBufferClip);
         canvas()->restore();
     }
 #endif
+
+    if (!m_state->m_antiAliasClipPaths.isEmpty())
+        applyAntiAliasedClipPaths(m_state->m_antiAliasClipPaths);
 
     m_stateStack.removeLast();
     m_state = &m_stateStack.last();
@@ -278,6 +307,7 @@ void PlatformContextSkia::drawRect(SkRect rect)
         SkShader* oldFillShader = m_state->m_fillShader;
         oldFillShader->safeRef();
         setFillColor(m_state->m_strokeColor);
+        paint.reset();
         setupPaintForFilling(&paint);
         SkRect topBorder = { rect.fLeft, rect.fTop, rect.fRight, rect.fTop + 1 };
         canvas()->drawRect(topBorder, paint);
@@ -295,7 +325,7 @@ void PlatformContextSkia::drawRect(SkRect rect)
 
 void PlatformContextSkia::setupPaintCommon(SkPaint* paint) const
 {
-#ifdef SK_DEBUGx
+#if defined(SK_DEBUG)
     {
         SkPaint defaultPaint;
         SkASSERT(*paint == defaultPaint);
@@ -314,6 +344,15 @@ void PlatformContextSkia::setupPaintForFilling(SkPaint* paint) const
     paint->setShader(m_state->m_fillShader);
 }
 
+static SkScalar scalarBound(SkScalar v, SkScalar min, SkScalar max)
+{
+    if (v < min)
+        return min;
+    if (v > max)
+        return max;
+    return v;
+}
+
 float PlatformContextSkia::setupPaintForStroking(SkPaint* paint, SkRect* rect, int length) const
 {
     setupPaintCommon(paint);
@@ -322,10 +361,13 @@ float PlatformContextSkia::setupPaintForStroking(SkPaint* paint, SkRect* rect, i
     paint->setColor(m_state->applyAlpha(m_state->m_strokeColor));
     paint->setShader(m_state->m_strokeShader);
     paint->setStyle(SkPaint::kStroke_Style);
-    paint->setStrokeWidth(SkFloatToScalar(width));
+    // The limits here (512 and 256) were made up but are hopefully large
+    // enough to be reasonable. They are, empirically, small enough not to
+    // cause overflows in Skia.
+    paint->setStrokeWidth(scalarBound(SkFloatToScalar(width), 0, 512));
     paint->setStrokeCap(m_state->m_lineCap);
     paint->setStrokeJoin(m_state->m_lineJoin);
-    paint->setStrokeMiter(SkFloatToScalar(m_state->m_miterLimit));
+    paint->setStrokeMiter(scalarBound(SkFloatToScalar(m_state->m_miterLimit), 0, 256));
 
     if (m_state->m_dash)
         paint->setPathEffect(m_state->m_dash);
@@ -533,7 +575,7 @@ bool PlatformContextSkia::isPrinting()
     return m_canvas->getTopPlatformDevice().IsVectorial();
 }
 
-#if defined(__linux__) || PLATFORM(WIN_OS)
+#if OS(LINUX) || OS(WINDOWS)
 void PlatformContextSkia::applyClipFromImage(const WebCore::FloatRect& rect, const SkBitmap& imageBuffer)
 {
     // NOTE: this assumes the image mask contains opaque black for the portions that are to be shown, as such we
@@ -543,3 +585,40 @@ void PlatformContextSkia::applyClipFromImage(const WebCore::FloatRect& rect, con
     m_canvas->drawBitmap(imageBuffer, SkFloatToScalar(rect.x()), SkFloatToScalar(rect.y()), &paint);
 }
 #endif
+
+void PlatformContextSkia::applyAntiAliasedClipPaths(WTF::Vector<SkPath>& paths)
+{
+    // Anti-aliased clipping:
+    //
+    // Skia's clipping is 1-bit only. Consider what would happen if it were 8-bit:
+    // We have a square canvas, filled with white and we declare a circular
+    // clipping path. Then we fill twice with a black rectangle. The fractional
+    // pixels would first get the correct color (white * alpha + black * (1 -
+    // alpha)), but the second fill would apply the alpha to the already
+    // modified color and the result would be too dark.
+    //
+    // This, anti-aliased clipping needs to be performed after the drawing has
+    // been done. In order to do this, we create a new layer of the canvas in
+    // clipPathAntiAliased and store the clipping path. All drawing is done to
+    // the layer's bitmap while it's in effect. When WebKit calls restore() to
+    // undo the clipping, this function is called.
+    //
+    // Here, we walk the list of clipping paths backwards and, for each, we
+    // clear outside of the clipping path. We only need a single extra layer
+    // for any number of clipping paths.
+    //
+    // When we call restore on the SkCanvas, the layer's bitmap is composed
+    // into the layer below and we end up with correct, anti-aliased clipping.
+
+    SkPaint paint;
+    paint.setXfermodeMode(SkXfermode::kClear_Mode);
+    paint.setAntiAlias(true);
+    paint.setStyle(SkPaint::kFill_Style);
+
+    for (size_t i = paths.size() - 1; i < paths.size(); --i) {
+        paths[i].setFillType(SkPath::kInverseWinding_FillType);
+        m_canvas->drawPath(paths[i], paint);
+    }
+
+    m_canvas->restore();
+}

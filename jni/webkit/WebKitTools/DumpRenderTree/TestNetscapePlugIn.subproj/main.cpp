@@ -64,6 +64,8 @@ void NP_Shutdown(void)
 {
 }
 
+static void executeScript(const PluginObject* obj, const char* script);
+
 NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode, int16 argc, char *argn[], char *argv[], NPSavedData *saved)
 {
     bool forceCarbon = false;
@@ -101,7 +103,14 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode, int16 argc, ch
             for (int i = 0; i < argc; i++)
                 if (strcasecmp(argn[i], "src") == 0)
                     pluginLog(instance, "src: %s", argv[i]);
-        }
+        } else if (strcasecmp(argn[i], "cleardocumentduringnew") == 0)
+            executeScript(obj, "document.body.innerHTML = ''");
+        else if (!strcasecmp(argn[i], "ondestroy"))
+            obj->onDestroy = strdup(argv[i]);
+        else if (strcasecmp(argn[i], "testdocumentopenindestroystream") == 0)
+            obj->testDocumentOpenInDestroyStream = TRUE;
+        else if (strcasecmp(argn[i], "testwindowopen") == 0)
+            obj->testWindowOpen = TRUE;
     }
         
 #ifndef NP_NO_CARBON
@@ -110,8 +119,9 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode, int16 argc, ch
     NPBool supportsCocoa = false;
 
 #ifndef NP_NO_CARBON
+    // A browser that doesn't know about NPNVsupportsCarbonBool is one that only supports Carbon event model.
     if (browser->getvalue(instance, NPNVsupportsCarbonBool, &supportsCarbon) != NPERR_NO_ERROR)
-        supportsCarbon = false;
+        supportsCarbon = true;
 #endif
 
     if (browser->getvalue(instance, NPNVsupportsCocoaBool, &supportsCocoa) != NPERR_NO_ERROR)
@@ -127,7 +137,9 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode, int16 argc, ch
         return NPERR_INCOMPATIBLE_VERSION_ERROR;
     }
     
+    browser->getvalue(instance, NPNVprivateModeBool, (void *)&obj->cachedPrivateBrowsingMode);
     browser->setvalue(instance, NPPVpluginEventModel, (void *)obj->eventModel);
+    
     return NPERR_NO_ERROR;
 }
 
@@ -135,6 +147,11 @@ NPError NPP_Destroy(NPP instance, NPSavedData **save)
 {
     PluginObject* obj = static_cast<PluginObject*>(instance->pdata);
     if (obj) {
+        if (obj->onDestroy) {
+            executeScript(obj, obj->onDestroy);
+            free(obj->onDestroy);
+        }
+
         if (obj->onStreamLoad)
             free(obj->onStreamLoad);
 
@@ -160,6 +177,11 @@ NPError NPP_SetWindow(NPP instance, NPWindow *window)
         if (obj->logSetWindow) {
             pluginLog(instance, "NPP_SetWindow: %d %d", (int)window->width, (int)window->height);
             obj->logSetWindow = false;
+        }
+
+        if (obj->testWindowOpen) {
+            testWindowOpen(instance);
+            obj->testWindowOpen = FALSE;
         }
     }
     
@@ -204,6 +226,11 @@ NPError NPP_DestroyStream(NPP instance, NPStream *stream, NPReason reason)
 
     if (obj->onStreamDestroy)
         executeScript(obj, obj->onStreamDestroy);
+
+    if (obj->testDocumentOpenInDestroyStream) {
+        testDocumentOpen(instance);
+        obj->testDocumentOpenInDestroyStream = FALSE;
+    }
 
     return NPERR_NO_ERROR;
 }
@@ -380,5 +407,13 @@ NPError NPP_GetValue(NPP instance, NPPVariable variable, void *value)
 
 NPError NPP_SetValue(NPP instance, NPNVariable variable, void *value)
 {
-    return NPERR_GENERIC_ERROR;
+    PluginObject* obj = static_cast<PluginObject*>(instance->pdata);
+
+    switch (variable) {
+        case NPNVprivateModeBool:
+            obj->cachedPrivateBrowsingMode = *(NPBool*)value;
+            return NPERR_NO_ERROR;
+        default:
+            return NPERR_GENERIC_ERROR;
+    }
 }

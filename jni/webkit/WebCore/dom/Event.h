@@ -103,29 +103,34 @@ namespace WebCore {
         virtual bool isMutationEvent() const;
         virtual bool isKeyboardEvent() const;
         virtual bool isTextEvent() const;
+        virtual bool isCompositionEvent() const;
         virtual bool isDragEvent() const; // a subset of mouse events
         virtual bool isClipboardEvent() const;
         virtual bool isMessageEvent() const;
         virtual bool isWheelEvent() const;
         virtual bool isBeforeTextInsertedEvent() const;
         virtual bool isOverflowEvent() const;
+        virtual bool isPageTransitionEvent() const;
+        virtual bool isPopStateEvent() const;
         virtual bool isProgressEvent() const;
         virtual bool isXMLHttpRequestProgressEvent() const;
         virtual bool isWebKitAnimationEvent() const;
         virtual bool isWebKitTransitionEvent() const;
+        virtual bool isBeforeLoadEvent() const;
 #if ENABLE(SVG)
         virtual bool isSVGZoomEvent() const;
 #endif
 #if ENABLE(DOM_STORAGE)
         virtual bool isStorageEvent() const;
 #endif
-#if ENABLE(TOUCH_EVENTS) // Android
-        virtual bool isTouchEvent() const;
-#endif
 #if ENABLE(WORKERS)
         virtual bool isErrorEvent() const;
 #endif
-
+#if ENABLE(TOUCH_EVENTS)
+        virtual bool isTouchEvent() const;
+#endif
+        bool fromUserGesture();
+        
         bool propagationStopped() const { return m_propagationStopped; }
 
         bool defaultPrevented() const { return m_defaultPrevented; }
@@ -146,6 +151,9 @@ namespace WebCore {
 
         virtual Clipboard* clipboard() const { return 0; }
 
+        bool createdByDOM() const { return m_createdByDOM; }
+        void setCreatedByDOM(bool createdByDOM) { m_createdByDOM = createdByDOM; }
+
     protected:
         Event();
         Event(const AtomicString& type, bool canBubble, bool cancelable);
@@ -162,6 +170,9 @@ namespace WebCore {
         bool m_defaultPrevented;
         bool m_defaultHandled;
         bool m_cancelBubble;
+
+        // Whether this event was created by document.createEvent().
+        bool m_createdByDOM;
 
         unsigned short m_eventPhase;
         EventTarget* m_currentTarget;

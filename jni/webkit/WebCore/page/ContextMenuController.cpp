@@ -26,9 +26,12 @@
 #include "config.h"
 #include "ContextMenuController.h"
 
+#if ENABLE(CONTEXT_MENUS)
+
 #include "Chrome.h"
 #include "ContextMenu.h"
 #include "ContextMenuClient.h"
+#include "ContextMenuProvider.h"
 #include "Document.h"
 #include "DocumentFragment.h"
 #include "DocumentLoader.h"
@@ -77,13 +80,38 @@ ContextMenuController::~ContextMenuController()
 void ContextMenuController::clearContextMenu()
 {
     m_contextMenu.set(0);
+    if (m_menuProvider)
+        m_menuProvider->contextMenuCleared();
+    m_menuProvider = 0;
 }
 
 void ContextMenuController::handleContextMenuEvent(Event* event)
 {
-    ASSERT(event->type() == eventNames().contextmenuEvent);
-    if (!event->isMouseEvent())
+    m_contextMenu.set(createContextMenu(event));
+    if (!m_contextMenu)
         return;
+    m_contextMenu->populate();
+    showContextMenu(event);
+}
+
+void ContextMenuController::showContextMenu(Event* event, PassRefPtr<ContextMenuProvider> menuProvider)
+{
+    m_menuProvider = menuProvider;
+
+    m_contextMenu.set(createContextMenu(event));
+    if (!m_contextMenu) {
+        clearContextMenu();
+        return;
+    }
+
+    m_menuProvider->populateContextMenu(m_contextMenu.get());
+    showContextMenu(event);
+}
+
+ContextMenu* ContextMenuController::createContextMenu(Event* event)
+{
+   if (!event->isMouseEvent())
+        return 0;
     MouseEvent* mouseEvent = static_cast<MouseEvent*>(event);
     HitTestResult result(mouseEvent->absoluteLocation());
 
@@ -91,16 +119,18 @@ void ContextMenuController::handleContextMenuEvent(Event* event)
         result = frame->eventHandler()->hitTestResultAtPoint(mouseEvent->absoluteLocation(), false);
 
     if (!result.innerNonSharedNode())
-        return;
+        return 0;
+    return new ContextMenu(result);
+}
 
-    m_contextMenu.set(new ContextMenu(result));
-    m_contextMenu->populate();
+void ContextMenuController::showContextMenu(Event* event)
+{
+#if ENABLE(INSPECTOR)
     if (m_page->inspectorController()->enabled())
         m_contextMenu->addInspectElementItem();
-
+#endif
     PlatformMenuDescription customMenu = m_client->getCustomMenuFromDefaultItems(m_contextMenu.get());
     m_contextMenu->setPlatformDescription(customMenu);
-
     event->setDefaultHandled();
 }
 
@@ -119,6 +149,12 @@ void ContextMenuController::contextMenuItemSelected(ContextMenuItem* item)
 
     if (item->action() >= ContextMenuItemBaseApplicationTag) {
         m_client->contextMenuItemSelected(item, m_contextMenu.get());
+        return;
+    }
+
+    if (item->action() >= ContextMenuItemBaseCustomTag) {
+        ASSERT(m_menuProvider);
+        m_menuProvider->contextMenuItemSelected(item);
         return;
     }
 
@@ -162,10 +198,12 @@ void ContextMenuController::contextMenuItemSelected(ContextMenuItem* item)
         frame->editor()->copy();
         break;
     case ContextMenuItemTagGoBack:
-        frame->loader()->goBackOrForward(-1);
+        if (Page* page = frame->page())
+            page->goBackOrForward(-1);
         break;
     case ContextMenuItemTagGoForward:
-        frame->loader()->goBackOrForward(1);
+        if (Page* page = frame->page())
+            page->goBackOrForward(1);
         break;
     case ContextMenuItemTagStop:
         frame->loader()->stop();
@@ -211,7 +249,7 @@ void ContextMenuController::contextMenuItemSelected(ContextMenuItem* item)
         break;
     case ContextMenuItemTagOpenLink:
         if (Frame* targetFrame = result.targetFrame())
-            targetFrame->loader()->loadFrameRequest(FrameLoadRequest(ResourceRequest(result.absoluteLinkURL(), frame->loader()->outgoingReferrer())), false, false, 0, 0);
+            targetFrame->loader()->loadFrameRequest(FrameLoadRequest(ResourceRequest(result.absoluteLinkURL(), frame->loader()->outgoingReferrer())), false, false, 0, 0, SendReferrer);
         else
             openNewWindow(result.absoluteLinkURL(), frame);
         break;
@@ -325,13 +363,17 @@ void ContextMenuController::contextMenuItemSelected(ContextMenuItem* item)
         frame->editor()->changeBackToReplacedString(result.replacedString());
         break;
 #endif
+#if ENABLE(INSPECTOR)
     case ContextMenuItemTagInspectElement:
         if (Page* page = frame->page())
             page->inspectorController()->inspect(result.innerNonSharedNode());
         break;
+#endif
     default:
         break;
     }
 }
 
 } // namespace WebCore
+
+#endif // ENABLE(CONTEXT_MENUS)

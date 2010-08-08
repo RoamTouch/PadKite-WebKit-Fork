@@ -26,6 +26,7 @@
 #import "config.h"
 #import "WebScriptObjectPrivate.h"
 
+#import "Bridge.h"
 #import "Console.h"
 #import "DOMInternal.h"
 #import "DOMWindow.h"
@@ -36,7 +37,6 @@
 #import "StringSourceProvider.h"
 #import "WebCoreObjCExtras.h"
 #import "objc_instance.h"
-#import "runtime.h"
 #import "runtime_object.h"
 #import "runtime_root.h"
 #import <JavaScriptCore/APICast.h>
@@ -299,7 +299,7 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
         return nil;
 
     [self _rootObject]->globalObject()->globalData()->timeoutChecker.start();
-    JSValue result = call(exec, function, callType, callData, [self _imp], argList);
+    JSValue result = JSC::call(exec, function, callType, callData, [self _imp], argList);
     [self _rootObject]->globalObject()->globalData()->timeoutChecker.stop();
 
     if (exec->hadException()) {
@@ -328,7 +328,7 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
     JSLock lock(SilenceAssertionsOnly);
     
     [self _rootObject]->globalObject()->globalData()->timeoutChecker.start();
-    Completion completion = JSC::evaluate([self _rootObject]->globalObject()->globalExec(), [self _rootObject]->globalObject()->globalScopeChain(), makeSource(String(script)));
+    Completion completion = JSC::evaluate([self _rootObject]->globalObject()->globalExec(), [self _rootObject]->globalObject()->globalScopeChain(), makeSource(String(script)), JSC::JSValue());
     [self _rootObject]->globalObject()->globalData()->timeoutChecker.stop();
     ComplType type = completion.complType();
     
@@ -529,7 +529,8 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
     }
 
     if (value.isString()) {
-        const UString& u = asString(value)->value();
+        ExecState* exec = rootObject->globalObject()->globalExec();
+        const UString& u = asString(value)->value(exec);
         return [NSString stringWithCharacters:u.data() length:u.size()];
     }
 

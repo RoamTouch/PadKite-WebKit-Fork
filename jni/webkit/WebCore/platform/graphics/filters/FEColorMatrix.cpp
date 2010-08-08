@@ -30,6 +30,7 @@
 #include "GraphicsContext.h"
 #include "ImageData.h"
 #include <math.h>
+#include <wtf/MathExtras.h>
 
 namespace WebCore {
 
@@ -92,8 +93,8 @@ inline void saturate(double& red, double& green, double& blue, const float& s)
 
 inline void huerotate(double& red, double& green, double& blue, const float& hue)
 {
-    double cosHue = cos(hue * M_PI / 180); 
-    double sinHue = sin(hue * M_PI / 180); 
+    double cosHue = cos(hue * piDouble / 180); 
+    double sinHue = sin(hue * piDouble / 180); 
     double r = red   * (0.213 + cosHue * 0.787 - sinHue * 0.213) +
                green * (0.715 - cosHue * 0.715 - sinHue * 0.715) +
                blue  * (0.072 - cosHue * 0.072 + sinHue * 0.928);
@@ -163,10 +164,10 @@ void FEColorMatrix::apply(Filter* filter)
     if (!filterContext)
         return;
 
-    filterContext->drawImage(m_in->resultImage()->image(), calculateDrawingRect(m_in->subRegion()));
+    filterContext->drawImage(m_in->resultImage()->image(), DeviceColorSpace, calculateDrawingRect(m_in->scaledSubRegion()));
 
     IntRect imageRect(IntPoint(), resultImage()->size());
-    PassRefPtr<ImageData> imageData(resultImage()->getImageData(imageRect));
+    PassRefPtr<ImageData> imageData(resultImage()->getUnmultipliedImageData(imageRect));
     PassRefPtr<CanvasPixelArray> srcPixelArray(imageData->data());
 
     switch (m_type) {
@@ -183,10 +184,11 @@ void FEColorMatrix::apply(Filter* filter)
             break;
         case FECOLORMATRIX_TYPE_LUMINANCETOALPHA:
             effectType<FECOLORMATRIX_TYPE_LUMINANCETOALPHA>(srcPixelArray, imageData, m_values);
+            setIsAlphaImage(true);
             break;
     }
 
-    resultImage()->putImageData(imageData.get(), imageRect, IntPoint());
+    resultImage()->putUnmultipliedImageData(imageData.get(), imageRect, IntPoint());
 }
 
 void FEColorMatrix::dump()

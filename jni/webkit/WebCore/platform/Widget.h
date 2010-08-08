@@ -70,8 +70,20 @@ class wxWindow;
 typedef wxWindow* PlatformWidget;
 #endif
 
+#if PLATFORM(HAIKU)
+class BView;
+typedef BView* PlatformWidget;
+#endif
+
 #if PLATFORM(CHROMIUM)
 #include "PlatformWidget.h"
+#endif
+
+#if PLATFORM(QT)
+class QWebPageClient;
+typedef QWebPageClient* PlatformPageClient;
+#else
+typedef PlatformWidget PlatformPageClient;
 #endif
 
 #include "IntPoint.h"
@@ -156,6 +168,8 @@ public:
 
     virtual bool isFrameView() const { return false; }
     virtual bool isPluginView() const { return false; }
+    // FIXME: The Mac plug-in code should inherit from PluginView. When this happens PluginWidget and PluginView can become one class. 
+    virtual bool isPluginWidget() const { return false; }
     virtual bool isScrollbar() const { return false; }
 
     void removeFromParent();
@@ -177,7 +191,7 @@ public:
 
     virtual void frameRectsChanged() {}
 
-#if PLATFORM(MAC)    
+#if PLATFORM(MAC)
     NSView* getOuterView() const;
     
     static void beforeMouseDown(NSView*, Widget*);

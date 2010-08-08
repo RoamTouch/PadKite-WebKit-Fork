@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2010 Stephan Aßmus, <superstippi@gmx.de>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,103 +29,45 @@
 
 #include <Bitmap.h>
 
-
 namespace WebCore {
-
-RGBA32Buffer::RGBA32Buffer()
-    : m_hasAlpha(false)
-    , m_status(FrameEmpty)
-    , m_duration(0)
-    , m_disposalMethod(DisposeNotSpecified)
-{
-} 
-
-void RGBA32Buffer::clear()
-{
-    m_bytes.clear();
-    m_status = FrameEmpty;
-    // NOTE: Do not reset other members here; clearFrameBufferCache()
-    // calls this to free the bitmap data, but other functions like
-    // initFrameBuffer() and frameComplete() may still need to read
-    // other metadata out of this frame later.
-}
-
-void RGBA32Buffer::zeroFill()
-{
-    m_bytes.fill(0);
-    m_hasAlpha = true;
-}
-
-void RGBA32Buffer::copyBitmapData(const RGBA32Buffer& other)
-{
-    if (this == &other)
-        return;
-
-    m_bytes = other.m_bytes;
-    setHasAlpha(other.m_hasAlpha);
-}
-
-bool RGBA32Buffer::setSize(int newWidth, int newHeight)
-{
-    // NOTE: This has no way to check for allocation failure if the
-    // requested size was too big...
-    m_bytes.resize(newWidth * newHeight);
-    m_size = IntSize(newWidth, newHeight);
-
-    // Zero the image.
-    zeroFill();
-
-    return true;
-}
 
 NativeImagePtr RGBA32Buffer::asNewNativeImage() const
 {
-    const void* bytes = m_bytes.data();
+    int bytesPerRow = width() * sizeof(PixelData);
+    OwnPtr<BBitmap> bitmap(new BBitmap(BRect(0, 0, width() - 1, height() - 1), 0, B_RGBA32, bytesPerRow));
 
-    BBitmap* bmp = new BBitmap(BRect(0, 0, width(), height()), B_RGB32);
-    bmp->SetBits(bytes, m_size.width() * m_size.height(), 0, B_RGB32);
+    const uint8* source = reinterpret_cast<const uint8*>(m_bytes.data());
+    uint8* destination = reinterpret_cast<uint8*>(bitmap->Bits());
+    int h = height();
+    int w = width();
+    for (int y = 0; y < h; y++) {
+#if 0
+// FIXME: Enable this conversion once Haiku has B_RGBA32P[remultiplied]...
+        memcpy(dst, source, bytesPerRow);
+#else
+        const uint8* sourceHandle = source;
+        uint8* destinationHandle = destination;
+        for (int x = 0; x < w; x++) {
+            if (sourceHandle[3] == 255 || !sourceHandle[3]) {
+                destinationHandle[0] = sourceHandle[0];
+                destinationHandle[1] = sourceHandle[1];
+                destinationHandle[2] = sourceHandle[2];
+                destinationHandle[3] = sourceHandle[3];
+            } else {
+                destinationHandle[0] = static_cast<uint16>(sourceHandle[0]) * 255 / sourceHandle[3];
+                destinationHandle[1] = static_cast<uint16>(sourceHandle[1]) * 255 / sourceHandle[3];
+                destinationHandle[2] = static_cast<uint16>(sourceHandle[2]) * 255 / sourceHandle[3];
+                destinationHandle[3] = sourceHandle[3];
+            }
+            destinationHandle += 4;
+            sourceHandle += 4;
+        }
+#endif
+        destination += bytesPerRow;
+        source += bytesPerRow;
+    }
 
-    return bmp;
-}
-
-bool RGBA32Buffer::hasAlpha() const
-{
-    return m_hasAlpha;
-}
-
-void RGBA32Buffer::setHasAlpha(bool alpha)
-{
-    m_hasAlpha = alpha;
-}
-
-void RGBA32Buffer::setStatus(FrameStatus status)
-{
-    m_status = status;
-}
-
-RGBA32Buffer& RGBA32Buffer::operator=(const RGBA32Buffer& other)
-{
-    if (this == &other)
-        return *this;
-
-    m_bytes = other.m_bytes;
-    m_size = other.m_size;
-    setHasAlpha(other.hasAlpha());
-    setRect(other.rect());
-    setStatus(other.status());
-    setDuration(other.duration());
-    setDisposalMethod(other.disposalMethod());
-    return *this;
-}
-
-int RGBA32Buffer::width() const
-{
-    return m_size.width();
-}
-
-int RGBA32Buffer::height() const
-{
-    return m_size.height();
+    return bitmap.release();
 }
 
 } // namespace WebCore

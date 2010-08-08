@@ -39,6 +39,7 @@ use VCSUtils;
 use webkitdirs;
 
 sub normalizeLineEndings($$);
+sub removeLongestCommonPrefixEndingInDoubleNewline(\%);
 
 sub usage
 {
@@ -169,7 +170,8 @@ for my $changeLog (@changeLogs) {
 
             # Attempt to insert the "patch by" line, after the first blank line.
             if ($previousLineWasBlank && $hasAuthorInfoToWrite && $lineCount > 0) {
-                my $authorAndCommitterAreSamePerson = $ENV{EMAIL_ADDRESS} && $email eq $ENV{EMAIL_ADDRESS};
+                my $committerEmail = changeLogEmailAddress();
+                my $authorAndCommitterAreSamePerson = $email eq $committerEmail;
                 if (!$authorAndCommitterAreSamePerson) {
                     $contents .= "Patch by $author <$email> on $date\n";
                     $hasAuthorInfoToWrite = 0;
@@ -216,6 +218,8 @@ for my $changeLog (@changeLogs) {
     $changeLogContents{$label} = $contents;
 }
 
+my $commonPrefix = removeLongestCommonPrefixEndingInDoubleNewline(%changeLogContents);
+
 my $first = 1;
 open NEWLOG, ">$log.edit" or die;
 if (isGit() && scalar keys %changeLogSort == 0) {
@@ -226,13 +230,14 @@ if (isGit() && scalar keys %changeLogSort == 0) {
         chomp($webkitGenerateCommitMessage = `git config --bool core.webkitGenerateCommitMessage`);
     }
     if ($webkitGenerateCommitMessage ne "false") {
-        open CHANGELOG_ENTRIES, "-|", "prepare-ChangeLog --git-index --no-write" or die "prepare-ChangeLog failed: $!.\n";
+        open CHANGELOG_ENTRIES, "-|", "$FindBin::Bin/prepare-ChangeLog --git-index --no-write" or die "prepare-ChangeLog failed: $!.\n";
         while (<CHANGELOG_ENTRIES>) {
             print NEWLOG normalizeLineEndings($_, $endl);
         }
         close CHANGELOG_ENTRIES;
     }
 } else {
+    print NEWLOG normalizeLineEndings($commonPrefix, $endl);
     for my $sortKey (sort keys %changeLogSort) {
         my $label = $changeLogSort{$sortKey};
         if (keys %changeLogSort > 1) {
@@ -272,4 +277,33 @@ sub normalizeLineEndings($$)
     my ($string, $endl) = @_;
     $string =~ s/\r?\n/$endl/g;
     return $string;
+}
+
+sub removeLongestCommonPrefixEndingInDoubleNewline(\%)
+{
+    my ($hashOfStrings) = @_;
+
+    my @strings = values %{$hashOfStrings};
+    return "" unless @strings > 1;
+
+    my $prefix = shift @strings;
+    my $prefixLength = length $prefix;
+    foreach my $string (@strings) {
+        while ($prefixLength) {
+            last if substr($string, 0, $prefixLength) eq $prefix;
+            --$prefixLength;
+            $prefix = substr($prefix, 0, -1);
+        }
+        last unless $prefixLength;
+    }
+
+    return "" unless $prefixLength;
+
+    my $lastDoubleNewline = rindex($prefix, "\n\n");
+    return "" unless $lastDoubleNewline > 0;
+
+    foreach my $key (keys %{$hashOfStrings}) {
+        $hashOfStrings->{$key} = substr($hashOfStrings->{$key}, $lastDoubleNewline);
+    }
+    return substr($prefix, 0, $lastDoubleNewline + 2);
 }

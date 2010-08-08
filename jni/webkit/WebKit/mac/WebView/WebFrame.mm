@@ -49,12 +49,14 @@
 #import "WebNSObjectExtras.h"
 #import "WebNSURLExtras.h"
 #import "WebScriptDebugger.h"
+#import "WebScriptWorldInternal.h"
 #import "WebViewInternal.h"
 #import <JavaScriptCore/APICast.h>
 #import <WebCore/AXObjectCache.h>
 #import <WebCore/AccessibilityObject.h>
 #import <WebCore/AnimationController.h>
 #import <WebCore/CSSMutableStyleDeclaration.h>
+#import <WebCore/Chrome.h>
 #import <WebCore/ColorMac.h>
 #import <WebCore/DOMImplementation.h>
 #import <WebCore/DocLoader.h>
@@ -78,6 +80,7 @@
 #import <WebCore/RuntimeApplicationChecks.h>
 #import <WebCore/ScriptValue.h>
 #import <WebCore/SmartReplace.h>
+#import <WebCore/SVGSMILElement.h>
 #import <WebCore/TextIterator.h>
 #import <WebCore/ThreadCheck.h>
 #import <WebCore/TypingCommand.h>
@@ -85,6 +88,7 @@
 #import <WebCore/markup.h>
 #import <WebCore/visible_units.h>
 #import <runtime/JSLock.h>
+#import <runtime/JSObject.h>
 #import <runtime/JSValue.h>
 #import <wtf/CurrentTime.h>
 
@@ -270,11 +274,12 @@ WebView *getWebView(WebFrame *webFrame)
     ScriptController* scriptController = _private->coreFrame->script();
 
     // Calling ScriptController::globalObject() would create a window shell, and dispatch corresponding callbacks, which may be premature
-    //  if the script debugger is attached before a document is created.
-    if (!scriptController->haveWindowShell())
+    // if the script debugger is attached before a document is created.  These calls use the debuggerWorld(), we will need to pass a world
+    // to be able to debug isolated worlds.
+    if (!scriptController->existingWindowShell(debuggerWorld()))
         return;
 
-    JSGlobalObject* globalObject = scriptController->globalObject();
+    JSGlobalObject* globalObject = scriptController->globalObject(debuggerWorld());
     if (!globalObject)
         return;
 
@@ -595,7 +600,7 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
 {
     ASSERT(_private->coreFrame->document());
     
-    JSValue result = _private->coreFrame->loader()->executeScript(string, forceUserGesture).jsValue();
+    JSValue result = _private->coreFrame->script()->executeScript(string, forceUserGesture).jsValue();
 
     if (!_private->coreFrame) // In case the script removed our frame from the page.
         return @"";
@@ -607,7 +612,7 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
         return @"";
 
     JSLock lock(SilenceAssertionsOnly);
-    return String(result.toString(_private->coreFrame->script()->globalObject()->globalExec()));
+    return String(result.toString(_private->coreFrame->script()->globalObject(mainThreadNormalWorld())->globalExec()));
 }
 
 - (NSRect)_caretRectAtNode:(DOMNode *)node offset:(int)offset affinity:(NSSelectionAffinity)affinity
@@ -843,7 +848,7 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
     if (!_private->coreFrame || !_private->coreFrame->document())
         return nil;
 
-    return kit(createFragmentFromMarkup(_private->coreFrame->document(), markupString, baseURLString).get());
+    return kit(createFragmentFromMarkup(_private->coreFrame->document(), markupString, baseURLString, FragmentScriptingNotAllowed).get());
 }
 
 - (DOMDocumentFragment *)_documentFragmentWithNodesAsParagraphs:(NSArray *)nodes
@@ -919,20 +924,6 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
     if (!_private->coreFrame)
         return;
     _private->coreFrame->computeAndSetTypingStyle(core(style), undoAction);
-}
-
-- (void)_dragSourceMovedTo:(NSPoint)windowLoc
-{
-    if (!_private->coreFrame)
-        return;
-    FrameView* view = _private->coreFrame->view();
-    if (!view)
-        return;
-    ASSERT([getWebView(self) _usesDocumentViews]);
-    // FIXME: These are fake modifier keys here, but they should be real ones instead.
-    PlatformMouseEvent event(IntPoint(windowLoc), globalPoint(windowLoc, [view->platformWidget() window]),
-        LeftButton, MouseEventMoved, 0, false, false, false, false, currentTime());
-    _private->coreFrame->eventHandler()->dragSourceMovedTo(event);
 }
 
 - (void)_dragSourceEndedAt:(NSPoint)windowLoc operation:(NSDragOperation)operation
@@ -1127,6 +1118,29 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
     return controller->pauseTransitionAtTime(coreNode->renderer(), name, time);
 }
 
+// Pause a given SVG animation on the target node at a specific time.
+// This method is only intended to be used for testing the SVG animation system.
+- (BOOL)_pauseSVGAnimation:(NSString*)elementId onSMILNode:(DOMNode *)node atTime:(NSTimeInterval)time
+{
+    Frame* frame = core(self);
+    if (!frame)
+        return false;
+ 
+    Document* document = frame->document();
+    if (!document || !document->svgExtensions())
+        return false;
+
+    Node* coreNode = core(node);
+    if (!coreNode || !SVGSMILElement::isSMILElement(coreNode))
+        return false;
+
+#if ENABLE(SVG)
+    return document->accessSVGExtensions()->sampleAnimationAtTime(elementId, static_cast<SVGSMILElement*>(coreNode), time);
+#else
+    return false;
+#endif
+}
+
 - (unsigned) _numberOfActiveAnimations
 {
     Frame* frame = core(self);
@@ -1174,16 +1188,20 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
         [result setObject:[NSNumber numberWithBool:YES] forKey:WebFrameHasPlugins];
     
     if (DOMWindow* domWindow = _private->coreFrame->domWindow()) {
-        if (domWindow->hasEventListener(eventNames().unloadEvent))
+        if (domWindow->hasEventListeners(eventNames().unloadEvent))
             [result setObject:[NSNumber numberWithBool:YES] forKey:WebFrameHasUnloadListener];
             
+#if ENABLE(OFFLINE_WEB_APPLICATIONS)
         if (domWindow->optionalApplicationCache())
             [result setObject:[NSNumber numberWithBool:YES] forKey:WebFrameUsesApplicationCache];
+#endif
     }
     
     if (Document* document = _private->coreFrame->document()) {
+#if ENABLE(DATABASE)
         if (document->hasOpenDatabases())
             [result setObject:[NSNumber numberWithBool:YES] forKey:WebFrameUsesDatabases];
+#endif
             
         if (document->usingGeolocation())
             [result setObject:[NSNumber numberWithBool:YES] forKey:WebFrameUsesGeolocation];
@@ -1193,6 +1211,52 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
     }
     
     return result;
+}
+
+- (BOOL)_allowsFollowingLink:(NSURL *)URL
+{
+    if (!_private->coreFrame)
+        return YES;
+    return SecurityOrigin::canLoad(URL, String(), _private->coreFrame->document());
+}
+
+- (NSString *)_stringByEvaluatingJavaScriptFromString:(NSString *)string withGlobalObject:(JSObjectRef)globalObjectRef inScriptWorld:(WebScriptWorld *)world
+{
+    // Start off with some guess at a frame and a global object, we'll try to do better...!
+    JSDOMWindow* anyWorldGlobalObject = _private->coreFrame->script()->globalObject(mainThreadNormalWorld());
+
+    // The global object is probably a shell object? - if so, we know how to use this!
+    JSC::JSObject* globalObjectObj = toJS(globalObjectRef);
+    if (!strcmp(globalObjectObj->classInfo()->className, "JSDOMWindowShell"))
+        anyWorldGlobalObject = static_cast<JSDOMWindowShell*>(globalObjectObj)->window();
+
+    // Get the frame frome the global object we've settled on.
+    Frame* frame = anyWorldGlobalObject->impl()->frame();
+    ASSERT(frame->document());
+    JSValue result = frame->script()->executeScriptInWorld(core(world), string, true).jsValue();
+
+    if (!frame) // In case the script removed our frame from the page.
+        return @"";
+
+    // This bizarre set of rules matches behavior from WebKit for Safari 2.0.
+    // If you don't like it, use -[WebScriptObject evaluateWebScript:] or 
+    // JSEvaluateScript instead, since they have less surprising semantics.
+    if (!result || !result.isBoolean() && !result.isString() && !result.isNumber())
+        return @"";
+
+    JSLock lock(SilenceAssertionsOnly);
+    return String(result.toString(anyWorldGlobalObject->globalExec()));
+}
+
+- (JSGlobalContextRef)_globalContextForScriptWorld:(WebScriptWorld *)world
+{
+    Frame* coreFrame = _private->coreFrame;
+    if (!coreFrame)
+        return 0;
+    DOMWrapperWorld* coreWorld = core(world);
+    if (!coreWorld)
+        return 0;
+    return toGlobalRef(coreFrame->script()->globalObject(coreWorld)->globalExec());
 }
 
 @end
@@ -1296,7 +1360,10 @@ static bool needsMicrosoftMessengerDOMDocumentWorkaround()
 
 - (void)loadRequest:(NSURLRequest *)request
 {
-    _private->coreFrame->loader()->load(request, false);
+    Frame* coreFrame = _private->coreFrame;
+    if (!coreFrame)
+        return;
+    coreFrame->loader()->load(request, false);
 }
 
 static NSURL *createUniqueWebDataURL()
@@ -1426,7 +1493,7 @@ static NSURL *createUniqueWebDataURL()
     Frame* coreFrame = _private->coreFrame;
     if (!coreFrame)
         return 0;
-    return toGlobalRef(coreFrame->script()->globalObject()->globalExec());
+    return toGlobalRef(coreFrame->script()->globalObject(mainThreadNormalWorld())->globalExec());
 }
 
 @end

@@ -26,7 +26,8 @@
 #ifndef CanvasRenderingContext2D_h
 #define CanvasRenderingContext2D_h
 
-#include "TransformationMatrix.h"
+#include "AffineTransform.h"
+#include "CanvasRenderingContext.h"
 #include "FloatSize.h"
 #include "Font.h"
 #include "GraphicsTypes.h"
@@ -54,14 +55,13 @@ namespace WebCore {
 
     typedef int ExceptionCode;
 
-    class CanvasRenderingContext2D : public Noncopyable {
+    class CanvasRenderingContext2D : public CanvasRenderingContext {
     public:
         CanvasRenderingContext2D(HTMLCanvasElement*);
+
+        virtual ~CanvasRenderingContext2D();
         
-        void ref();
-        void deref();
-        
-        HTMLCanvasElement* canvas() const { return m_canvas; }
+        virtual bool is2d() const { return true; }
 
         CanvasStyle* strokeStyle() const;
         void setStrokeStyle(PassRefPtr<CanvasStyle>);
@@ -178,7 +178,7 @@ namespace WebCore {
         PassRefPtr<CanvasPattern> createPattern(HTMLImageElement*, const String& repetitionType, ExceptionCode&);
         PassRefPtr<CanvasPattern> createPattern(HTMLCanvasElement*, const String& repetitionType, ExceptionCode&);
         
-        PassRefPtr<ImageData> createImageData(float width, float height) const;
+        PassRefPtr<ImageData> createImageData(float width, float height, ExceptionCode&) const;
         PassRefPtr<ImageData> getImageData(float sx, float sy, float sw, float sh, ExceptionCode&) const;
         void putImageData(ImageData*, float dx, float dy, ExceptionCode&);
         void putImageData(ImageData*, float dx, float dy, float dirtyX, float dirtyY, float dirtyWidth, float dirtyHeight, ExceptionCode&);
@@ -218,7 +218,7 @@ namespace WebCore {
             String m_shadowColor;
             float m_globalAlpha;
             CompositeOperator m_globalComposite;
-            TransformationMatrix m_transform;
+            AffineTransform m_transform;
             bool m_invertibleCTM;
             
             // Text state.
@@ -262,7 +262,6 @@ namespace WebCore {
         void checkOrigin(const KURL&);
         void checkOrigin(const String&);
 
-        HTMLCanvasElement* m_canvas;
         Vector<State, 1> m_stateStack;
     };
 

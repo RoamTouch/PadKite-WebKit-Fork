@@ -16,9 +16,14 @@
 
 package android.webkit;
 
+import android.content.ActivityNotFoundException;
 import android.content.Context;
-import android.net.WebAddress;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.net.ParseException;
+import android.net.Uri;
+import android.net.WebAddress;
 import android.net.http.EventHandler;
 import android.net.http.Headers;
 import android.net.http.HttpAuthHeader;
@@ -59,6 +64,7 @@ class LoadListener extends Handler implements EventHandler {
 
     // Standard HTTP status codes in a more representative format
     private static final int HTTP_OK = 200;
+    private static final int HTTP_PARTIAL_CONTENT = 206;
     private static final int HTTP_MOVED_PERMANENTLY = 301;
     private static final int HTTP_FOUND = 302;
     private static final int HTTP_SEE_OTHER = 303;
@@ -78,7 +84,7 @@ class LoadListener extends Handler implements EventHandler {
 
     private static int sNativeLoaderCount;
 
-    private final ByteArrayBuilder mDataBuilder = new ByteArrayBuilder(8192);
+    private final ByteArrayBuilder mDataBuilder = new ByteArrayBuilder();
 
     private String   mUrl;
     private WebAddress mUri;
@@ -96,7 +102,6 @@ class LoadListener extends Handler implements EventHandler {
     private boolean  mCancelled;  // The request has been cancelled.
     private boolean  mAuthFailed;  // indicates that the prev. auth failed
     private CacheLoader mCacheLoader;
-    private CacheManager.CacheResult mCacheResult;
     private boolean  mFromCache = false;
     private HttpAuthHeader mAuthHeader;
     private int      mErrorID = OK;
@@ -104,6 +109,7 @@ class LoadListener extends Handler implements EventHandler {
     private SslError mSslError;
     private RequestHandle mRequestHandle;
     private RequestHandle mSslErrorRequestHandle;
+    private long     mPostIdentifier;
 
     // Request data. It is only valid when we are doing a load from the
     // cache. It is needed if the cache returns a redirect
@@ -116,20 +122,29 @@ class LoadListener extends Handler implements EventHandler {
 
     // Does this loader correspond to the main-frame top-level page?
     private boolean mIsMainPageLoader;
+    // Does this loader correspond to the main content (as opposed to a supporting resource)
+    private final boolean mIsMainResourceLoader;
+    private final boolean mUserGesture;
 
     private Headers mHeaders;
+
+    private final String mUsername;
+    private final String mPassword;
 
     // =========================================================================
     // Public functions
     // =========================================================================
 
-    public static LoadListener getLoadListener(
-            Context context, BrowserFrame frame, String url,
-            int nativeLoader, boolean synchronous, boolean isMainPageLoader) {
+    public static LoadListener getLoadListener(Context context,
+            BrowserFrame frame, String url, int nativeLoader,
+            boolean synchronous, boolean isMainPageLoader,
+            boolean isMainResource, boolean userGesture, long postIdentifier,
+            String username, String password) {
 
         sNativeLoaderCount += 1;
-        return new LoadListener(
-            context, frame, url, nativeLoader, synchronous, isMainPageLoader);
+        return new LoadListener(context, frame, url, nativeLoader, synchronous,
+                isMainPageLoader, isMainResource, userGesture, postIdentifier,
+                username, password);
     }
 
     public static int getNativeLoaderCount() {
@@ -137,7 +152,9 @@ class LoadListener extends Handler implements EventHandler {
     }
 
     LoadListener(Context context, BrowserFrame frame, String url,
-            int nativeLoader, boolean synchronous, boolean isMainPageLoader) {
+            int nativeLoader, boolean synchronous, boolean isMainPageLoader,
+            boolean isMainResource, boolean userGesture, long postIdentifier,
+            String username, String password) {
         if (DebugFlags.LOAD_LISTENER) {
             Log.v(LOGTAG, "LoadListener constructor url=" + url);
         }
@@ -150,6 +167,11 @@ class LoadListener extends Handler implements EventHandler {
             mMessageQueue = new Vector<Message>();
         }
         mIsMainPageLoader = isMainPageLoader;
+        mIsMainResourceLoader = isMainResource;
+        mUserGesture = userGesture;
+        mPostIdentifier = postIdentifier;
+        mUsername = username;
+        mPassword = password;
     }
 
     /**
@@ -288,18 +310,37 @@ class LoadListener extends Handler implements EventHandler {
      */
     public void headers(Headers headers) {
         if (DebugFlags.LOAD_LISTENER) Log.v(LOGTAG, "LoadListener.headers");
-        sendMessageInternal(obtainMessage(MSG_CONTENT_HEADERS, headers));
-    }
-
-    // Does the header parsing work on the WebCore thread.
-    private void handleHeaders(Headers headers) {
+        // call db (setCookie) in the non-WebCore thread
         if (mCancelled) return;
-        mHeaders = headers;
-
         ArrayList<String> cookies = headers.getSetCookie();
         for (int i = 0; i < cookies.size(); ++i) {
             CookieManager.getInstance().setCookie(mUri, cookies.get(i));
         }
+        sendMessageInternal(obtainMessage(MSG_CONTENT_HEADERS, headers));
+    }
+
+    // This is the same regex that DOMImplementation uses to check for xml
+    // content. Use this to check if another Activity wants to handle the
+    // content before giving it to webkit.
+    private static final String XML_MIME_TYPE =
+            "^[\\w_\\-+~!$\\^{}|.%'`#&*]+/" +
+            "[\\w_\\-+~!$\\^{}|.%'`#&*]+\\+xml$";
+
+    // Does the header parsing work on the WebCore thread.
+    private void handleHeaders(Headers headers) {
+        if (mCancelled) return;
+
+        // Note: the headers we care in LoadListeners, like
+        // content-type/content-length, should not be updated for partial
+        // content. Just skip here and go ahead with adding data.
+        if (mStatusCode == HTTP_PARTIAL_CONTENT) {
+            // we don't support cache for partial content yet
+            WebViewWorker.getHandler().obtainMessage(
+                    WebViewWorker.MSG_REMOVE_CACHE, this).sendToTarget();
+            return;
+        }
+
+        mHeaders = headers;
 
         long contentLength = headers.getContentLength();
         if (contentLength != Headers.NO_CONTENT_LENGTH) {
@@ -349,6 +390,27 @@ class LoadListener extends Handler implements EventHandler {
                than the headers that are returned from the server. */
             guessMimeType();
         }
+        // At this point, mMimeType has been set to non-null.
+        if (mIsMainPageLoader && mIsMainResourceLoader && mUserGesture &&
+                Pattern.matches(XML_MIME_TYPE, mMimeType) &&
+                !mMimeType.equalsIgnoreCase("application/xhtml+xml")) {
+            Intent i = new Intent(Intent.ACTION_VIEW);
+            i.setDataAndType(Uri.parse(url()), mMimeType);
+            ResolveInfo info = mContext.getPackageManager().resolveActivity(i,
+                    PackageManager.MATCH_DEFAULT_ONLY);
+            if (info != null && !mContext.getPackageName().equals(
+                    info.activityInfo.packageName)) {
+                // someone (other than the current app) knows how to
+                // handle this mime type.
+                try {
+                    mContext.startActivity(i);
+                    mBrowserFrame.stopLoading();
+                    return;
+                } catch (ActivityNotFoundException ex) {
+                    // continue loading internally.
+                }
+            }
+        }
 
         // is it an authentication request?
         boolean mustAuthenticate = (mStatusCode == HTTP_AUTH ||
@@ -361,7 +423,7 @@ class LoadListener extends Handler implements EventHandler {
 
         // if we tried to authenticate ourselves last time
         if (mAuthHeader != null) {
-            // we failed, if we must to authenticate again now and
+            // we failed, if we must authenticate again now and
             // we have a proxy-ness match
             mAuthFailed = (mustAuthenticate &&
                     isProxyAuthRequest == mAuthHeader.isProxy());
@@ -408,13 +470,27 @@ class LoadListener extends Handler implements EventHandler {
                 mStatusCode == HTTP_MOVED_PERMANENTLY ||
                 mStatusCode == HTTP_TEMPORARY_REDIRECT) && 
                 mNativeLoader != 0) {
-            if (!mFromCache && mRequestHandle != null) {
-                mCacheResult = CacheManager.createCacheFile(mUrl, mStatusCode,
-                        headers, mMimeType, false);
+            // for POST request, only cache the result if there is an identifier
+            // associated with it. postUrl() or form submission should set the
+            // identifier while XHR POST doesn't.
+            if (!mFromCache && mRequestHandle != null
+                    && (!mRequestHandle.getMethod().equals("POST")
+                            || mPostIdentifier != 0)) {
+                WebViewWorker.CacheCreateData data = new WebViewWorker.CacheCreateData();
+                data.mListener = this;
+                data.mUrl = mUrl;
+                data.mMimeType = mMimeType;
+                data.mStatusCode = mStatusCode;
+                data.mPostId = mPostIdentifier;
+                data.mHeaders = headers;
+                WebViewWorker.getHandler().obtainMessage(
+                        WebViewWorker.MSG_CREATE_CACHE, data).sendToTarget();
             }
-            if (mCacheResult != null) {
-                mCacheResult.encoding = mEncoding;
-            }
+            WebViewWorker.CacheEncoding ce = new WebViewWorker.CacheEncoding();
+            ce.mEncoding = mEncoding;
+            ce.mListener = this;
+            WebViewWorker.getHandler().obtainMessage(
+                    WebViewWorker.MSG_UPDATE_CACHE_ENCODING, ce).sendToTarget();
         }
         commitHeadersCheckRedirect();
     }
@@ -468,23 +544,28 @@ class LoadListener extends Handler implements EventHandler {
     }
 
     /**
-     * Implementation of certificate handler for EventHandler.
-     * Called every time a resource is loaded via a secure
-     * connection. In this context, can be called multiple
-     * times if we have redirects
-     * @param certificate The SSL certifcate
-     * IMPORTANT: as this is called from network thread, can't call native
-     * directly
+     * Implementation of certificate handler for EventHandler. Called
+     * before a resource is requested. In this context, can be called
+     * multiple times if we have redirects
+     *
+     * IMPORTANT: as this is called from network thread, can't call
+     * native directly
+     *
+     * @param certificate The SSL certifcate or null if the request
+     * was not secure
      */
     public void certificate(SslCertificate certificate) {
+        if (DebugFlags.LOAD_LISTENER) {
+            Log.v(LOGTAG, "LoadListener.certificate: " + certificate);
+        }
         sendMessageInternal(obtainMessage(MSG_SSL_CERTIFICATE, certificate));
     }
 
     // Handle the certificate on the WebCore thread.
     private void handleCertificate(SslCertificate certificate) {
-        // if this is the top-most main-frame page loader
-        if (mIsMainPageLoader) {
-            // update the browser frame (ie, the main frame)
+        // if this is main resource of the top frame
+        if (mIsMainPageLoader && mIsMainResourceLoader) {
+            // update the browser frame with certificate
             mBrowserFrame.certificate(certificate);
         }
     }
@@ -522,17 +603,18 @@ class LoadListener extends Handler implements EventHandler {
      * IMPORTANT: as this is called from network thread, can't call native
      * directly
      * XXX: Unlike the other network thread methods, this method can do the
-     * work of decoding the data and appending it to the data builder because
-     * mDataBuilder is a thread-safe structure.
+     * work of decoding the data and appending it to the data builder.
      */
     public void data(byte[] data, int length) {
         if (DebugFlags.LOAD_LISTENER) {
             Log.v(LOGTAG, "LoadListener.data(): url: " + url());
         }
 
-        // Synchronize on mData because commitLoad may write mData to WebCore
-        // and we don't want to replace mData or mDataLength at the same time
-        // as a write.
+        // The reason isEmpty() and append() need to synchronized together is
+        // because it is possible for getFirstChunk() to be called multiple
+        // times between isEmpty() and append(). This could cause commitLoad()
+        // to finish before processing the newly appended data and no message
+        // will be sent.
         boolean sendMessage = false;
         synchronized (mDataBuilder) {
             sendMessage = mDataBuilder.isEmpty();
@@ -593,7 +675,18 @@ class LoadListener extends Handler implements EventHandler {
                 if (mAuthHeader != null &&
                         (Network.getInstance(mContext).isValidProxySet() ||
                          !mAuthHeader.isProxy())) {
-                    Network.getInstance(mContext).handleAuthRequest(this);
+                    // If this is the first attempt to authenticate, try again with the username and
+                    // password supplied in the URL, if present.
+                    if (!mAuthFailed && mUsername != null && mPassword != null) {
+                        String host = mAuthHeader.isProxy() ?
+                                Network.getInstance(mContext).getProxyHostname() :
+                                mUri.mHost;
+                        HttpAuthHandler.onReceivedCredentials(this, host,
+                                mAuthHeader.getRealm(), mUsername, mPassword);
+                        makeAuthResponse(mUsername, mPassword);
+                    } else {
+                        Network.getInstance(mContext).handleAuthRequest(this);
+                    }
                     return;
                 }
                 break;  // use default
@@ -603,7 +696,14 @@ class LoadListener extends Handler implements EventHandler {
                 // ask for it, so make sure we have a valid CacheLoader
                 // before calling it.
                 if (mCacheLoader != null) {
-                    mCacheLoader.load();
+                    if (isSynchronous()) {
+                        mCacheLoader.load();
+                    } else {
+                        // Load the cached file in a separate thread
+                        WebViewWorker.getHandler().obtainMessage(
+                                WebViewWorker.MSG_ADD_STREAMLOADER, mCacheLoader)
+                                .sendToTarget();
+                    }
                     mFromCache = true;
                     if (DebugFlags.LOAD_LISTENER) {
                         Log.v(LOGTAG, "LoadListener cache load url=" + url());
@@ -636,7 +736,7 @@ class LoadListener extends Handler implements EventHandler {
      */
     boolean checkCache(Map<String, String> headers) {
         // Get the cache file name for the current URL
-        CacheResult result = CacheManager.getCacheFile(url(),
+        CacheResult result = CacheManager.getCacheFile(url(), mPostIdentifier,
                 headers);
 
         // Go ahead and set the cache loader to null in case the result is
@@ -662,8 +762,14 @@ class LoadListener extends Handler implements EventHandler {
                     Log.v(LOGTAG, "FrameLoader: HTTP URL in cache " +
                             "and usable: " + url());
                 }
-                // Load the cached file
-                mCacheLoader.load();
+                if (isSynchronous()) {
+                    mCacheLoader.load();
+                } else {
+                    // Load the cached file in a separate thread
+                    WebViewWorker.getHandler().obtainMessage(
+                            WebViewWorker.MSG_ADD_STREAMLOADER, mCacheLoader)
+                            .sendToTarget();
+                }
                 mFromCache = true;
                 return true;
             }
@@ -772,41 +878,41 @@ class LoadListener extends Handler implements EventHandler {
                     + " username: " + username
                     + " password: " + password);
         }
-
-        // create and queue an authentication-response
         if (username != null && password != null) {
-            if (mAuthHeader != null && mRequestHandle != null) {
-                mAuthHeader.setUsername(username);
-                mAuthHeader.setPassword(password);
-
-                int scheme = mAuthHeader.getScheme();
-                if (scheme == HttpAuthHeader.BASIC) {
-                    // create a basic response
-                    boolean isProxy = mAuthHeader.isProxy();
-
-                    mRequestHandle.setupBasicAuthResponse(isProxy,
-                            username, password);
-                } else {
-                    if (scheme == HttpAuthHeader.DIGEST) {
-                        // create a digest response
-                        boolean isProxy = mAuthHeader.isProxy();
-
-                        String realm     = mAuthHeader.getRealm();
-                        String nonce     = mAuthHeader.getNonce();
-                        String qop       = mAuthHeader.getQop();
-                        String algorithm = mAuthHeader.getAlgorithm();
-                        String opaque    = mAuthHeader.getOpaque();
-
-                        mRequestHandle.setupDigestAuthResponse
-                                (isProxy, username, password, realm,
-                                 nonce, qop, algorithm, opaque);
-                    }
-                }
-            }
+            makeAuthResponse(username, password);
         } else {
             // Commit whatever data we have and tear down the loader.
             commitLoad();
             tearDown();
+        }
+    }
+
+    void makeAuthResponse(String username, String password) {
+        if (mAuthHeader == null || mRequestHandle == null) {
+            return;
+        }
+
+        mAuthHeader.setUsername(username);
+        mAuthHeader.setPassword(password);
+
+        int scheme = mAuthHeader.getScheme();
+        if (scheme == HttpAuthHeader.BASIC) {
+            // create a basic response
+            boolean isProxy = mAuthHeader.isProxy();
+
+            mRequestHandle.setupBasicAuthResponse(isProxy, username, password);
+        } else if (scheme == HttpAuthHeader.DIGEST) {
+            // create a digest response
+            boolean isProxy = mAuthHeader.isProxy();
+
+            String realm     = mAuthHeader.getRealm();
+            String nonce     = mAuthHeader.getNonce();
+            String qop       = mAuthHeader.getQop();
+            String algorithm = mAuthHeader.getAlgorithm();
+            String opaque    = mAuthHeader.getOpaque();
+
+            mRequestHandle.setupDigestAuthResponse(isProxy, username, password,
+                    realm, nonce, qop, algorithm, opaque);
         }
     }
 
@@ -861,6 +967,10 @@ class LoadListener extends Handler implements EventHandler {
         }
     }
 
+    long postIdentifier() {
+        return mPostIdentifier;
+    }
+
     void attachRequestHandle(RequestHandle requestHandle) {
         if (DebugFlags.LOAD_LISTENER) {
             Log.v(LOGTAG, "LoadListener.attachRequestHandle(): " +
@@ -884,10 +994,10 @@ class LoadListener extends Handler implements EventHandler {
      * WebCore.
      */
     void downloadFile() {
-        // Setting the Cache Result to null ensures that this
-        // content is not added to the cache
-        mCacheResult = null;
-        
+        // remove the cache
+        WebViewWorker.getHandler().obtainMessage(
+                WebViewWorker.MSG_REMOVE_CACHE, this).sendToTarget();
+
         // Inform the client that they should download a file
         mBrowserFrame.getCallbackProxy().onDownloadStart(url(), 
                 mBrowserFrame.getUserAgentString(),
@@ -907,8 +1017,9 @@ class LoadListener extends Handler implements EventHandler {
      * be used. This is just for forward/back navigation to a POST
      * URL.
      */
-    static boolean willLoadFromCache(String url) {
-        boolean inCache = CacheManager.getCacheFile(url, null) != null;
+    static boolean willLoadFromCache(String url, long identifier) {
+        boolean inCache =
+                CacheManager.getCacheFile(url, identifier, null) != null;
         if (DebugFlags.LOAD_LISTENER) {
             Log.v(LOGTAG, "willLoadFromCache: " + url + " in cache: " + 
                     inCache);
@@ -951,8 +1062,12 @@ class LoadListener extends Handler implements EventHandler {
 
         // do not call webcore if it is redirect. According to the code in
         // InspectorController::willSendRequest(), the response is only updated
-        // when it is not redirect.
-        if ((mStatusCode >= 301 && mStatusCode <= 303) || mStatusCode == 307) {
+        // when it is not redirect. If we received a not-modified response from
+        // the server and mCacheLoader is not null, do not send the response to
+        // webkit. This is just a validation response for loading from the
+        // cache.
+        if ((mStatusCode >= 301 && mStatusCode <= 303) || mStatusCode == 307 ||
+                (mStatusCode == 304 && mCacheLoader != null)) {
             return;
         }
 
@@ -966,6 +1081,13 @@ class LoadListener extends Handler implements EventHandler {
             // KeyStore in commitLoad. Do not call webcore.
             return;
         }
+
+        // If the response is an authentication and we've resent the
+        // request with some credentials then don't commit the headers
+        // of this response; wait for the response to the request with the
+        // credentials.
+        if (mAuthHeader != null)
+            return;
 
         // Commit the headers to WebCore
         int nativeResponse = createNativeResponse();
@@ -987,7 +1109,7 @@ class LoadListener extends Handler implements EventHandler {
                 mCacheLoader != null) ? HTTP_OK : mStatusCode;
         // pass content-type content-length and content-encoding
         final int nativeResponse = nativeCreateResponse(
-                mUrl, statusCode, mStatusText,
+                originalUrl(), statusCode, mStatusText,
                 mMimeType, mContentLength, mEncoding);
         if (mHeaders != null) {
             mHeaders.getHeaders(new Headers.HeaderCallback() {
@@ -1009,28 +1131,34 @@ class LoadListener extends Handler implements EventHandler {
         if (mIsMainPageLoader) {
             String type = sCertificateTypeMap.get(mMimeType);
             if (type != null) {
-                // In the case of downloading certificate, we will save it to
-                // the KeyStore and stop the current loading so that it will not
-                // generate a new history page
-                byte[] cert = new byte[mDataBuilder.getByteSize()];
-                int offset = 0;
-                while (true) {
-                    ByteArrayBuilder.Chunk c = mDataBuilder.getFirstChunk();
-                    if (c == null) break;
+                // This must be synchronized so that no more data can be added
+                // after getByteSize returns.
+                synchronized (mDataBuilder) {
+                    // In the case of downloading certificate, we will save it
+                    // to the KeyStore and stop the current loading so that it
+                    // will not generate a new history page
+                    byte[] cert = new byte[mDataBuilder.getByteSize()];
+                    int offset = 0;
+                    while (true) {
+                        ByteArrayBuilder.Chunk c = mDataBuilder.getFirstChunk();
+                        if (c == null) break;
 
-                    if (c.mLength != 0) {
-                        System.arraycopy(c.mArray, 0, cert, offset, c.mLength);
-                        offset += c.mLength;
+                        if (c.mLength != 0) {
+                            System.arraycopy(c.mArray, 0, cert, offset, c.mLength);
+                            offset += c.mLength;
+                        }
+                        c.release();
                     }
-                    mDataBuilder.releaseChunk(c);
+                    CertTool.addCertificate(mContext, type, cert);
+                    mBrowserFrame.stopLoading();
+                    return;
                 }
-                CertTool.addCertificate(mContext, type, cert);
-                mBrowserFrame.stopLoading();
-                return;
             }
         }
 
-        // Give the data to WebKit now
+        // Give the data to WebKit now. We don't have to synchronize on
+        // mDataBuilder here because pulling each chunk removes it from the
+        // internal list so it cannot be modified.
         PerfChecker checker = new PerfChecker();
         ByteArrayBuilder.Chunk c;
         while (true) {
@@ -1038,16 +1166,15 @@ class LoadListener extends Handler implements EventHandler {
             if (c == null) break;
 
             if (c.mLength != 0) {
-                if (mCacheResult != null) {
-                    try {
-                        mCacheResult.outStream.write(c.mArray, 0, c.mLength);
-                    } catch (IOException e) {
-                        mCacheResult = null;
-                    }
-                }
                 nativeAddData(c.mArray, c.mLength);
+                WebViewWorker.CacheData data = new WebViewWorker.CacheData();
+                data.mListener = this;
+                data.mChunk = c;
+                WebViewWorker.getHandler().obtainMessage(
+                        WebViewWorker.MSG_APPEND_CACHE, data).sendToTarget();
+            } else {
+                c.release();
             }
-            mDataBuilder.releaseChunk(c);
             checker.responseAlert("res nativeAddData");
         }
     }
@@ -1057,16 +1184,16 @@ class LoadListener extends Handler implements EventHandler {
      * cancellation or errors during the load.
      */
     void tearDown() {
-        if (mCacheResult != null) {
-            if (getErrorID() == OK) {
-                CacheManager.saveCacheFile(mUrl, mCacheResult);
-            }
-
-            // we need to reset mCacheResult to be null
-            // resource loader's tearDown will call into WebCore's
-            // nativeFinish, which in turn calls loader.cancel().
-            // If we don't reset mCacheFile, the file will be deleted.
-            mCacheResult = null;
+        if (getErrorID() == OK) {
+            WebViewWorker.CacheSaveData data = new WebViewWorker.CacheSaveData();
+            data.mListener = this;
+            data.mUrl = mUrl;
+            data.mPostId = mPostIdentifier;
+            WebViewWorker.getHandler().obtainMessage(
+                    WebViewWorker.MSG_SAVE_CACHE, data).sendToTarget();
+        } else {
+            WebViewWorker.getHandler().obtainMessage(
+                    WebViewWorker.MSG_REMOVE_CACHE, this).sendToTarget();
         }
         if (mNativeLoader != 0) {
             PerfChecker checker = new PerfChecker();
@@ -1105,6 +1232,16 @@ class LoadListener extends Handler implements EventHandler {
     }
 
     /**
+     * Pause the load. For example, if a plugin is unable to accept more data,
+     * we pause reading from the request. Called directly from the WebCore thread.
+     */
+    void pauseLoad(boolean pause) {
+        if (mRequestHandle != null) {
+            mRequestHandle.pauseRequest(pause);
+        }
+    }
+
+    /**
      * Cancel a request.
      * FIXME: This will only work if the request has yet to be handled. This
      * is in no way guarenteed if requests are served in a separate thread.
@@ -1124,7 +1261,8 @@ class LoadListener extends Handler implements EventHandler {
             mRequestHandle = null;
         }
 
-        mCacheResult = null;
+        WebViewWorker.getHandler().obtainMessage(
+                WebViewWorker.MSG_REMOVE_CACHE, this).sendToTarget();
         mCancelled = true;
 
         clearNativeLoader();
@@ -1180,18 +1318,22 @@ class LoadListener extends Handler implements EventHandler {
                 return;
             }
 
-            if (mOriginalUrl == null) {
-                mOriginalUrl = mUrl;
-            }
 
             // Cache the redirect response
-            if (mCacheResult != null) {
-                if (getErrorID() == OK) {
-                    CacheManager.saveCacheFile(mUrl, mCacheResult);
-                }
-                mCacheResult = null;
+            if (getErrorID() == OK) {
+                WebViewWorker.CacheSaveData data = new WebViewWorker.CacheSaveData();
+                data.mListener = this;
+                data.mUrl = mUrl;
+                data.mPostId = mPostIdentifier;
+                WebViewWorker.getHandler().obtainMessage(
+                        WebViewWorker.MSG_SAVE_CACHE, data).sendToTarget();
+            } else {
+                WebViewWorker.getHandler().obtainMessage(
+                        WebViewWorker.MSG_REMOVE_CACHE, this).sendToTarget();
             }
 
+            // Saving a copy of the unstripped url for the response
+            mOriginalUrl = redirectTo;
             // This will strip the anchor
             setUrl(redirectTo);
 
@@ -1210,8 +1352,17 @@ class LoadListener extends Handler implements EventHandler {
                 // mRequestHandle can be null when the request was satisfied
                 // by the cache, and the cache returned a redirect
                 if (mRequestHandle != null) {
-                    mRequestHandle.setupRedirect(mUrl, mStatusCode,
-                            mRequestHeaders);
+                    try {
+                        mRequestHandle.setupRedirect(mUrl, mStatusCode,
+                                mRequestHeaders);
+                    } catch(RuntimeException e) {
+                        Log.e(LOGTAG, e.getMessage());
+                        // Signal a bad url error if we could not load the
+                        // redirection.
+                        handleError(EventHandler.ERROR_BAD_URL,
+                                mContext.getString(R.string.httpErrorBadUrl));
+                        return;
+                    }
                 } else {
                     // If the original request came from the cache, there is no
                     // RequestHandle, we have to create a new one through
@@ -1482,7 +1633,7 @@ class LoadListener extends Handler implements EventHandler {
         // from http thread. Then it is called again from WebViewCore thread 
         // after the load is completed. So make sure the queue is cleared but
         // don't set it to null.
-        for (int size = mMessageQueue.size(); size > 0; size--) {
+        while (!mMessageQueue.isEmpty()) {
             handleMessage(mMessageQueue.remove(0));
         }
     }

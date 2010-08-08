@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -40,16 +40,31 @@ static SkShader::TileMode toTileMode(bool doRepeat) {
     return doRepeat ? SkShader::kRepeat_TileMode : SkShader::kClamp_TileMode;
 }
 
-SkShader* Pattern::createPlatformPattern(const TransformationMatrix& ) const
+void Pattern::platformDestroy()
 {
+    m_pattern->safeUnref();
+    m_pattern = 0;
+}
+
+SkShader* Pattern::platformPattern(const AffineTransform&)
+{
+    if (m_pattern)
+        return m_pattern;
+
     SkBitmapRef* ref = tileImage()->nativeImageForCurrentFrame();
     if (!ref)
         return 0;
-    SkShader* s = SkShader::CreateBitmapShader(ref->bitmap(),
-                                               toTileMode(m_repeatX),
-                                               toTileMode(m_repeatY));
-    s->setLocalMatrix(m_patternSpaceTransformation);
-    return s;
+    m_pattern = SkShader::CreateBitmapShader(ref->bitmap(),
+                                             toTileMode(m_repeatX),
+                                             toTileMode(m_repeatY));
+    m_pattern->setLocalMatrix(m_patternSpaceTransformation);
+    return m_pattern;
+}
+
+void Pattern::setPlatformPatternSpaceTransform()
+{
+    if (m_pattern)
+        m_pattern->setLocalMatrix(m_patternSpaceTransformation);
 }
 
 } //namespace

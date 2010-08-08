@@ -36,6 +36,8 @@
 
 #include "Frame.h"
 #include "V8CustomVoidCallback.h"
+#include "V8SQLError.h"
+#include "V8SQLTransaction.h"
 
 namespace WebCore {
 
@@ -52,7 +54,6 @@ V8CustomSQLStatementErrorCallback::~V8CustomSQLStatementErrorCallback()
 
 bool V8CustomSQLStatementErrorCallback::handleEvent(SQLTransaction* transaction, SQLError* error)
 {
-    LOCK_V8;
     v8::HandleScope handleScope;
 
     v8::Handle<v8::Context> context = V8Proxy::context(m_frame.get());
@@ -62,8 +63,8 @@ bool V8CustomSQLStatementErrorCallback::handleEvent(SQLTransaction* transaction,
     v8::Context::Scope scope(context);
 
     v8::Handle<v8::Value> argv[] = {
-        V8DOMWrapper::convertToV8Object(V8ClassIndex::SQLTRANSACTION, transaction),
-        V8DOMWrapper::convertToV8Object(V8ClassIndex::SQLERROR, error)
+        toV8(transaction),
+        toV8(error)
     };
 
     // Protect the frame until the callback returns.

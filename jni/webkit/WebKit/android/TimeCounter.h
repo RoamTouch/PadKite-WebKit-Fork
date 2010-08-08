@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -26,10 +26,7 @@
 #ifndef TIME_COUNTER_H
 #define TIME_COUNTER_H
 
-#ifdef ANDROID_INSTRUMENT
-
 #include "hardware_legacy/qemu_tracing.h"
-#include <wtf/CurrentTime.h>
 
 namespace WebCore {
 
@@ -38,6 +35,10 @@ class KURL;
 }
 
 namespace android {
+
+uint32_t getThreadMsec();
+
+#ifdef ANDROID_INSTRUMENT
 
 class TimeCounter {
 public:
@@ -84,9 +85,9 @@ private:
 class TimeCounterAuto {
 public:
     TimeCounterAuto(TimeCounter::Type type) : 
-        m_type(type), m_startTime(WTF::get_thread_msec()) {}
+        m_type(type), m_startTime(getThreadMsec()) {}
     ~TimeCounterAuto() {
-        uint32_t time = WTF::get_thread_msec();
+        uint32_t time = getThreadMsec();
         TimeCounter::sEndWebCoreThreadTime = time;
         TimeCounter::sTotalTimeUsed[m_type] += time - m_startTime;
         TimeCounter::sCounter[m_type]++;
@@ -112,8 +113,8 @@ public:
 private:
     static int reentry_count;
 };
+#endif  // ANDROID_INSTRUMENT
 
 }
-#endif
 
 #endif

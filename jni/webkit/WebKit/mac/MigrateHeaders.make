@@ -36,6 +36,8 @@ all : \
     $(PUBLIC_HEADERS_DIR)/DOM.h \
     $(PUBLIC_HEADERS_DIR)/DOMAbstractView.h \
     $(PUBLIC_HEADERS_DIR)/DOMAttr.h \
+    $(PUBLIC_HEADERS_DIR)/DOMBlob.h \
+    $(INTERNAL_HEADERS_DIR)/DOMBlobInternal.h \
     $(PUBLIC_HEADERS_DIR)/DOMCDATASection.h \
     $(PUBLIC_HEADERS_DIR)/DOMCSS.h \
     $(PUBLIC_HEADERS_DIR)/DOMCSSCharsetRule.h \
@@ -106,6 +108,7 @@ all : \
     $(PUBLIC_HEADERS_DIR)/DOMHTMLIFrameElement.h \
     $(PUBLIC_HEADERS_DIR)/DOMHTMLImageElement.h \
     $(PUBLIC_HEADERS_DIR)/DOMHTMLInputElement.h \
+    $(PRIVATE_HEADERS_DIR)/DOMHTMLInputElementPrivate.h \
     $(INTERNAL_HEADERS_DIR)/DOMHTMLInputElementInternal.h \
     $(PUBLIC_HEADERS_DIR)/DOMHTMLIsIndexElement.h \
     $(PUBLIC_HEADERS_DIR)/DOMHTMLLIElement.h \
@@ -242,7 +245,6 @@ all : \
     $(INTERNAL_HEADERS_DIR)/DOMSVGCursorElementInternal.h \
     $(PRIVATE_HEADERS_DIR)/DOMSVGDefsElement.h \
     $(INTERNAL_HEADERS_DIR)/DOMSVGDefsElementInternal.h \
-    $(PRIVATE_HEADERS_DIR)/DOMSVGDefinitionSrcElement.h \
     $(PRIVATE_HEADERS_DIR)/DOMSVGDescElement.h \
     $(INTERNAL_HEADERS_DIR)/DOMSVGDescElementInternal.h \
     $(PRIVATE_HEADERS_DIR)/DOMSVGDocument.h \

@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -29,8 +29,8 @@
 #include "ChromeClient.h"
 
 #include "GeolocationPermissions.h"
-#include "Threading.h"
 #include "Timer.h"
+#include <wtf/Threading.h>
 
 namespace WebCore {
     class Geolocation;
@@ -43,7 +43,14 @@ namespace android {
 
     class ChromeClientAndroid : public ChromeClient {
     public:
-        ChromeClientAndroid() : m_webFrame(0), m_geolocationPermissions(0) { }
+        ChromeClientAndroid() : m_webFrame(0), m_geolocationPermissions(0)
+#if USE(ACCELERATED_COMPOSITING)
+                                , m_rootGraphicsLayer(0)
+                                , m_askToDrawAgain(false)
+                                , m_syncTimer(this, &ChromeClientAndroid::syncTimerFired)
+#endif
+                                , m_triedToReclaimDBQuota(false)
+                                { }
         virtual void chromeDestroyed();
         
         virtual void setWindowRect(const FloatRect&);
@@ -53,12 +60,18 @@ namespace android {
         
         virtual float scaleFactor();
         
+#ifdef ANDROID_USER_GESTURE
+        virtual void focus(bool userGesture);
+#else
         virtual void focus();
+#endif
         virtual void unfocus();
         
         virtual bool canTakeFocus(FocusDirection);
         virtual void takeFocus(FocusDirection);
-        
+
+        virtual void focusedNodeChanged(Node*);
+
         // The Frame pointer provides the ChromeClient with context about which
         // Frame wants to create the new Page.  Also, the newly created window
         // should not be shown to the user until the ChromeClient of the newly
@@ -104,11 +117,12 @@ namespace android {
         virtual void scroll(const IntSize& scrollDelta, const IntRect& rectToScroll, const IntRect& clipRect);
         virtual IntPoint screenToWindow(const IntPoint&) const;
         virtual IntRect windowToScreen(const IntRect&) const;
-        virtual PlatformWidget platformWindow() const;
+        virtual PlatformPageClient platformPageClient() const;
         virtual void contentsSizeChanged(Frame*, const IntSize&) const;
         virtual void scrollRectIntoView(const IntRect&, const ScrollView*) const;
         // End methods used by HostWindow.
 
+        virtual void scrollbarsModeDidChange() const;
         virtual void mouseDidMoveOverElement(const HitTestResult&, unsigned int);
 
         virtual void setToolTip(const String&, TextDirection);
@@ -123,8 +137,13 @@ namespace android {
 
 	virtual void populateVisitedLinks();
 
+#if ENABLE(TOUCH_EVENTS)
+        virtual void needTouchEvents(bool);
+#endif
+
         // Methods used to request and provide Geolocation permissions.
         virtual void requestGeolocationPermissionForFrame(Frame*, Geolocation*);
+        virtual void cancelGeolocationPermissionRequestForFrame(Frame*);
         // Android-specific
         void provideGeolocationPermissions(const String &origin, bool allow, bool remember);
         void storeGeolocationPermissions();
@@ -142,13 +161,27 @@ namespace android {
         // Android-specific
         void setWebFrame(android::WebFrame* webframe);
         void wakeUpMainThreadWithNewQuota(long newQuota);
+
+#if USE(ACCELERATED_COMPOSITING)
+        virtual void attachRootGraphicsLayer(WebCore::Frame*, WebCore::GraphicsLayer* g);
+        virtual void setNeedsOneShotDrawingSynchronization();
+        virtual void scheduleCompositingLayerSync();
+        void syncTimerFired(Timer<ChromeClientAndroid>*);
+#endif
+
     private:
         android::WebFrame* m_webFrame;
+        // The Geolocation permissions manager.
+        OwnPtr<GeolocationPermissions> m_geolocationPermissions;
+#if USE(ACCELERATED_COMPOSITING)
+        WebCore::GraphicsLayer* m_rootGraphicsLayer;
+        bool m_askToDrawAgain;
+        Timer<ChromeClientAndroid> m_syncTimer;
+#endif
         WTF::ThreadCondition m_quotaThreadCondition;
         WTF::Mutex m_quotaThreadLock;
         long m_newQuota;
-        // The Geolocation permissions manager.
-        OwnPtr<GeolocationPermissions> m_geolocationPermissions;
+        bool m_triedToReclaimDBQuota;
     };
 
 }

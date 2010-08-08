@@ -21,6 +21,7 @@
 #include "config.h"
 #include "GraphicsContext.h"
 
+#include "AffineTransform.h"
 #include "CharacterNames.h"
 #include "GlyphBuffer.h"
 #include "Gradient.h"
@@ -30,7 +31,6 @@
 #include "PlatformPathWince.h"
 #include "SharedBitmap.h"
 #include "SimpleFontData.h"
-#include "TransformationMatrix.h"
 #include <wtf/OwnPtr.h>
 
 #include <windows.h>
@@ -168,7 +168,7 @@ public:
     {
     }
 
-    TransformationMatrix m_transform;
+    AffineTransform m_transform;
     float m_opacity;
     Vector<Path> m_paths;
 };
@@ -211,7 +211,7 @@ public:
         m_transform.rotate(rad2deg(radians));
     }
 
-    void  concatCTM(const TransformationMatrix& transform)
+    void  concatCTM(const AffineTransform& transform)
     {
         m_transform = transform * m_transform;
     }
@@ -947,7 +947,7 @@ void GraphicsContext::drawConvexPolygon(size_t npoints, const FloatPoint* points
     }
 }
 
-void GraphicsContext::fillRect(const FloatRect& rect, const Color& color)
+void GraphicsContext::fillRect(const FloatRect& rect, const Color& color, ColorSpace colorSpace)
 {
     if (paintingDisabled() || !m_data->m_opacity)
         return;
@@ -1002,7 +1002,12 @@ void GraphicsContext::clipOut(const IntRect& rect)
     ExcludeClipRect(m_data->m_dc, trRect.x(), trRect.y(), trRect.right(), trRect.bottom());
 }
 
-void GraphicsContext::drawFocusRing(const Color& color)
+void GraphicsContext::drawFocusRing(const Vector<Path>& paths, int width, int offset, const Color& color)
+{
+    // FIXME: implement
+}
+
+void GraphicsContext::drawFocusRing(const Vector<IntRect>& rects, int width, int offset, const Color& color)
 {
     if (!m_data->m_opacity || paintingDisabled())
         return;
@@ -1011,10 +1016,9 @@ void GraphicsContext::drawFocusRing(const Color& color)
     if (!m_data->m_dc)
         return;
 
-    int radius = (focusRingWidth() - 1) / 2;
-    int offset = radius + focusRingOffset();
+    int radius = (width - 1) / 2;
+    offset += radius;
 
-    const Vector<IntRect>& rects = focusRingRects();
     unsigned rectCount = rects.size();
     IntRect finalFocusRect;
     for (unsigned i = 0; i < rectCount; i++) {
@@ -1051,12 +1055,12 @@ void GraphicsContext::drawLineForMisspellingOrBadGrammar(const IntPoint&, int wi
     notImplemented();
 }
 
-void GraphicsContext::setPlatformFillColor(const Color& col)
+void GraphicsContext::setPlatformFillColor(const Color& col, ColorSpace colorSpace)
 {
     notImplemented();
 }
 
-void GraphicsContext::setPlatformStrokeColor(const Color& col)
+void GraphicsContext::setPlatformStrokeColor(const Color& col, ColorSpace colorSpace)
 {
     notImplemented();
 }
@@ -1088,7 +1092,7 @@ void GraphicsContext::clearRect(const FloatRect& rect)
         return;
     } 
 
-    fillRect(rect, Color(Color::white));
+    fillRect(rect, Color(Color::white), DeviceColorSpace);
 }
 
 void GraphicsContext::strokeRect(const FloatRect& rect, float width)
@@ -1139,7 +1143,7 @@ void GraphicsContext::endTransparencyLayer()
     m_data->restore();
 }
 
-void GraphicsContext::concatCTM(const TransformationMatrix& transform)
+void GraphicsContext::concatCTM(const AffineTransform& transform)
 {
     m_data->concatCTM(transform);
 }
@@ -1219,6 +1223,11 @@ void GraphicsContext::clip(const Path& path)
     notImplemented();
 }
 
+void GraphicsContext::canvasClip(const Path& path)
+{
+    clip(path);
+}
+
 void GraphicsContext::clipOut(const Path&)
 {
     notImplemented();
@@ -1233,7 +1242,7 @@ static inline IntPoint rectCenterPoint(const RECT& rect)
 {
     return IntPoint(rect.left + (rect.right - rect.left) / 2, rect.top + (rect.bottom - rect.top) / 2);
 }
-void GraphicsContext::fillRoundedRect(const IntRect& fillRect, const IntSize& topLeft, const IntSize& topRight, const IntSize& bottomLeft, const IntSize& bottomRight, const Color& c)
+void GraphicsContext::fillRoundedRect(const IntRect& fillRect, const IntSize& topLeft, const IntSize& topRight, const IntSize& bottomLeft, const IntSize& bottomRight, const Color& c, ColorSpace colorSpace)
 {
     ScopeDCProvider dcProvider(m_data);
     if (!m_data->m_dc)
@@ -1350,7 +1359,7 @@ Color gradientAverageColor(const Gradient* gradient)
 
 void GraphicsContext::fillPath()
 {
-    Color c = m_common->state.fillColorSpace == GradientColorSpace && m_common->state.fillGradient
+    Color c = m_common->state.fillGradient
         ? gradientAverageColor(m_common->state.fillGradient.get())
         : fillColor();
 
@@ -1371,7 +1380,7 @@ void GraphicsContext::fillPath()
             if (!dc)
                 continue;
 
-            TransformationMatrix tr = m_data->m_transform;
+            AffineTransform tr = m_data->m_transform;
             tr.translate(transparentDC.toShift().width(), transparentDC.toShift().height());
 
             SelectObject(dc, GetStockObject(NULL_PEN));
@@ -1411,7 +1420,7 @@ void GraphicsContext::strokePath()
             if (!dc)
                 continue;
 
-            TransformationMatrix tr = m_data->m_transform;
+            AffineTransform tr = m_data->m_transform;
             tr.translate(transparentDC.toShift().width(), transparentDC.toShift().height());
 
             SelectObject(dc, GetStockObject(NULL_BRUSH));
@@ -1444,7 +1453,7 @@ void GraphicsContext::fillRect(const FloatRect& r, const Gradient* gradient)
     if (numStops == 1) {
         const Gradient::ColorStop& stop = stops.first();
         Color color(stop.red, stop.green, stop.blue, stop.alpha);
-        fillRect(r, color);
+        fillRect(r, color, DeviceColorSpace);
         return;
     } 
     
@@ -1522,7 +1531,7 @@ void GraphicsContext::fillRect(const FloatRect& r, const Gradient* gradient)
     GradientFill(dc, tv.data(), tv.size(), mesh.data(), mesh.size(), vertical ? GRADIENT_FILL_RECT_V : GRADIENT_FILL_RECT_H);
 }
 
-TransformationMatrix GraphicsContext::getCTM() const
+AffineTransform GraphicsContext::getCTM() const
 {
     return m_data->m_transform;
 }
@@ -1534,13 +1543,13 @@ void GraphicsContext::clipToImageBuffer(const FloatRect&, const ImageBuffer*)
 
 void GraphicsContext::fillRect(const FloatRect& rect)
 {
-    if (m_common->state.fillColorSpace == GradientColorSpace && m_common->state.fillGradient)
+    if (m_common->state.fillGradient)
         fillRect(rect, m_common->state.fillGradient.get());
     else
-        fillRect(rect, fillColor());
+        fillRect(rect, fillColor(), DeviceColorSpace);
 }
 
-void GraphicsContext::setPlatformShadow(const IntSize&, int, const Color&)
+void GraphicsContext::setPlatformShadow(const IntSize&, int, const Color&, ColorSpace)
 {
     notImplemented();
 }
@@ -1865,7 +1874,7 @@ void GraphicsContext::drawBitmap(SharedBitmap* bmp, const IntRect& dstRectIn, co
         transparentDC.fillAlphaChannel();
 }
 
-void GraphicsContext::drawBitmapPattern(SharedBitmap* bmp, const FloatRect& tileRectIn, const TransformationMatrix& patternTransform,
+void GraphicsContext::drawBitmapPattern(SharedBitmap* bmp, const FloatRect& tileRectIn, const AffineTransform& patternTransform,
                 const FloatPoint& phase, CompositeOperator op, const FloatRect& destRectIn, const IntSize& origSourceSize)
 {
     if (!m_data->m_opacity)
@@ -1884,7 +1893,7 @@ void GraphicsContext::drawBitmapPattern(SharedBitmap* bmp, const FloatRect& tile
     trRect.move(transparentDC.toShift());
     FloatRect movedDstRect = m_data->m_transform.inverse().mapRect(FloatRect(trRect));
     FloatSize moved(movedDstRect.location() - destRectIn.location());
-    TransformationMatrix transform = m_data->m_transform;
+    AffineTransform transform = m_data->m_transform;
     transform.translate(moved.width(), moved.height());
 
     bmp->drawPattern(dc, transform, tileRectIn, patternTransform, phase, op, destRectIn, origSourceSize);

@@ -26,6 +26,7 @@
 #include "config.h"
 #include "Settings.h"
 
+#include "BackForwardList.h"
 #include "Frame.h"
 #include "FrameTree.h"
 #include "FrameView.h"
@@ -46,6 +47,10 @@ static void setNeedsReapplyStylesInAllFrames(Page* page)
 
 #if USE(SAFARI_THEME)
 bool Settings::gShouldPaintNativeControls = true;
+#endif
+
+#if PLATFORM(WIN) || (OS(WINDOWS) && PLATFORM(WX))
+bool Settings::gShouldUseHighResolutionTimers = true;
 #endif
 
 Settings::Settings(Page* page)
@@ -69,14 +74,16 @@ Settings::Settings(Page* page)
     , m_blockNetworkImage(false)
 #endif
     , m_maximumDecodedImageSize(numeric_limits<size_t>::max())
+    , m_localStorageQuota(5 * 1024 * 1024)  // Suggested by the HTML5 spec.
+    , m_pluginAllowedRunTime(numeric_limits<unsigned>::max())
     , m_isJavaEnabled(false)
     , m_loadsImagesAutomatically(false)
     , m_privateBrowsingEnabled(false)
     , m_caretBrowsingEnabled(false)
+    , m_areImagesEnabled(true)
     , m_arePluginsEnabled(false)
     , m_databasesEnabled(false)
     , m_localStorageEnabled(false)
-    , m_sessionStorageEnabled(true)
     , m_isJavaScriptEnabled(false)
     , m_isWebSecurityEnabled(true)
     , m_allowUniversalAccessFromFileURLs(true)
@@ -100,6 +107,7 @@ Settings::Settings(Page* page)
     , m_authorAndUserStylesEnabled(true)
     , m_needsSiteSpecificQuirks(false)
     , m_fontRenderingMode(0)
+    , m_frameSetFlatteningEnabled(false)
     , m_webArchiveDebugModeEnabled(false)
     , m_localFileContentSniffingEnabled(false)
     , m_inApplicationChromeMode(false)
@@ -110,7 +118,8 @@ Settings::Settings(Page* page)
     , m_usesEncodingDetector(false)
     , m_allowScriptsToCloseWindows(false)
     , m_editingBehavior(
-#if PLATFORM(MAC)
+#if PLATFORM(MAC) || (PLATFORM(CHROMIUM) && OS(DARWIN))
+        // (PLATFORM(MAC) is always false in Chromium, hence the extra condition.)
         EditingMacBehavior
 #else
         EditingWindowsBehavior
@@ -121,11 +130,20 @@ Settings::Settings(Page* page)
     , m_downloadableBinaryFontsEnabled(true)
     , m_xssAuditorEnabled(false)
     , m_acceleratedCompositingEnabled(true)
+    , m_showDebugBorders(false)
+    , m_showRepaintCounter(false)
+    , m_experimentalNotificationsEnabled(false)
+    , m_webGLEnabled(false)
+    , m_geolocationEnabled(true)
+    , m_loadDeferringEnabled(true)
+#ifdef ANDROID_PLUGINS
+    , m_pluginsOnDemand(false)
+#endif
 {
     // A Frame may not have been created yet, so we initialize the AtomicString 
     // hash before trying to use it.
     AtomicString::init();
-#ifdef ANDROID_META_SUPPORT    
+#ifdef ANDROID_META_SUPPORT
     resetMetadataSettings();
 #endif
 }
@@ -252,6 +270,11 @@ void Settings::setJavaEnabled(bool isJavaEnabled)
     m_isJavaEnabled = isJavaEnabled;
 }
 
+void Settings::setImagesEnabled(bool areImagesEnabled)
+{
+    m_areImagesEnabled = areImagesEnabled;
+}
+
 void Settings::setPluginsEnabled(bool arePluginsEnabled)
 {
     m_arePluginsEnabled = arePluginsEnabled;
@@ -267,9 +290,9 @@ void Settings::setLocalStorageEnabled(bool localStorageEnabled)
     m_localStorageEnabled = localStorageEnabled;
 }
 
-void Settings::setSessionStorageEnabled(bool sessionStorageEnabled)
+void Settings::setLocalStorageQuota(unsigned localStorageQuota)
 {
-    m_sessionStorageEnabled = sessionStorageEnabled;
+    m_localStorageQuota = localStorageQuota;
 }
 
 void Settings::setPrivateBrowsingEnabled(bool privateBrowsingEnabled)
@@ -295,7 +318,6 @@ void Settings::setUserStyleSheetLocation(const KURL& userStyleSheetLocation)
     m_userStyleSheetLocation = userStyleSheetLocation;
 
     m_page->userStyleSheetLocationChanged();
-    setNeedsReapplyStylesInAllFrames(m_page);
 }
 
 void Settings::setShouldPrintBackgrounds(bool shouldPrintBackgrounds)
@@ -427,9 +449,9 @@ void Settings::setMetadataSettings(const String& key, const String& value)
             int width = value.toInt();
             if (width <= 10000) {
                 if (width <= 320) {
-                    // This is a hack to accommodate the pages designed for the 
-                    // original iPhone. The new version, since 10/2007, is to 
-                    // use device-width which works for both portrait and 
+                    // This is a hack to accommodate the pages designed for the
+                    // original iPhone. The new version, since 10/2007, is to
+                    // use device-width which works for both portrait and
                     // landscape modes.
                     m_viewport_width = 0;
                 } else {
@@ -485,26 +507,94 @@ void Settings::setMetadataSettings(const String& key, const String& value)
     } else if (key == "telephone") {
         if (value == "no") {
             m_format_detection_telephone = false;
-        }        
+        }
     } else if (key == "address") {
         if (value == "no") {
             m_format_detection_address = false;
-        }        
+        }
     } else if (key == "email") {
         if (value == "no") {
             m_format_detection_email = false;
-        }        
+        }
     } else if (key == "format-detection") {
-        // even Apple doc says "format-detection" should be the name of the 
-        // <meta> tag. In the real world, e.g. amazon.com, use 
+        // even Apple doc says "format-detection" should be the name of the
+        // <meta> tag. In the real world, e.g. amazon.com, use
         // "format-detection=no" in the "viewport" <meta> tag to disable all
         // format detection.
         if (value == "no") {
             m_format_detection_telephone = false;
             m_format_detection_address = false;
             m_format_detection_email = false;
-        }        
+        }
     }
+}
+
+void Settings::setViewportWidth(int width)
+{
+    if (width < 0 || width > 10000)
+        m_viewport_width = -1;
+    else
+        m_viewport_width = width;
+}
+
+void Settings::setViewportHeight(int height)
+{
+    if (height < 0 || height > 10000)
+        m_viewport_height = -1;
+    else
+        m_viewport_height = height;
+}
+
+void Settings::setViewportInitialScale(int scale)
+{
+    if (scale < 1 || scale > 1000)
+        m_viewport_initial_scale = 0;
+    else
+        m_viewport_initial_scale = scale;
+}
+
+void Settings::setViewportMinimumScale(int scale)
+{
+    if (scale < 1 || scale > 1000)
+        m_viewport_minimum_scale = 0;
+    else
+        m_viewport_minimum_scale = scale;
+}
+
+void Settings::setViewportMaximumScale(int scale)
+{
+    if (scale < 1 || scale > 1000)
+        m_viewport_maximum_scale = 0;
+    else
+        m_viewport_maximum_scale = scale;
+}
+
+void Settings::setViewportUserScalable(bool scalable)
+{
+    m_viewport_user_scalable = scalable;
+}
+
+void Settings::setViewportTargetDensityDpi(int dpi)
+{
+    if (dpi < 0 || dpi > 400)
+        m_viewport_target_densitydpi = -1;
+    else
+        m_viewport_target_densitydpi = dpi;
+}
+
+void Settings::setFormatDetectionAddress(bool detect)
+{
+    m_format_detection_address = detect;
+}
+
+void Settings::setFormatDetectionEmail(bool detect)
+{
+    m_format_detection_email = detect;
+}
+
+void Settings::setFormatDetectionTelephone(bool detect)
+{
+    m_format_detection_telephone = detect;
 }
 #endif
 
@@ -533,6 +623,11 @@ FontRenderingMode Settings::fontRenderingMode() const
 void Settings::setNeedsSiteSpecificQuirks(bool needsQuirks)
 {
     m_needsSiteSpecificQuirks = needsQuirks;
+}
+
+void Settings::setFrameSetFlatteningEnabled(bool frameSetFlatteningEnabled)
+{
+    m_frameSetFlatteningEnabled = frameSetFlatteningEnabled;
 }
 
 void Settings::setWebArchiveDebugModeEnabled(bool enabled)
@@ -618,6 +713,57 @@ void Settings::setAcceleratedCompositingEnabled(bool enabled)
         
     m_acceleratedCompositingEnabled = enabled;
     setNeedsReapplyStylesInAllFrames(m_page);
+}
+
+void Settings::setShowDebugBorders(bool enabled)
+{
+    if (m_showDebugBorders == enabled)
+        return;
+        
+    m_showDebugBorders = enabled;
+    setNeedsReapplyStylesInAllFrames(m_page);
+}
+
+void Settings::setShowRepaintCounter(bool enabled)
+{
+    if (m_showRepaintCounter == enabled)
+        return;
+        
+    m_showRepaintCounter = enabled;
+    setNeedsReapplyStylesInAllFrames(m_page);
+}
+
+void Settings::setExperimentalNotificationsEnabled(bool enabled)
+{
+    m_experimentalNotificationsEnabled = enabled;
+}
+
+void Settings::setPluginAllowedRunTime(unsigned runTime)
+{
+    m_pluginAllowedRunTime = runTime;
+    m_page->pluginAllowedRunTimeChanged();
+}
+
+#if PLATFORM(WIN) || (OS(WINDOWS) && PLATFORM(WX))
+void Settings::setShouldUseHighResolutionTimers(bool shouldUseHighResolutionTimers)
+{
+    gShouldUseHighResolutionTimers = shouldUseHighResolutionTimers;
+}
+#endif
+
+void Settings::setWebGLEnabled(bool enabled)
+{
+    m_webGLEnabled = enabled;
+}
+
+void Settings::setGeolocationEnabled(bool enabled)
+{
+    m_geolocationEnabled = enabled;
+}
+
+void Settings::setLoadDeferringEnabled(bool enabled)
+{
+    m_loadDeferringEnabled = enabled;
 }
 
 } // namespace WebCore

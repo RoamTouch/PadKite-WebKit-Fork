@@ -286,7 +286,7 @@ HRESULT STDMETHODCALLTYPE WebDatabaseManager::deleteAllDatabases()
 
     return S_OK;
 }
-   
+
 HRESULT STDMETHODCALLTYPE WebDatabaseManager::deleteOrigin( 
     /* [in] */ IWebSecurityOrigin* origin)
 {
@@ -336,6 +336,21 @@ void WebDatabaseManager::dispatchDidModifyOrigin(SecurityOrigin* origin)
     notifyCenter->postNotificationName(databaseDidModifyOriginName, securityOrigin.get(), 0);
 }
 
+HRESULT STDMETHODCALLTYPE WebDatabaseManager::setQuota(
+    /* [in] */ BSTR origin,
+    /* [in] */ unsigned long long quota)
+{
+    if (!origin)
+        return E_POINTER;
+
+    if (this != s_sharedWebDatabaseManager)
+        return E_FAIL;
+
+    DatabaseTracker::tracker().setQuota(SecurityOrigin::createFromString(origin).get(), quota);
+
+    return S_OK;
+}
+
 void WebDatabaseManager::dispatchDidModifyDatabase(SecurityOrigin* origin, const String& databaseName)
 {
     static BSTR databaseDidModifyOriginName = SysAllocString(WebDatabaseDidModifyDatabaseNotification);
@@ -349,7 +364,7 @@ void WebDatabaseManager::dispatchDidModifyDatabase(SecurityOrigin* origin, const
     RetainPtr<CFStringRef> str(AdoptCF, databaseName.createCFString());
     CFDictionarySetValue(userInfo.get(), databaseNameKey, str.get());
 
-    COMPtr<CFDictionaryPropertyBag> userInfoBag(AdoptCOM, CFDictionaryPropertyBag::createInstance());
+    COMPtr<CFDictionaryPropertyBag> userInfoBag = CFDictionaryPropertyBag::createInstance();
     userInfoBag->setDictionary(userInfo.get());
 
     notifyCenter->postNotificationName(databaseDidModifyOriginName, securityOrigin.get(), userInfoBag.get());

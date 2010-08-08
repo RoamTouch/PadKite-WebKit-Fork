@@ -27,6 +27,7 @@
 #include "config.h"
 #include "DOMTimer.h"
 
+#include "InspectorTimelineAgent.h"
 #include "ScheduledAction.h"
 #include "ScriptExecutionContext.h"
 #include <wtf/HashSet.h>
@@ -47,6 +48,9 @@ DOMTimer::DOMTimer(ScriptExecutionContext* context, ScheduledAction* action, int
     , m_action(action)
     , m_nextFireInterval(0)
     , m_repeatInterval(0)
+#if !ASSERT_DISABLED
+    , m_suspended(false)
+#endif
 {
     static int lastUsedTimeoutId = 0;
     ++lastUsedTimeoutId;
@@ -84,6 +88,12 @@ int DOMTimer::install(ScriptExecutionContext* context, ScheduledAction* action, 
     // The timer is deleted when context is deleted (DOMTimer::contextDestroyed) or explicitly via DOMTimer::removeById(),
     // or if it is a one-time timer and it has fired (DOMTimer::fired).
     DOMTimer* timer = new DOMTimer(context, action, timeout, singleShot);
+
+#if ENABLE(INSPECTOR)
+    if (InspectorTimelineAgent* timelineAgent = InspectorTimelineAgent::retrieve(context))
+        timelineAgent->didInstallTimer(timer->m_timeoutId, timeout, singleShot);
+#endif    
+
     return timer->m_timeoutId;
 }
 
@@ -94,6 +104,12 @@ void DOMTimer::removeById(ScriptExecutionContext* context, int timeoutId)
     // respectively
     if (timeoutId <= 0)
         return;
+
+#if ENABLE(INSPECTOR)
+    if (InspectorTimelineAgent* timelineAgent = InspectorTimelineAgent::retrieve(context))
+        timelineAgent->didRemoveTimer(timeoutId);
+#endif
+
     delete context->findTimeout(timeoutId);
 }
 
@@ -101,6 +117,11 @@ void DOMTimer::fired()
 {
     ScriptExecutionContext* context = scriptExecutionContext();
     timerNestingLevel = m_nestingLevel;
+
+#if ENABLE(INSPECTOR)
+    if (InspectorTimelineAgent* timelineAgent = InspectorTimelineAgent::retrieve(context))
+        timelineAgent->willFireTimer(m_timeoutId);
+#endif
 
     // Simple case for non-one-shot timers.
     if (isActive()) {
@@ -112,6 +133,10 @@ void DOMTimer::fired()
 
         // No access to member variables after this point, it can delete the timer.
         m_action->execute(context);
+#if ENABLE(INSPECTOR)
+        if (InspectorTimelineAgent* timelineAgent = InspectorTimelineAgent::retrieve(context))
+            timelineAgent->didFireTimer();
+#endif
         return;
     }
 
@@ -122,6 +147,10 @@ void DOMTimer::fired()
     delete this;
 
     action->execute(context);
+#if ENABLE(INSPECTOR)
+    if (InspectorTimelineAgent* timelineAgent = InspectorTimelineAgent::retrieve(context))
+        timelineAgent->didFireTimer();
+#endif
     delete action;
     timerNestingLevel = 0;
 }
@@ -148,7 +177,10 @@ void DOMTimer::stop()
 
 void DOMTimer::suspend()
 {
-    ASSERT(!m_nextFireInterval && !m_repeatInterval);
+#if !ASSERT_DISABLED
+    ASSERT(!m_suspended);
+    m_suspended = true;
+#endif
     m_nextFireInterval = nextFireInterval();
     m_repeatInterval = repeatInterval();
     TimerBase::stop();
@@ -156,9 +188,11 @@ void DOMTimer::suspend()
 
 void DOMTimer::resume()
 {
+#if !ASSERT_DISABLED
+    ASSERT(m_suspended);
+    m_suspended = false;
+#endif
     start(m_nextFireInterval, m_repeatInterval);
-    m_nextFireInterval = 0;
-    m_repeatInterval = 0;
 }
 
 

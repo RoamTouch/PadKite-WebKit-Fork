@@ -43,14 +43,20 @@
 
 #import <WebCore/WebCoreObjCExtras.h>
 #import <WebCore/AuthenticationMac.h>
+#import <WebCore/BitmapImage.h>
+#import <WebCore/Credential.h>
+#import <WebCore/CredentialStorage.h>
 #import <WebCore/CString.h>
 #import <WebCore/Document.h>
 #import <WebCore/Element.h>
 #import <WebCore/Frame.h>
 #import <WebCore/FrameLoader.h>
 #import <WebCore/HTMLPlugInElement.h>
+#import <WebCore/HaltablePlugin.h>
 #import <WebCore/Page.h>
+#import <WebCore/ProtectionSpace.h>
 #import <WebCore/RenderView.h>
+#import <WebCore/RenderWidget.h>
 #import <WebKit/DOMPrivate.h>
 #import <runtime/InitializeThreading.h>
 #import <wtf/Assertions.h>
@@ -58,7 +64,51 @@
 #define LoginWindowDidSwitchFromUserNotification    @"WebLoginWindowDidSwitchFromUserNotification"
 #define LoginWindowDidSwitchToUserNotification      @"WebLoginWindowDidSwitchToUserNotification"
 
+static const NSTimeInterval ClearSubstituteImageDelay = 0.5;
+
 using namespace WebCore;
+
+class WebHaltablePlugin : public HaltablePlugin {
+public:
+    WebHaltablePlugin(WebBaseNetscapePluginView* view)
+        : m_view(view)
+    {
+    }
+    
+private:
+    virtual void halt();
+    virtual void restart();
+    virtual Node* node() const;
+    virtual bool isWindowed() const;
+    virtual String pluginName() const;
+
+    WebBaseNetscapePluginView* m_view;
+};
+
+void WebHaltablePlugin::halt()
+{
+    [m_view halt];
+}
+
+void WebHaltablePlugin::restart()
+{ 
+    [m_view resumeFromHalt];
+}
+    
+Node* WebHaltablePlugin::node() const
+{
+    return [m_view element];
+}
+
+bool WebHaltablePlugin::isWindowed() const
+{
+    return false;
+}
+
+String WebHaltablePlugin::pluginName() const
+{
+    return [[m_view pluginPackage] name];
+}
 
 @implementation WebBaseNetscapePluginView
 
@@ -111,7 +161,7 @@ using namespace WebCore;
         _mode = NP_EMBED;
     
     _loadManually = loadManually;
-
+    _haltable = new WebHaltablePlugin(self);
     return self;
 }
 
@@ -222,6 +272,10 @@ using namespace WebCore;
 - (void)sendModifierEventWithKeyCode:(int)keyCode character:(char)character
 {
     ASSERT_NOT_REACHED();
+}
+
+- (void)privateBrowsingModeDidChange
+{
 }
 
 - (void)removeTrackingRect
@@ -388,10 +442,13 @@ using namespace WebCore;
     }
     
     _isStarted = YES;
+    page->didStartPlugin(_haltable.get());
+
     [[self webView] addPluginInstanceView:self];
-    
-    [self updateAndSetWindow];
-    
+
+    if ([self currentWindow])
+        [self updateAndSetWindow];
+
     if ([self window]) {
         [self addWindowObservers];
         if ([[self window] isKeyWindow]) {
@@ -414,6 +471,11 @@ using namespace WebCore;
     
     if (!_isStarted)
         return;
+
+    if (Frame* frame = core([self webFrame])) {
+        if (Page* page = frame->page())
+            page->didStopPlugin(_haltable.get());
+    }
     
     _isStarted = NO;
     
@@ -426,6 +488,82 @@ using namespace WebCore;
     [self removeWindowObservers];
     
     [self destroyPlugin];
+}
+
+- (void)halt
+{
+    ASSERT(!_isHalted);
+    ASSERT(_isStarted);
+    Element *element = [self element];
+#if !defined(BUILDING_ON_TIGER) && !defined(BUILDING_ON_LEOPARD)
+    CGImageRef cgImage = CGImageRetain([core([self webFrame])->nodeImage(element) CGImageForProposedRect:nil context:nil hints:nil]);
+#else
+    RetainPtr<CGImageSourceRef> imageRef(AdoptCF, CGImageSourceCreateWithData((CFDataRef)[core([self webFrame])->nodeImage(element) TIFFRepresentation], 0));
+    CGImageRef cgImage = CGImageSourceCreateImageAtIndex(imageRef.get(), 0, 0);
+#endif
+    ASSERT(cgImage);
+    
+    // BitmapImage will release the passed in CGImage on destruction.
+    RefPtr<Image> nodeImage = BitmapImage::create(cgImage);
+    ASSERT(element->renderer());
+    toRenderWidget(element->renderer())->showSubstituteImage(nodeImage);
+    [self stop];
+    _isHalted = YES;  
+    _hasBeenHalted = YES;
+}
+
+- (void)_clearSubstituteImage
+{
+    Element* element = [self element];
+    if (!element)
+        return;
+    
+    RenderObject* renderer = element->renderer();
+    if (!renderer)
+        return;
+    
+    toRenderWidget(renderer)->showSubstituteImage(0);
+}
+
+- (void)resumeFromHalt
+{
+    ASSERT(_isHalted);
+    ASSERT(!_isStarted);
+    [self start];
+    
+    if (_isStarted)
+        _isHalted = NO;
+    
+    ASSERT([self element]->renderer());
+    // FIXME 7417484: This is a workaround for plug-ins not drawing immediately. We'd like to detect when the
+    // plug-in actually draws instead of just assuming it will do so within 0.5 seconds of being restarted.
+    [self performSelector:@selector(_clearSubstituteImage) withObject:nil afterDelay:ClearSubstituteImageDelay];
+}
+
+- (BOOL)isHalted
+{
+    return _isHalted;
+}
+
+- (BOOL)superviewsHaveSuperviews
+{
+    NSView *contentView = [[self window] contentView];
+    for (NSView *view = self; view; view = [view superview]) { 
+        if (view == contentView) 
+            return YES;
+    }
+    return NO;
+}
+
+- (BOOL)shouldClipOutPlugin
+{
+    NSWindow *window = [self window];
+    return !window || [window isMiniaturized] || [NSApp isHidden] || ![self superviewsHaveSuperviews] || [self isHiddenOrHasHiddenAncestor];
+}
+    
+- (BOOL)hasBeenHalted
+{
+    return _hasBeenHalted;
 }
 
 - (void)viewWillMoveToWindow:(NSWindow *)newWindow
@@ -478,11 +616,18 @@ using namespace WebCore;
                                                  selector:@selector(preferencesHaveChanged:)
                                                      name:WebPreferencesChangedNotification
                                                    object:nil];
+
+        _isPrivateBrowsingEnabled = [[[self webView] preferences] privateBrowsingEnabled];
         
         // View moved to an actual window. Start it if not already started.
         [self start];
-        [self restartTimers];
-        [self addWindowObservers];
+
+        // Starting the plug-in can result in it removing itself from the window so we need to ensure that we're still in
+        // place before doing anything that requires a window.
+        if ([self window]) {
+            [self restartTimers];
+            [self addWindowObservers];
+        }
     } else if ([[self webView] hostWindow]) {
         // View moved out of an actual window, but still has a host window.
         // Call setWindow to explicitly "clip out" the plug-in from sight.
@@ -554,9 +699,12 @@ using namespace WebCore;
 - (void)preferencesHaveChanged:(NSNotification *)notification
 {
     WebPreferences *preferences = [[self webView] preferences];
-    BOOL arePlugInsEnabled = [preferences arePlugInsEnabled];
+
+    if ([notification object] != preferences)
+        return;
     
-    if ([notification object] == preferences && _isStarted != arePlugInsEnabled) {
+    BOOL arePlugInsEnabled = [preferences arePlugInsEnabled];
+    if (_isStarted != arePlugInsEnabled) {
         if (arePlugInsEnabled) {
             if ([self currentWindow]) {
                 [self start];
@@ -565,6 +713,12 @@ using namespace WebCore;
             [self stop];
             [self invalidatePluginContentRect:[self bounds]];
         }
+    }
+    
+    BOOL isPrivateBrowsingEnabled = [preferences privateBrowsingEnabled];
+    if (isPrivateBrowsingEnabled != _isPrivateBrowsingEnabled) {
+        _isPrivateBrowsingEnabled = isPrivateBrowsingEnabled;
+        [self privateBrowsingModeDidChange];
     }
 }
 
@@ -608,13 +762,12 @@ using namespace WebCore;
 
 - (WebDataSource *)dataSource
 {
-    WebFrame *webFrame = kit(_element->document()->frame());
-    return [webFrame _dataSource];
+    return [[self webFrame] _dataSource];
 }
 
 - (WebFrame *)webFrame
 {
-    return [[self dataSource] webFrame];
+    return kit(_element->document()->frame());
 }
 
 - (WebView *)webView
@@ -868,7 +1021,7 @@ bool getAuthenticationInfo(const char* protocolStr, const char* hostStr, int32_t
     
     RetainPtr<NSURLProtectionSpace> protectionSpace(AdoptNS, [[NSURLProtectionSpace alloc] initWithHost:host port:port protocol:protocol realm:realm authenticationMethod:authenticationMethod]);
     
-    NSURLCredential *credential = WebCoreCredentialStorage::get(protectionSpace.get());
+    NSURLCredential *credential = mac(CredentialStorage::get(core(protectionSpace.get())));
     if (!credential)
         credential = [[NSURLCredentialStorage sharedCredentialStorage] defaultCredentialForProtectionSpace:protectionSpace.get()];
     if (!credential)

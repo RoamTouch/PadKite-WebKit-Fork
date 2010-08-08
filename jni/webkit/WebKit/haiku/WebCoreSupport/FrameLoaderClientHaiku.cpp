@@ -42,6 +42,7 @@
 #include "Page.h"
 #include "PlatformString.h"
 #include "ResourceRequest.h"
+#include "ScriptController.h"
 #include "WebView.h"
 
 #include <Message.h>
@@ -207,6 +208,21 @@ void FrameLoaderClientHaiku::dispatchDidChangeLocationWithinPage()
     notImplemented();
 }
 
+void FrameLoaderClientHaiku::dispatchDidPushStateWithinPage()
+{
+    notImplemented();
+}
+
+void FrameLoaderClientHaiku::dispatchDidReplaceStateWithinPage()
+{
+    notImplemented();
+}
+
+void FrameLoaderClientHaiku::dispatchDidPopStateWithinPage()
+{
+    notImplemented();
+}
+
 void FrameLoaderClientHaiku::dispatchWillClose()
 {
     notImplemented();
@@ -280,7 +296,7 @@ void FrameLoaderClientHaiku::dispatchWillSubmitForm(FramePolicyFunction function
     // FIXME: Send an event to allow for alerts and cancellation.
     if (!m_frame)
         return;
-    (m_frame->loader()->*function)(PolicyUse);
+    (m_frame->loader()->policyChecker()->*function)(PolicyUse);
 }
 
 void FrameLoaderClientHaiku::dispatchDidLoadMainResource(DocumentLoader*)
@@ -461,6 +477,18 @@ bool FrameLoaderClientHaiku::shouldGoToHistoryItem(WebCore::HistoryItem*) const
     return true;
 }
 
+void FrameLoaderClientHaiku::dispatchDidAddBackForwardItem(WebCore::HistoryItem*) const
+{
+}
+
+void FrameLoaderClientHaiku::dispatchDidRemoveBackForwardItem(WebCore::HistoryItem*) const
+{
+}
+
+void FrameLoaderClientHaiku::dispatchDidChangeBackForwardIndex() const
+{
+}
+
 void FrameLoaderClientHaiku::saveScrollPositionAndViewStateToItem(WebCore::HistoryItem*)
 {
     notImplemented();
@@ -635,7 +663,7 @@ void FrameLoaderClientHaiku::dispatchDecidePolicyForMIMEType(FramePolicyFunction
         return;
 
     notImplemented();
-    (m_frame->loader()->*function)(PolicyUse);
+    (m_frame->loader()->policyChecker()->*function)(PolicyUse);
 }
 
 void FrameLoaderClientHaiku::dispatchDecidePolicyForNewWindowAction(FramePolicyFunction function,
@@ -650,12 +678,12 @@ void FrameLoaderClientHaiku::dispatchDecidePolicyForNewWindowAction(FramePolicyF
         BMessage message(NEW_WINDOW_REQUESTED);
         message.AddString("url", request.url().string());
         if (m_messenger->SendMessage(&message)) {
-            (m_frame->loader()->*function)(PolicyIgnore);
+            (m_frame->loader()->policyChecker()->*function)(PolicyIgnore);
             return;
         }
     }
 
-    (m_frame->loader()->*function)(PolicyUse);
+    (m_frame->loader()->policyChecker()->*function)(PolicyUse);
 }
 
 void FrameLoaderClientHaiku::dispatchDecidePolicyForNavigationAction(FramePolicyFunction function,
@@ -671,7 +699,7 @@ void FrameLoaderClientHaiku::dispatchDecidePolicyForNavigationAction(FramePolicy
         message.AddString("url", request.url().string());
         m_messenger->SendMessage(&message);
 
-        (m_frame->loader()->*function)(PolicyUse);
+        (m_frame->loader()->policyChecker()->*function)(PolicyUse);
     }
 }
 
@@ -759,8 +787,11 @@ String FrameLoaderClientHaiku::overrideMediaType() const
     return String();
 }
 
-void FrameLoaderClientHaiku::windowObjectCleared()
+void FrameLoaderClientHaiku::dispatchDidClearWindowObjectInWorld(DOMWrapperWorld* world)
 {
+    if (world != mainThreadNormalWorld())
+        return;
+
     if (m_webView) {
         BMessage message(JAVASCRIPT_WINDOW_OBJECT_CLEARED);
         m_messenger->SendMessage(&message);

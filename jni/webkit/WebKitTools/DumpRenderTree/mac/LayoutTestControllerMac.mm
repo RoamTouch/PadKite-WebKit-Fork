@@ -42,23 +42,28 @@
 #import <WebKit/DOMElement.h>
 #import <WebKit/WebApplicationCache.h>
 #import <WebKit/WebBackForwardList.h>
-#import <WebKit/WebDatabaseManagerPrivate.h>
+#import <WebKit/WebCoreStatistics.h>
 #import <WebKit/WebDataSource.h>
+#import <WebKit/WebDatabaseManagerPrivate.h>
 #import <WebKit/WebFrame.h>
 #import <WebKit/WebFrameViewPrivate.h>
-#import <WebKit/WebIconDatabasePrivate.h>
+#import <WebKit/WebGeolocationMockPrivate.h>
 #import <WebKit/WebHTMLRepresentation.h>
 #import <WebKit/WebHTMLViewPrivate.h>
 #import <WebKit/WebHistory.h>
 #import <WebKit/WebHistoryPrivate.h>
-#import <WebKit/WebInspector.h>
+#import <WebKit/WebIconDatabasePrivate.h>
+#import <WebKit/WebInspectorPrivate.h>
 #import <WebKit/WebNSURLExtras.h>
 #import <WebKit/WebPreferences.h>
 #import <WebKit/WebPreferencesPrivate.h>
+#import <WebKit/WebScriptWorld.h>
 #import <WebKit/WebSecurityOriginPrivate.h>
 #import <WebKit/WebTypesInternal.h>
 #import <WebKit/WebView.h>
 #import <WebKit/WebViewPrivate.h>
+#import <WebKit/WebWorkersPrivate.h>
+#import <wtf/HashMap.h>
 #import <wtf/RetainPtr.h>
 
 @interface CommandValidationTarget : NSObject <NSValidatedUserInterfaceItem>
@@ -149,6 +154,19 @@ void LayoutTestController::display()
     displayWebView();
 }
 
+JSRetainPtr<JSStringRef> LayoutTestController::counterValueForElementById(JSStringRef id)
+{
+    RetainPtr<CFStringRef> idCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, id));
+    NSString *idNS = (NSString *)idCF.get();
+
+    DOMElement *element = [[mainFrame DOMDocument] getElementById:idNS];
+    if (!element)
+        return 0;
+
+    JSRetainPtr<JSStringRef> counterValue(Adopt, JSStringCreateWithCFString((CFStringRef)[mainFrame counterValueForElement:element]));
+    return counterValue;
+}
+
 void LayoutTestController::keepWebHistory()
 {
     if (![WebHistory optionalSharedHistory]) {
@@ -158,9 +176,31 @@ void LayoutTestController::keepWebHistory()
     }
 }
 
+int LayoutTestController::pageNumberForElementById(JSStringRef id, float pageWidthInPixels, float pageHeightInPixels)
+{
+    RetainPtr<CFStringRef> idCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, id));
+    NSString *idNS = (NSString *)idCF.get();
+
+    DOMElement *element = [[mainFrame DOMDocument] getElementById:idNS];
+    if (!element)
+        return -1;
+
+    return [mainFrame pageNumberForElement:element:pageWidthInPixels:pageHeightInPixels];
+}
+
+int LayoutTestController::numberOfPages(float pageWidthInPixels, float pageHeightInPixels)
+{
+    return [mainFrame numberOfPages:pageWidthInPixels:pageHeightInPixels];
+}
+
 size_t LayoutTestController::webHistoryItemCount()
 {
     return [[[WebHistory optionalSharedHistory] allItems] count];
+}
+
+unsigned LayoutTestController::workerThreadCount() const
+{
+    return [WebWorkersPrivate workerThreadCount];
 }
 
 void LayoutTestController::notifyDone()
@@ -192,6 +232,16 @@ void LayoutTestController::setAcceptsEditing(bool newAcceptsEditing)
     [(EditingDelegate *)[[mainFrame webView] editingDelegate] setAcceptsEditing:newAcceptsEditing];
 }
 
+void LayoutTestController::setAlwaysAcceptCookies(bool alwaysAcceptCookies)
+{
+    if (alwaysAcceptCookies == m_alwaysAcceptCookies)
+        return;
+
+    m_alwaysAcceptCookies = alwaysAcceptCookies;
+    NSHTTPCookieAcceptPolicy cookieAcceptPolicy = alwaysAcceptCookies ? NSHTTPCookieAcceptPolicyAlways : NSHTTPCookieAcceptPolicyOnlyFromMainDocumentDomain;
+    [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookieAcceptPolicy:cookieAcceptPolicy];
+}
+
 void LayoutTestController::setAppCacheMaximumSize(unsigned long long size)
 {
     [WebApplicationCache setMaximumSize:size];
@@ -216,6 +266,24 @@ void LayoutTestController::setDatabaseQuota(unsigned long long quota)
     WebSecurityOrigin *origin = [[WebSecurityOrigin alloc] initWithURL:[NSURL URLWithString:@"file:///"]];
     [origin setQuota:quota];
     [origin release];
+}
+
+void LayoutTestController::setDomainRelaxationForbiddenForURLScheme(bool forbidden, JSStringRef scheme)
+{
+    RetainPtr<CFStringRef> schemeCFString(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, scheme));
+    [WebView _setDomainRelaxationForbidden:forbidden forURLScheme:(NSString *)schemeCFString.get()];
+}
+
+void LayoutTestController::setMockGeolocationPosition(double latitude, double longitude, double accuracy)
+{
+    [WebGeolocationMock setPosition:latitude:longitude:accuracy];
+}
+
+void LayoutTestController::setMockGeolocationError(int code, JSStringRef message)
+{
+    RetainPtr<CFStringRef> messageCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, message));
+    NSString *messageNS = (NSString *)messageCF.get();
+    [WebGeolocationMock setError:code:messageNS];
 }
 
 void LayoutTestController::setIconDatabaseEnabled(bool iconDatabaseEnabled)
@@ -256,6 +324,16 @@ void LayoutTestController::setXSSAuditorEnabled(bool enabled)
     [[[mainFrame webView] preferences] setXSSAuditorEnabled:enabled];
 }
 
+void LayoutTestController::setFrameSetFlatteningEnabled(bool enabled)
+{
+    [[[mainFrame webView] preferences] setFrameSetFlatteningEnabled:enabled];
+}
+
+void LayoutTestController::setAllowUniversalAccessFromFileURLs(bool enabled)
+{
+    [[[mainFrame webView] preferences] setAllowUniversalAccessFromFileURLs:enabled];
+}
+
 void LayoutTestController::setPopupBlockingEnabled(bool popupBlockingEnabled)
 {
     [[[mainFrame webView] preferences] setJavaScriptCanOpenWindowsAutomatically:!popupBlockingEnabled];
@@ -264,6 +342,11 @@ void LayoutTestController::setPopupBlockingEnabled(bool popupBlockingEnabled)
 void LayoutTestController::setTabKeyCyclesThroughElements(bool cycles)
 {
     [[mainFrame webView] setTabKeyCyclesThroughElements:cycles];
+}
+
+void LayoutTestController::setTimelineProfilingEnabled(bool enabled)
+{
+    [[[mainFrame webView] inspector] setTimelineProfilingEnabled:enabled];
 }
 
 void LayoutTestController::setUseDashboardCompatibilityMode(bool flag)
@@ -293,6 +376,22 @@ void LayoutTestController::dispatchPendingLoadRequests()
     [[mainFrame webView] _dispatchPendingLoadRequests];
 }
 
+void LayoutTestController::overridePreference(JSStringRef key, JSStringRef value)
+{
+    RetainPtr<CFStringRef> keyCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, key));
+    NSString *keyNS = (NSString *)keyCF.get();
+
+    RetainPtr<CFStringRef> valueCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, value));
+    NSString *valueNS = (NSString *)valueCF.get();
+
+    [[WebPreferences standardPreferences] _setPreferenceForTestWithValue:valueNS forKey:keyNS];
+}
+
+void LayoutTestController::removeAllVisitedLinks()
+{
+    [WebHistory _removeAllVisitedLinks];
+}
+
 void LayoutTestController::setPersistentUserStyleSheetLocation(JSStringRef jsURL)
 {
     RetainPtr<CFStringRef> urlString(AdoptCF, JSStringCopyCFString(0, jsURL));
@@ -320,14 +419,11 @@ void LayoutTestController::setSelectTrailingWhitespaceEnabled(bool flag)
     [[mainFrame webView] setSelectTrailingWhitespaceEnabled:flag];
 }
 
-static const CFTimeInterval waitToDumpWatchdogInterval = 10.0;
+static const CFTimeInterval waitToDumpWatchdogInterval = 15.0;
 
 static void waitUntilDoneWatchdogFired(CFRunLoopTimerRef timer, void* info)
 {
-    const char* message = "FAIL: Timed out waiting for notifyDone to be called\n";
-    fprintf(stderr, "%s", message);
-    fprintf(stdout, "%s", message);
-    dump();
+    gLayoutTestController->waitToDumpWatchdogTimerFired();
 }
 
 void LayoutTestController::setWaitToDump(bool waitUntilDone)
@@ -418,6 +514,16 @@ bool LayoutTestController::pauseTransitionAtTimeOnElementWithId(JSStringRef prop
     return [mainFrame _pauseTransitionOfProperty:nameNS onNode:[[mainFrame DOMDocument] getElementById:idNS] atTime:time];
 }
 
+bool LayoutTestController::sampleSVGAnimationForElementAtTime(JSStringRef animationId, double time, JSStringRef elementId)
+{
+    RetainPtr<CFStringRef> animationIDCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, animationId));
+    NSString *animationIDNS = (NSString *)animationIDCF.get();
+    RetainPtr<CFStringRef> elementIDCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, elementId));
+    NSString *elementIDNS = (NSString *)elementIDCF.get();
+
+    return [mainFrame _pauseSVGAnimation:elementIDNS onSMILNode:[[mainFrame DOMDocument] getElementById:animationIDNS] atTime:time];
+}
+
 unsigned LayoutTestController::numberOfActiveAnimations() const
 {
     return [mainFrame _numberOfActiveAnimations];
@@ -428,4 +534,86 @@ void LayoutTestController::waitForPolicyDelegate()
     setWaitToDump(true);
     [policyDelegate setControllerToNotifyDone:this];
     [[mainFrame webView] setPolicyDelegate:policyDelegate];
+}
+
+void LayoutTestController::whiteListAccessFromOrigin(JSStringRef sourceOrigin, JSStringRef destinationProtocol, JSStringRef destinationHost, bool allowDestinationSubdomains)
+{
+    RetainPtr<CFStringRef> sourceOriginCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, sourceOrigin));
+    NSString *sourceOriginNS = (NSString *)sourceOriginCF.get();
+    RetainPtr<CFStringRef> protocolCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, destinationProtocol));
+    NSString *destinationProtocolNS = (NSString *)protocolCF.get();
+    RetainPtr<CFStringRef> hostCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, destinationHost));
+    NSString *destinationHostNS = (NSString *)hostCF.get();
+    [WebView _whiteListAccessFromOrigin:sourceOriginNS destinationProtocol:destinationProtocolNS destinationHost:destinationHostNS allowDestinationSubdomains:allowDestinationSubdomains];
+}
+
+void LayoutTestController::addUserScript(JSStringRef source, bool runAtStart)
+{
+    RetainPtr<CFStringRef> sourceCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, source));
+    NSString *sourceNS = (NSString *)sourceCF.get();
+    [WebView _addUserScriptToGroup:@"org.webkit.DumpRenderTree" world:[WebScriptWorld world] source:sourceNS url:nil whitelist:nil blacklist:nil injectionTime:(runAtStart ? WebInjectAtDocumentStart : WebInjectAtDocumentEnd)];
+}
+
+void LayoutTestController::addUserStyleSheet(JSStringRef source)
+{
+    RetainPtr<CFStringRef> sourceCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, source));
+    NSString *sourceNS = (NSString *)sourceCF.get();
+    [WebView _addUserStyleSheetToGroup:@"org.webkit.DumpRenderTree" world:[WebScriptWorld world] source:sourceNS url:nil whitelist:nil blacklist:nil];
+}
+
+void LayoutTestController::showWebInspector()
+{
+    [[[mainFrame webView] preferences] setDeveloperExtrasEnabled:true];
+    [[[mainFrame webView] inspector] show:nil];
+}
+
+void LayoutTestController::closeWebInspector()
+{
+    [[[mainFrame webView] inspector] close:nil];
+    [[[mainFrame webView] preferences] setDeveloperExtrasEnabled:false];
+}
+
+void LayoutTestController::evaluateInWebInspector(long callId, JSStringRef script)
+{
+    RetainPtr<CFStringRef> scriptCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, script));
+    NSString *scriptNS = (NSString *)scriptCF.get();
+    [[[mainFrame webView] inspector] evaluateInFrontend:nil callId:callId script:scriptNS];
+}
+
+typedef HashMap<unsigned, RetainPtr<WebScriptWorld> > WorldMap;
+static WorldMap& worldMap()
+{
+    static WorldMap& map = *new WorldMap;
+    return map;
+}
+
+unsigned worldIDForWorld(WebScriptWorld *world)
+{
+    WorldMap::const_iterator end = worldMap().end();
+    for (WorldMap::const_iterator it = worldMap().begin(); it != end; ++it) {
+        if (it->second == world)
+            return it->first;
+    }
+
+    return 0;
+}
+
+void LayoutTestController::evaluateScriptInIsolatedWorld(unsigned worldID, JSObjectRef globalObject, JSStringRef script)
+{
+    RetainPtr<CFStringRef> scriptCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, script));
+    NSString *scriptNS = (NSString *)scriptCF.get();
+
+    // A worldID of 0 always corresponds to a new world. Any other worldID corresponds to a world
+    // that is created once and cached forever.
+    WebScriptWorld *world;
+    if (!worldID)
+        world = [WebScriptWorld world];
+    else {
+        RetainPtr<WebScriptWorld>& worldSlot = worldMap().add(worldID, 0).first->second;
+        if (!worldSlot)
+            worldSlot.adoptNS([[WebScriptWorld alloc] init]);
+        world = worldSlot.get();
+    }
+
+    [mainFrame _stringByEvaluatingJavaScriptFromString:scriptNS withGlobalObject:globalObject inScriptWorld:world];
 }

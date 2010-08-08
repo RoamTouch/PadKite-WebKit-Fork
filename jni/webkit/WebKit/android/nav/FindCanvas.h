@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -26,6 +26,8 @@
 #ifndef Find_Canvas_h
 #define Find_Canvas_h
 
+#include "DrawExtra.h"
+#include "IntRect.h"
 #include "SkBounder.h"
 #include "SkCanvas.h"
 #include "SkPicture.h"
@@ -34,8 +36,7 @@
 #include "icu/unicode/umachine.h"
 #include "wtf/Vector.h"
 
-class SkRect;
-class SkTypeface;
+namespace android {
 
 // Stores both region information and an SkPicture of the match, so that the
 // region can be drawn, followed by drawing the matching text on top of it.
@@ -51,11 +52,14 @@ public:
     SkPicture* getPicture() const { return m_picture; }
     // This will make a copy of the region, and increase the ref count on the
     // SkPicture.  If this MatchInfo already had one, unref it.
-    void set(const SkRegion& region, SkPicture* pic);
+    bool isInLayer() const { return m_layerId >= 0; }
+    int layerId() const { return m_layerId; }
+    void set(const SkRegion& region, SkPicture* pic, int layerId);
 private:
     MatchInfo& operator=(MatchInfo& src);
     SkRegion    m_location;
     SkPicture*  m_picture;
+    int         m_layerId;
 };
 
 // A class containing a typeface for reference, the length in glyphs, and
@@ -135,7 +139,9 @@ public:
                                 const SkPaint& paint) {
     }
 
+    void drawLayers(LayerAndroid* );
     int found() const { return mNumFound; }
+    void setLayerId(int layerId) { mLayerId = layerId; }
 
     // This method detaches our array of matches and passes ownership to
     // the caller, who is then responsible for deleting them.
@@ -201,7 +207,41 @@ private:
     SkCanvas*               mWorkingCanvas;
     SkRegion                mWorkingRegion;
     int                     mWorkingIndex;
+    int                     mLayerId;
 };
 
-#endif  // Find_Canvas_h
+class FindOnPage : public DrawExtra {
+public:
+    FindOnPage() {
+        m_matches = 0;
+        m_hasCurrentLocation = false;
+        m_isFindPaintSetUp = false;
+    }
+    virtual ~FindOnPage() { delete m_matches; }
+    void clearCurrentLocation() { m_hasCurrentLocation = false; }
+    IntRect currentMatchBounds() const;
+    bool currentMatchIsInLayer() const;
+    virtual void draw(SkCanvas* , LayerAndroid* );
+    void findNext(bool forward);
+    void setMatches(WTF::Vector<MatchInfo>* matches);
+private:
+    void drawMatch(const SkRegion& region, SkCanvas* canvas, bool focused);
+    void setUpFindPaint();
+    void storeCurrentMatchLocation();
+    WTF::Vector<MatchInfo>* m_matches;
+    // Stores the location of the current match.
+    SkIPoint m_currentMatchLocation;
+    // Tells whether the value in m_currentMatchLocation is valid.
+    bool m_hasCurrentLocation;
+    // Tells whether we have done the setup to draw the Find matches.
+    bool m_isFindPaintSetUp;
+    // Paint used to draw our Find matches.
+    SkPaint m_findPaint;
+    // Paint used for the background of our Find matches.
+    SkPaint m_findBlurPaint;
+    unsigned m_findIndex;
+};
 
+}
+
+#endif  // Find_Canvas_h

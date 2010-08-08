@@ -1,5 +1,5 @@
 /*
- * Copyright 2008, The Android Open Source Project
+ * Copyright 2009, The Android Open Source Project
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -26,17 +26,9 @@
 #include "config.h"
 #include "MainThread.h"
 
-#include "jni/JavaSharedClient.h"
-
-using namespace android;
+#include "AndroidThreading.h"
 
 namespace WTF {
-
-// Callback in the main thread.
-static void timeoutFired(void* )
-{
-    dispatchFunctionsFromMainThread();
-}
 
 void initializeMainThreadPlatform()
 {
@@ -44,7 +36,7 @@ void initializeMainThreadPlatform()
 
 void scheduleDispatchFunctionsOnMainThread()
 {
-    JavaSharedClient::EnqueueFunctionPtr(timeoutFired, 0);
+    AndroidThreading::scheduleDispatchFunctionsOnMainThread();
 }
 
-}
+} // namespace WTF

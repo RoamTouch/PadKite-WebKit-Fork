@@ -36,7 +36,7 @@
 typedef struct CGPoint CGPoint;
 #endif
 
-#if PLATFORM(MAC)
+#if PLATFORM(MAC) || (PLATFORM(CHROMIUM) && OS(DARWIN))
 #ifdef NSGEOMETRY_TYPES_SAME_AS_CGGEOMETRY_TYPES
 typedef struct CGPoint NSPoint;
 #else
@@ -51,12 +51,17 @@ class QPointF;
 QT_END_NAMESPACE
 #endif
 
+#if PLATFORM(HAIKU)
+class BPoint;
+#endif
+
 #if PLATFORM(SKIA)
 struct SkPoint;
 #endif
 
 namespace WebCore {
 
+class AffineTransform;
 class TransformationMatrix;
 class IntPoint;
 
@@ -80,7 +85,8 @@ public:
     operator CGPoint() const;
 #endif
 
-#if PLATFORM(MAC) && !defined(NSGEOMETRY_TYPES_SAME_AS_CGGEOMETRY_TYPES)
+#if (PLATFORM(MAC) && !defined(NSGEOMETRY_TYPES_SAME_AS_CGGEOMETRY_TYPES)) \
+        || (PLATFORM(CHROMIUM) && OS(DARWIN))
     FloatPoint(const NSPoint&);
     operator NSPoint() const;
 #endif
@@ -90,12 +96,18 @@ public:
     operator QPointF() const;
 #endif
 
-#if (PLATFORM(SKIA) || PLATFORM(SGL))
+#if PLATFORM(HAIKU)
+    FloatPoint(const BPoint&);
+    operator BPoint() const;
+#endif
+
+#if PLATFORM(SKIA)
     operator SkPoint() const;
     FloatPoint(const SkPoint&);
 #endif
 
     FloatPoint matrixTransform(const TransformationMatrix&) const;
+    FloatPoint matrixTransform(const AffineTransform&) const;
 
 private:
     float m_x, m_y;

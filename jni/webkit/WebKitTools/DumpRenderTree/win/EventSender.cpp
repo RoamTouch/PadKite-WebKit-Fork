@@ -144,6 +144,30 @@ static JSValueRef contextClickCallback(JSContextRef context, JSObjectRef functio
     return JSValueMakeUndefined(context);
 }
 
+static WPARAM buildModifierFlags(JSContextRef context, const JSValueRef modifiers)
+{
+    JSObjectRef modifiersArray = JSValueToObject(context, modifiers, 0);
+    if (!modifiersArray)
+        return 0;
+
+    WPARAM flags = 0;
+    int modifiersCount = JSValueToNumber(context, JSObjectGetProperty(context, modifiersArray, JSStringCreateWithUTF8CString("length"), 0), 0);
+    for (int i = 0; i < modifiersCount; ++i) {
+        JSValueRef value = JSObjectGetPropertyAtIndex(context, modifiersArray, i, 0);
+        JSStringRef string = JSValueToStringCopy(context, value, 0);
+        if (JSStringIsEqualToUTF8CString(string, "ctrlKey")
+            || JSStringIsEqualToUTF8CString(string, "addSelectionKey"))
+            flags |= MK_CONTROL;
+        else if (JSStringIsEqualToUTF8CString(string, "shiftKey")
+                 || JSStringIsEqualToUTF8CString(string, "rangeSelectionKey"))
+            flags |= MK_SHIFT;
+        // No way to specifiy altKey in a MSG.
+
+        JSStringRelease(string);
+    }
+    return flags;
+}
+
 static JSValueRef mouseDownCallback(JSContextRef context, JSObjectRef function, JSObjectRef thisObject, size_t argumentCount, const JSValueRef arguments[], JSValueRef* exception)
 {
     COMPtr<IWebFramePrivate> framePrivate;
@@ -151,7 +175,34 @@ static JSValueRef mouseDownCallback(JSContextRef context, JSObjectRef function, 
         framePrivate->layout();
 
     down = true;
-    MSG msg = makeMsg(webViewWindow, WM_LBUTTONDOWN, 0, MAKELPARAM(lastMousePosition.x, lastMousePosition.y));
+    int mouseType = WM_LBUTTONDOWN;
+    if (argumentCount >= 1) {
+        int mouseNumber = JSValueToNumber(context, arguments[0], exception);
+        switch (mouseNumber) {
+        case 0:
+            mouseType = WM_LBUTTONDOWN;
+            break;
+        case 1:
+            mouseType = WM_MBUTTONDOWN;
+            break;
+        case 2:
+            mouseType = WM_RBUTTONDOWN;
+            break;
+        case 3:
+            // fast/events/mouse-click-events expects the 4th button has event.button = 1, so send an WM_BUTTONDOWN
+            mouseType = WM_MBUTTONDOWN;
+            break;
+        default:
+            mouseType = WM_LBUTTONDOWN;
+            break;
+        }
+    }
+
+    WPARAM wparam = 0;
+    if (argumentCount >= 2)
+        wparam |= buildModifierFlags(context, arguments[1]);
+        
+    MSG msg = makeMsg(webViewWindow, mouseType, wparam, MAKELPARAM(lastMousePosition.x, lastMousePosition.y));
     if (!msgQueue[endOfQueue].delay)
         dispatchMessage(&msg);
     else {
@@ -171,7 +222,7 @@ static inline POINTL pointl(const POINT& point)
     return result;
 }
 
-static void doMouseUp(MSG msg)
+static void doMouseUp(MSG msg, HRESULT* oleDragAndDropReturnValue = 0)
 {
     COMPtr<IWebFramePrivate> framePrivate;
     if (SUCCEEDED(frame->QueryInterface(&framePrivate)))
@@ -192,22 +243,52 @@ static void doMouseUp(MSG msg)
                 didDragEnter = true;
             }
             HRESULT hr = draggingInfo->dropSource()->QueryContinueDrag(0, 0);
+            if (oleDragAndDropReturnValue)
+                *oleDragAndDropReturnValue = hr;
             webViewDropTarget->DragOver(0, pointl(screenPoint), &effect);
             if (hr == DRAGDROP_S_DROP && effect != DROPEFFECT_NONE) {
                 DWORD effect = 0;
                 webViewDropTarget->Drop(draggingInfo->dataObject(), 0, pointl(screenPoint), &effect);
+                draggingInfo->setPerformedDropEffect(effect);
             } else
                 webViewDropTarget->DragLeave();
 
-            delete draggingInfo;
-            draggingInfo = 0;
+            // Reset didDragEnter so that another drag started within the same frame works properly.
+            didDragEnter = false;
         }
     }
 }
 
 static JSValueRef mouseUpCallback(JSContextRef context, JSObjectRef function, JSObjectRef thisObject, size_t argumentCount, const JSValueRef arguments[], JSValueRef* exception)
 {
-    MSG msg = makeMsg(webViewWindow, WM_LBUTTONUP, 0, MAKELPARAM(lastMousePosition.x, lastMousePosition.y));
+    int mouseType = WM_LBUTTONUP;
+    if (argumentCount >= 1) {
+        int mouseNumber = JSValueToNumber(context, arguments[0], exception);
+        switch (mouseNumber) {
+        case 0:
+            mouseType = WM_LBUTTONUP;
+            break;
+        case 1:
+            mouseType = WM_MBUTTONUP;
+            break;
+        case 2:
+            mouseType = WM_RBUTTONUP;
+            break;
+        case 3:
+            // fast/events/mouse-click-events expects the 4th button has event.button = 1, so send an WM_MBUTTONUP
+            mouseType = WM_MBUTTONUP;
+            break;
+        default:
+            mouseType = WM_LBUTTONUP;
+            break;
+        }
+    }
+
+    WPARAM wparam = 0;
+    if (argumentCount >= 2)
+        wparam |= buildModifierFlags(context, arguments[1]);
+
+    MSG msg = makeMsg(webViewWindow, mouseType, wparam, MAKELPARAM(lastMousePosition.x, lastMousePosition.y));
 
     if ((dragMode && !replayingSavedEvents) || msgQueue[endOfQueue].delay) {
         msgQueue[endOfQueue++].msg = msg;
@@ -267,7 +348,7 @@ static JSValueRef mouseMoveToCallback(JSContextRef context, JSObjectRef function
     return JSValueMakeUndefined(context);
 }
 
-void replaySavedEvents()
+void replaySavedEvents(HRESULT* oleDragAndDropReturnValue)
 {
     replayingSavedEvents = true;
   
@@ -277,12 +358,16 @@ void replaySavedEvents()
         msg = msgQueue[startOfQueue++].msg;
         switch (msg.message) {
             case WM_LBUTTONUP:
-                doMouseUp(msg);
+            case WM_RBUTTONUP:
+            case WM_MBUTTONUP:
+                doMouseUp(msg, oleDragAndDropReturnValue);
                 break;
             case WM_MOUSEMOVE:
                 doMouseMove(msg);
                 break;
             case WM_LBUTTONDOWN:
+            case WM_RBUTTONDOWN:
+            case WM_MBUTTONDOWN:
                 dispatchMessage(&msg);
                 break;
             default:
@@ -317,12 +402,16 @@ void replaySavedEvents()
         msg = msgQueue[startOfQueue++].msg;
         switch (msg.message) {
             case WM_LBUTTONUP:
-                doMouseUp(msg);
+            case WM_RBUTTONUP:
+            case WM_MBUTTONUP:
+                doMouseUp(msg, oleDragAndDropReturnValue);
                 break;
             case WM_MOUSEMOVE:
                 doMouseMove(msg);
                 break;
             case WM_LBUTTONDOWN:
+            case WM_RBUTTONDOWN:
+            case WM_MBUTTONDOWN:
                 dispatchMessage(&msg);
                 break;
             default:
@@ -405,9 +494,9 @@ static JSValueRef keyDownCallback(JSContextRef context, JSObjectRef function, JS
                 for (int i = 0; i < modifiersCount; ++i) {
                     JSValueRef value = JSObjectGetPropertyAtIndex(context, modifiersArray, i, 0);
                     JSStringRef string = JSValueToStringCopy(context, value, 0);
-                    if (JSStringIsEqualToUTF8CString(string, "ctrlKey"))
+                    if (JSStringIsEqualToUTF8CString(string, "ctrlKey") || JSStringIsEqualToUTF8CString(string, "addSelectionKey"))
                         newKeyState[VK_CONTROL] = 0x80;
-                    else if (JSStringIsEqualToUTF8CString(string, "shiftKey"))
+                    else if (JSStringIsEqualToUTF8CString(string, "shiftKey") || JSStringIsEqualToUTF8CString(string, "rangeSelectionKey"))
                         newKeyState[VK_SHIFT] = 0x80;
                     else if (JSStringIsEqualToUTF8CString(string, "altKey"))
                         newKeyState[VK_MENU] = 0x80;

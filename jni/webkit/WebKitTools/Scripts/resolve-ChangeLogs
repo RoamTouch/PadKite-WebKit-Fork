@@ -44,10 +44,10 @@ sub canonicalRelativePath($);
 sub conflictFiles($);
 sub findChangeLog($);
 sub findUnmergedChangeLogs();
-sub fixChangeLogPatch($);
 sub fixMergedChangeLogs($;@);
 sub fixOneMergedChangeLog($);
 sub hasGitUnmergedFiles();
+sub isInGitFilterBranch();
 sub mergeChanges($$$);
 sub parseFixMerged($$;$);
 sub removeChangeLogArguments($);
@@ -55,15 +55,12 @@ sub resolveChangeLog($);
 sub resolveConflict($);
 sub showStatus($;$);
 sub usageAndExit();
-sub normalizePath($);
 
 my $isGit = isGit();
 my $isSVN = isSVN();
 
 my $SVN = "svn";
 my $GIT = "git";
-
-my $svnVersion = `svn --version --quiet` if $isSVN;
 
 my $fixMerged;
 my $gitRebaseContinue = 0;
@@ -77,7 +74,7 @@ my $getOptionsResult = GetOptions(
     'w|warnings!'    => \$printWarnings,
 );
 
-my $relativePath = chdirReturningRelativePath(determineVCSRoot());
+my $relativePath = isInGitFilterBranch() ? '.' : chdirReturningRelativePath(determineVCSRoot());
 
 my @changeLogFiles = removeChangeLogArguments($relativePath);
 
@@ -255,11 +252,11 @@ sub findUnmergedChangeLogs()
         if ($isSVN) {
             my $matches;
             my $file;
-            if (eval "v$svnVersion" ge v1.6) {
-                $matches = /^([C]).{6} (.*\S+)\s*$/;
+            if (isSVNVersion16OrNewer()) {
+                $matches = /^([C]).{6} (.+?)[\r\n]*$/;
                 $file = $2;
             } else {
-                $matches = /^([C]).{5} (.*\S+)\s*$/;
+                $matches = /^([C]).{5} (.+?)[\r\n]*$/;
                 $file = $2;
             }
             if ($matches) {
@@ -280,57 +277,6 @@ sub findUnmergedChangeLogs()
     close STAT;
 
     return @results;
-}
-
-sub fixChangeLogPatch($)
-{
-    my $patch = shift;
-    my $contextLineCount = 3;
-
-    return $patch if $patch !~ /\n@@ -1,(\d+) \+1,(\d+) @@\n( .*\n)+(\+.*\n)+( .*\n){$contextLineCount}$/m;
-    my ($oldLineCount, $newLineCount) = ($1, $2);
-    return $patch if $oldLineCount <= $contextLineCount;
-
-    # The diff(1) command is greedy when matching lines, so a new ChangeLog entry will
-    # have lines of context at the top of a patch when the existing entry has the same
-    # date and author as the new entry.  This nifty loop alters a ChangeLog patch so
-    # that the added lines ("+") in the patch always start at the beginning of the
-    # patch and there are no initial lines of context.
-    my $newPatch;
-    my $lineCountInState = 0;
-    my $oldContentLineCountReduction = $oldLineCount - $contextLineCount;
-    my $newContentLineCountWithoutContext = $newLineCount - $oldLineCount - $oldContentLineCountReduction;
-    my ($stateHeader, $statePreContext, $stateNewChanges, $statePostContext) = (1..4);
-    my $state = $stateHeader;
-    foreach my $line (split(/\n/, $patch)) {
-        $lineCountInState++;
-        if ($state == $stateHeader && $line =~ /^@@ -1,$oldLineCount \+1,$newLineCount @\@$/) {
-            $line = "@@ -1,$contextLineCount +1," . ($newLineCount - $oldContentLineCountReduction) . " @@";
-            $lineCountInState = 0;
-            $state = $statePreContext;
-        } elsif ($state == $statePreContext && substr($line, 0, 1) eq " ") {
-            $line = "+" . substr($line, 1);
-            if ($lineCountInState == $oldContentLineCountReduction) {
-                $lineCountInState = 0;
-                $state = $stateNewChanges;
-            }
-        } elsif ($state == $stateNewChanges && substr($line, 0, 1) eq "+") {
-            # No changes to these lines
-            if ($lineCountInState == $newContentLineCountWithoutContext) {
-                $lineCountInState = 0;
-                $state = $statePostContext;
-            }
-        } elsif ($state == $statePostContext) {
-            if (substr($line, 0, 1) eq "+" && $lineCountInState <= $oldContentLineCountReduction) {
-                $line = " " . substr($line, 1);
-            } elsif ($lineCountInState > $contextLineCount && substr($line, 0, 1) eq " ") {
-                next; # Discard
-            }
-        }
-        $newPatch .= $line . "\n";
-    }
-
-    return $newPatch;
 }
 
 sub fixMergedChangeLogs($;@)
@@ -409,7 +355,7 @@ sub fixOneMergedChangeLog($)
         close FILE;
 
         # Apply the new patch
-        open(PATCH, "| patch -p1 $file > /dev/null") or die $!;
+        open(PATCH, "| patch -p1 $file > " . File::Spec->devnull()) or die $!;
         print PATCH $newPatch;
         close(PATCH) or die $!;
 
@@ -430,6 +376,11 @@ sub hasGitUnmergedFiles()
 {
     my $output = `$GIT ls-files --unmerged`;
     return $output ne "";
+}
+
+sub isInGitFilterBranch()
+{
+    return exists $ENV{MAPPED_PREVIOUS_COMMIT} && $ENV{MAPPED_PREVIOUS_COMMIT};
 }
 
 sub mergeChanges($$$)
@@ -456,7 +407,7 @@ sub mergeChanges($$$)
     unlink("${fileNewer}.orig");
     unlink("${fileNewer}.rej");
 
-    open(PATCH, "| patch --fuzz=3 --binary $fileNewer > /dev/null") or die $!;
+    open(PATCH, "| patch --fuzz=3 --binary $fileNewer > " . File::Spec->devnull()) or die $!;
     print PATCH fixChangeLogPatch($patch);
     close(PATCH);
 
@@ -567,9 +518,3 @@ sub showStatus($;$)
     }
 }
 
-sub normalizePath($)
-{
-    my ($path) = @_;
-    $path =~ s/\\/\//g;
-    return $path;
-}

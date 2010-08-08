@@ -13,7 +13,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
@@ -25,12 +25,8 @@
 
 #define LOG_TAG "webcoreglue"
 
-#include <config.h>
-#include <wtf/Platform.h>
-
-#include "jni_utility.h"
+#include "config.h"
 #include "WebCoreResourceLoader.h"
-#include "SkUtils.h"
 
 #include "CString.h"
 #include "ResourceError.h"
@@ -38,16 +34,18 @@
 #include "ResourceHandleClient.h"
 #include "ResourceHandleInternal.h"
 #include "ResourceResponse.h"
-#include "WebCoreJni.h"
-
+#include "SkUtils.h"
 #ifdef ANDROID_INSTRUMENT
 #include "TimeCounter.h"
 #endif
+#include "WebCoreJni.h"
 
-#include <utils/misc.h>
 #include <JNIHelp.h>
+#include <JNIUtility.h>
 #include <SkTypes.h>
 #include <stdlib.h>
+#include <utils/misc.h>
+#include <wtf/Platform.h>
 
 namespace android {
   
@@ -58,6 +56,7 @@ static struct resourceloader_t {
     jmethodID   mCancelMethodID;
     jmethodID   mDownloadFileMethodID;
     jmethodID   mWillLoadFromCacheMethodID;
+    jmethodID   mPauseLoadMethodID;
 } gResourceLoader;
 
 // ----------------------------------------------------------------------------
@@ -68,7 +67,13 @@ static struct resourceloader_t {
 //-----------------------------------------------------------------------------
 // ResourceLoadHandler
 
+PassRefPtr<WebCore::ResourceLoaderAndroid> WebCoreResourceLoader::create(JNIEnv *env, jobject jLoadListener)
+{
+    return adoptRef<WebCore::ResourceLoaderAndroid>(new WebCoreResourceLoader(env, jLoadListener));
+}
+
 WebCoreResourceLoader::WebCoreResourceLoader(JNIEnv *env, jobject jLoadListener)
+    : mPausedLoad(false)
 {
     mJLoader = env->NewGlobalRef(jLoadListener);
 }
@@ -95,19 +100,30 @@ void WebCoreResourceLoader::downloadFile()
     checkException(env);
 }
 
+void WebCoreResourceLoader::pauseLoad(bool pause)
+{
+    if (mPausedLoad == pause)
+        return;
+
+    mPausedLoad = pause;
+    JNIEnv* env = JSC::Bindings::getJNIEnv();
+    env->CallVoidMethod(mJLoader, gResourceLoader.mPauseLoadMethodID, pause);
+    checkException(env);
+}
+
 /*
 * This static method is called to check to see if a POST response is in
 * the cache. This may be slow, but is only used during a navigation to
 * a POST response.
 */
-bool WebCoreResourceLoader::willLoadFromCache(const WebCore::KURL& url)
+bool WebCoreResourceLoader::willLoadFromCache(const WebCore::KURL& url, int64_t identifier)
 {
     JNIEnv* env = JSC::Bindings::getJNIEnv();
     WebCore::String urlStr = url.string();
     jstring jUrlStr = env->NewString(urlStr.characters(), urlStr.length());
     jclass resourceLoader = env->FindClass("android/webkit/LoadListener");
     bool val = env->CallStaticBooleanMethod(resourceLoader, 
-            gResourceLoader.mWillLoadFromCacheMethodID, jUrlStr);
+            gResourceLoader.mWillLoadFromCacheMethodID, jUrlStr, identifier);
     checkException(env);
     env->DeleteLocalRef(jUrlStr);
 
@@ -140,7 +156,7 @@ jint WebCoreResourceLoader::CreateResponse(JNIEnv* env, jobject obj, jstring url
     TimeCounterAuto counter(TimeCounter::ResourceTimeCounter);
 #endif
     LOG_ASSERT(url, "Must have a url in the response!");
-    WebCore::KURL kurl(to_string(env, url));
+    WebCore::KURL kurl(WebCore::ParsedURLString, to_string(env, url));
     WebCore::String encodingStr;
     WebCore::String mimeTypeStr;
     if (mimeType) {
@@ -235,20 +251,24 @@ jstring WebCoreResourceLoader::RedirectedToUrl(JNIEnv* env, jobject obj,
 
     LOG_ASSERT(handle->client(), "Why do we not have a client?");
     WebCore::ResourceRequest r = handle->request();
-    WebCore::KURL url(WebCore::KURL(to_string(env, baseUrl)),
+    WebCore::KURL url(WebCore::KURL(WebCore::ParsedURLString, to_string(env, baseUrl)),
             to_string(env, redirectTo));
+    WebCore::ResourceResponse* response = (WebCore::ResourceResponse*)nativeResponse;
+    // If the url fails to resolve the relative path, return null.
+    if (url.protocol().isEmpty()) {
+        delete response;
+        return NULL;
+    } else {
+        // Ensure the protocol is lowercase.
+        url.setProtocol(url.protocol().lower());
+    }
+    // Set the url after updating the protocol.
     r.setURL(url);
     if (r.httpMethod() == "POST") {
         r.setHTTPMethod("GET");
         r.clearHTTPReferrer();
         r.setHTTPBody(0);
         r.setHTTPContentType("");
-    }
-    WebCore::ResourceResponse* response = (WebCore::ResourceResponse*)nativeResponse;
-    // If the url fails to resolve the relative path, return null.
-    if (url.protocol().isEmpty()) {
-        delete response;
-        return NULL;
     }
     handle->client()->willSendRequest(handle, r, *response);
     delete response;
@@ -317,8 +337,13 @@ int register_resource_loader(JNIEnv* env)
     LOG_FATAL_IF(gResourceLoader.mDownloadFileMethodID == NULL, 
         "Could not find method downloadFile on LoadListener");
 
+    gResourceLoader.mPauseLoadMethodID =
+        env->GetMethodID(resourceLoader, "pauseLoad", "(Z)V");
+    LOG_FATAL_IF(gResourceLoader.mPauseLoadMethodID == NULL,
+        "Could not find method pauseLoad on LoadListener");
+
     gResourceLoader.mWillLoadFromCacheMethodID = 
-        env->GetStaticMethodID(resourceLoader, "willLoadFromCache", "(Ljava/lang/String;)Z");
+        env->GetStaticMethodID(resourceLoader, "willLoadFromCache", "(Ljava/lang/String;J)Z");
     LOG_FATAL_IF(gResourceLoader.mWillLoadFromCacheMethodID == NULL, 
         "Could not find static method willLoadFromCache on LoadListener");
 
