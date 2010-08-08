@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package android.webkit;
+package roamtouch.webkit;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -51,13 +51,13 @@ public class PluginManager {
      * public.
      */
     @SdkConstant(SdkConstantType.SERVICE_ACTION)
-    public static final String PLUGIN_ACTION = "android.webkit.PLUGIN";
+    public static final String PLUGIN_ACTION = "roamtouch.webkit.PLUGIN";
 
     /**
      * A plugin wishes to be loaded in the WebView must provide this permission
      * in their AndroidManifest.xml.
      */
-    public static final String PLUGIN_PERMISSION = "android.webkit.permission.PLUGIN";
+    public static final String PLUGIN_PERMISSION = "roamtouch.webkit.permission.PLUGIN";
 
     private static final String LOGTAG = "webkit";
 

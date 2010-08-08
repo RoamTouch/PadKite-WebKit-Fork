@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package android.net.http;
+package roamtouch.net.http;
 
 import com.android.internal.http.HttpDateTime;
 import org.apache.http.Header;

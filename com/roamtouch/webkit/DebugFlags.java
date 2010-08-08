@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package android.webkit;
+package roamtouch.webkit;
 
 /**
  * This class is a container for all of the debug flags used in the Java

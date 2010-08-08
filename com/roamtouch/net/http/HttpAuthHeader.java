@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package android.net.http;
+package roamtouch.net.http;
 
 /**
  * HttpAuthHeader: a class to store HTTP authentication-header parameters.

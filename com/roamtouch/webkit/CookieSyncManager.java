@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-package android.webkit;
+package roamtouch.webkit;
 
 import android.content.Context;
 import android.util.Log;
-import android.webkit.CookieManager.Cookie;
+import roamtouch.webkit.CookieManager.Cookie;
 
 import java.util.ArrayList;
 import java.util.Iterator;

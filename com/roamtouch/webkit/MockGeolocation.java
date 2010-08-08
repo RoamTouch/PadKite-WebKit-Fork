@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package android.webkit;
+package roamtouch.webkit;
 
 /**
  * This class is simply a container for the methods used to configure WebKit's
