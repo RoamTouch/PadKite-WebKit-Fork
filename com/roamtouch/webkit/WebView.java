@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package android.webkit;
+package roamtouch.webkit;
 
 import android.annotation.Widget;
 import android.app.AlertDialog;
@@ -68,9 +68,9 @@ import android.view.animation.AlphaAnimation;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
-import android.webkit.WebTextView.AutoCompleteAdapter;
-import android.webkit.WebViewCore.EventHub;
-import android.webkit.WebViewCore.TouchEventData;
+import roamtouch.webkit.WebTextView.AutoCompleteAdapter;
+import roamtouch.webkit.WebViewCore.EventHub;
+import roamtouch.webkit.WebViewCore.TouchEventData;
 import android.widget.AbsoluteLayout;
 import android.widget.Adapter;
 import android.widget.AdapterView;
@@ -160,23 +160,23 @@ import junit.framework.Assert;
  * own behavior. These are:</p>
  *
  * <ul>
- *   <li>Creating and setting a {@link android.webkit.WebChromeClient} subclass.
+ *   <li>Creating and setting a {@link roamtouch.webkit.WebChromeClient} subclass.
  *       This class is called when something that might impact a
  *       browser UI happens, for instance, progress updates and
  *       JavaScript alerts are sent here (see <a
  * href="{@docRoot}guide/developing/debug-tasks.html#DebuggingWebPages">Debugging Tasks</a>).
  *   </li>
- *   <li>Creating and setting a {@link android.webkit.WebViewClient} subclass.
+ *   <li>Creating and setting a {@link roamtouch.webkit.WebViewClient} subclass.
  *       It will be called when things happen that impact the
  *       rendering of the content, eg, errors or form submissions. You
  *       can also intercept URL loading here (via {@link
- * android.webkit.WebViewClient#shouldOverrideUrlLoading(WebView,String)
+ * roamtouch.webkit.WebViewClient#shouldOverrideUrlLoading(WebView,String)
  * shouldOverrideUrlLoading()}).</li>
- *   <li>Modifying the {@link android.webkit.WebSettings}, such as
- * enabling JavaScript with {@link android.webkit.WebSettings#setJavaScriptEnabled(boolean)
+ *   <li>Modifying the {@link roamtouch.webkit.WebSettings}, such as
+ * enabling JavaScript with {@link roamtouch.webkit.WebSettings#setJavaScriptEnabled(boolean)
  * setJavaScriptEnabled()}. </li>
  *   <li>Adding JavaScript-to-Java interfaces with the {@link
- * android.webkit.WebView#addJavascriptInterface} method.
+ * roamtouch.webkit.WebView#addJavascriptInterface} method.
  *       This lets you bind Java objects into the WebView so they can be
  *       controlled from the web pages JavaScript.</li>
  * </ul>
@@ -214,7 +214,7 @@ import junit.framework.Assert;
  * cache, cookie store etc.&mdash;it does not share the Browser
  * application's data. Cookies are managed on a separate thread, so
  * operations like index building don't block the UI
- * thread. Follow the instructions in {@link android.webkit.CookieSyncManager}
+ * thread. Follow the instructions in {@link roamtouch.webkit.CookieSyncManager}
  * if you want to use cookies in your application.
  * </p>
  *

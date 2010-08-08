@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package android.webkit;
+package roamtouch.webkit;
 
 import android.content.Context;
 import android.content.Intent;
@@ -57,7 +57,7 @@ final class WebViewCore {
         // Load libwebcore during static initialization. This happens in the
         // zygote process so it will be shared read-only across all app
         // processes.
-        System.loadLibrary("webcore");
+        System.loadLibrary("rtwebcore");
     }
 
     /*
