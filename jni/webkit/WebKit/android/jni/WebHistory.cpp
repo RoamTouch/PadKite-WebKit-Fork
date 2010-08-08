@@ -344,7 +344,7 @@ void WebHistory::AddItem(const AutoJObject& list, WebCore::HistoryItem* item)
 
     JNIEnv* env = list.env();
     // Allocate a blank WebHistoryItem
-    jclass clazz = env->FindClass("android/webkit/WebHistoryItem");
+    jclass clazz = env->FindClass("roamtouch/webkit/WebHistoryItem");
     jobject newItem = env->NewObject(clazz, gWebHistoryItem.mInit);
 
     // Create the bridge, make it active, and attach it to the item.
@@ -819,8 +819,8 @@ int register_webhistory(JNIEnv* env)
     unit_test();
 #endif
     // Find WebHistoryItem, its constructor, and the update method.
-    jclass clazz = env->FindClass("android/webkit/WebHistoryItem");
-    LOG_ASSERT(clazz, "Unable to find class android/webkit/WebHistoryItem");
+    jclass clazz = env->FindClass("roamtouch/webkit/WebHistoryItem");
+    LOG_ASSERT(clazz, "Unable to find class roamtouch/webkit/WebHistoryItem");
     gWebHistoryItem.mInit = env->GetMethodID(clazz, "<init>", "()V");
     LOG_ASSERT(gWebHistoryItem.mInit, "Could not find WebHistoryItem constructor");
     gWebHistoryItem.mUpdate = env->GetMethodID(clazz, "update",
@@ -835,10 +835,10 @@ int register_webhistory(JNIEnv* env)
 
     // Find the WebBackForwardList object, the addHistoryItem and
     // removeHistoryItem methods and the mCurrentIndex field.
-    clazz = env->FindClass("android/webkit/WebBackForwardList");
-    LOG_ASSERT(clazz, "Unable to find class android/webkit/WebBackForwardList");
+    clazz = env->FindClass("roamtouch/webkit/WebBackForwardList");
+    LOG_ASSERT(clazz, "Unable to find class roamtouch/webkit/WebBackForwardList");
     gWebBackForwardList.mAddHistoryItem = env->GetMethodID(clazz, "addHistoryItem",
-            "(Landroid/webkit/WebHistoryItem;)V");
+            "(Lroamtouch/webkit/WebHistoryItem;)V");
     LOG_ASSERT(gWebBackForwardList.mAddHistoryItem, "Could not find method addHistoryItem");
     gWebBackForwardList.mRemoveHistoryItem = env->GetMethodID(clazz, "removeHistoryItem",
             "(I)V");
@@ -846,9 +846,9 @@ int register_webhistory(JNIEnv* env)
     gWebBackForwardList.mCurrentIndex = env->GetFieldID(clazz, "mCurrentIndex", "I");
     LOG_ASSERT(gWebBackForwardList.mCurrentIndex, "Could not find field mCurrentIndex");
 
-    int result = jniRegisterNativeMethods(env, "android/webkit/WebBackForwardList",
+    int result = jniRegisterNativeMethods(env, "roamtouch/webkit/WebBackForwardList",
             gWebBackForwardListMethods, NELEM(gWebBackForwardListMethods));
-    return (result < 0) ? result : jniRegisterNativeMethods(env, "android/webkit/WebHistoryItem",
+    return (result < 0) ? result : jniRegisterNativeMethods(env, "roamtouch/webkit/WebHistoryItem",
             gWebHistoryItemMethods, NELEM(gWebHistoryItemMethods));
 }
 

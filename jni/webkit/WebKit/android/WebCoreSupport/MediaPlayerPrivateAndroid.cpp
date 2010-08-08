@@ -42,7 +42,7 @@ using namespace android;
 
 namespace WebCore {
 
-static const char* g_ProxyJavaClass = "android/webkit/HTML5VideoViewProxy";
+static const char* g_ProxyJavaClass = "roamtouch/webkit/HTML5VideoViewProxy";
 
 struct MediaPlayerPrivate::JavaGlue
 {
@@ -291,7 +291,7 @@ MediaPlayerPrivate::MediaPlayerPrivate(MediaPlayer* player)
         return;
 
     m_glue = new JavaGlue;
-    m_glue->m_getInstance = env->GetStaticMethodID(clazz, "getInstance", "(Landroid/webkit/WebViewCore;I)Landroid/webkit/HTML5VideoViewProxy;");
+    m_glue->m_getInstance = env->GetStaticMethodID(clazz, "getInstance", "(Lroamtouch/webkit/WebViewCore;I)Lroamtouch/webkit/HTML5VideoViewProxy;");
     m_glue->m_play = env->GetMethodID(clazz, "play", "(Ljava/lang/String;)V");
     m_glue->m_teardown = env->GetMethodID(clazz, "teardown", "()V");
     m_glue->m_loadPoster = env->GetMethodID(clazz, "loadPoster", "(Ljava/lang/String;)V");

@@ -408,12 +408,12 @@ static JNINativeMethod gWebCoreJavaBridgeMethods[] = {
 
 int register_javabridge(JNIEnv* env)
 {
-    jclass javaBridge = env->FindClass("android/webkit/JWebCoreJavaBridge");
-    LOG_FATAL_IF(javaBridge == NULL, "Unable to find class android/webkit/JWebCoreJavaBridge");
+    jclass javaBridge = env->FindClass("roamtouch/webkit/JWebCoreJavaBridge");
+    LOG_FATAL_IF(javaBridge == NULL, "Unable to find class roamtouch/webkit/JWebCoreJavaBridge");
     gJavaBridge_ObjectID = env->GetFieldID(javaBridge, "mNativeBridge", "I");
-    LOG_FATAL_IF(gJavaBridge_ObjectID == NULL, "Unable to find android/webkit/JWebCoreJavaBridge.mNativeBridge");
+    LOG_FATAL_IF(gJavaBridge_ObjectID == NULL, "Unable to find roamtouch/webkit/JWebCoreJavaBridge.mNativeBridge");
 
-    return jniRegisterNativeMethods(env, "android/webkit/JWebCoreJavaBridge", 
+    return jniRegisterNativeMethods(env, "roamtouch/webkit/JWebCoreJavaBridge", 
                                     gWebCoreJavaBridgeMethods, NELEM(gWebCoreJavaBridgeMethods));
 }
 

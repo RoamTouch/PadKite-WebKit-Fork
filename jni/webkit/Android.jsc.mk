@@ -19,7 +19,7 @@ BASE_PATH := $(call my-dir)
 include $(CLEAR_VARS)
 
 # Define our module and find the intermediates directory
-LOCAL_MODULE := libwebcore
+LOCAL_MODULE := librtwebcore
 LOCAL_MODULE_CLASS := STATIC_LIBRARIES
 base_intermediates := $(call local-intermediates-dir)
 
@@ -241,16 +241,19 @@ include $(BUILD_STATIC_LIBRARY)
 include $(CLEAR_VARS)
 # if you need to make webcore huge (for debugging), enable this line
 #LOCAL_PRELINK_MODULE := false
-LOCAL_MODULE := libwebcore
+LOCAL_MODULE := librtwebcore
 LOCAL_LDLIBS := $(WEBKIT_LDLIBS)
 LOCAL_SHARED_LIBRARIES := $(WEBKIT_SHARED_LIBRARIES)
-LOCAL_STATIC_LIBRARIES := libwebcore $(WEBKIT_STATIC_LIBRARIES)
+LOCAL_STATIC_LIBRARIES := librtwebcore $(WEBKIT_STATIC_LIBRARIES)
 LOCAL_LDFLAGS := -fvisibility=hidden
 LOCAL_CFLAGS := $(WEBKIT_CFLAGS)
 LOCAL_C_INCLUDES := $(WEBKIT_C_INCLUDES)
 LOCAL_PATH := $(BASE_PATH)
 LOCAL_SRC_FILES := \
 	WebKit/android/jni/WebCoreJniOnLoad.cpp
+
+LOCAL_PRELINK_MODULE := false
+
 include $(BUILD_SHARED_LIBRARY)
 
 # Build the wds client

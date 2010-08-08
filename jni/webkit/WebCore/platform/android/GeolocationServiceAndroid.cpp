@@ -68,7 +68,7 @@ private:
     jobject m_javaGeolocationServiceObject;
 };
 
-static const char* kJavaGeolocationServiceClass = "android/webkit/GeolocationService";
+static const char* kJavaGeolocationServiceClass = "roamtouch/webkit/GeolocationService";
 enum kJavaGeolocationServiceClassMethods {
     GEOLOCATION_SERVICE_METHOD_INIT = 0,
     GEOLOCATION_SERVICE_METHOD_START,

@@ -209,10 +209,10 @@ static JNINativeMethod gWebIconDatabaseMethods[] = {
 
 int register_webicondatabase(JNIEnv* env)
 {
-    jclass webIconDB = env->FindClass("android/webkit/WebIconDatabase");
-    LOG_ASSERT(webIconDB, "Unable to find class android.webkit.WebIconDatabase");
+    jclass webIconDB = env->FindClass("roamtouch/webkit/WebIconDatabase");
+    LOG_ASSERT(webIconDB, "Unable to find class roamtouch.webkit.WebIconDatabase");
 
-    return jniRegisterNativeMethods(env, "android/webkit/WebIconDatabase",
+    return jniRegisterNativeMethods(env, "roamtouch/webkit/WebIconDatabase",
             gWebIconDatabaseMethods, NELEM(gWebIconDatabaseMethods));
 }
 

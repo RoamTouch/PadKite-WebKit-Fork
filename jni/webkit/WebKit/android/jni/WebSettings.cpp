@@ -54,9 +54,9 @@ namespace android {
 struct FieldIds {
     FieldIds(JNIEnv* env, jclass clazz) {
         mLayoutAlgorithm = env->GetFieldID(clazz, "mLayoutAlgorithm",
-                "Landroid/webkit/WebSettings$LayoutAlgorithm;");
+                "Lroamtouch/webkit/WebSettings$LayoutAlgorithm;");
         mTextSize = env->GetFieldID(clazz, "mTextSize",
-                "Landroid/webkit/WebSettings$TextSize;");
+                "Lroamtouch/webkit/WebSettings$TextSize;");
         mStandardFontFamily = env->GetFieldID(clazz, "mStandardFontFamily",
                 "Ljava/lang/String;");
         mFixedFontFamily = env->GetFieldID(clazz, "mFixedFontFamily",
@@ -150,7 +150,7 @@ struct FieldIds {
         LOG_ASSERT(c, "Could not find Enum class!");
         mOrdinal = env->GetMethodID(c, "ordinal", "()I");
         LOG_ASSERT(mOrdinal, "Could not find method ordinal");
-        c = env->FindClass("android/webkit/WebSettings$TextSize");
+        c = env->FindClass("roamtouch/webkit/WebSettings$TextSize");
         LOG_ASSERT(c, "Could not find TextSize enum");
         mTextSizeValue = env->GetFieldID(c, "value", "I");
     }
@@ -377,10 +377,10 @@ static JNINativeMethod gWebSettingsMethods[] = {
 
 int register_websettings(JNIEnv* env)
 {
-    jclass clazz = env->FindClass("android/webkit/WebSettings");
+    jclass clazz = env->FindClass("roamtouch/webkit/WebSettings");
     LOG_ASSERT(clazz, "Unable to find class WebSettings!");
     gFieldIds = new FieldIds(env, clazz);
-    return jniRegisterNativeMethods(env, "android/webkit/WebSettings",
+    return jniRegisterNativeMethods(env, "roamtouch/webkit/WebSettings",
             gWebSettingsMethods, NELEM(gWebSettingsMethods));
 }
 

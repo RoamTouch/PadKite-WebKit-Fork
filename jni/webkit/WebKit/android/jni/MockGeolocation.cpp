@@ -42,7 +42,7 @@ using namespace WebCore;
 
 namespace android {
 
-static const char* javaMockGeolocationClass = "android/webkit/MockGeolocation";
+static const char* javaMockGeolocationClass = "roamtouch/webkit/MockGeolocation";
 
 static void setPosition(JNIEnv* env, jobject, double latitude, double longitude, double accuracy)
 {

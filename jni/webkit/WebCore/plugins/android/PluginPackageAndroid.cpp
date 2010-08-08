@@ -206,9 +206,9 @@ static jobject createPluginObject(const char *name,
 {
     JNIEnv *env = JSC::Bindings::getJNIEnv();
     // Create a Java "class Plugin" object instance
-    jclass pluginClass = env->FindClass("android/webkit/Plugin");
+    jclass pluginClass = env->FindClass("roamtouch/webkit/Plugin");
     if(!pluginClass) {
-        PLUGIN_LOG("Couldn't find class android.webkit.Plugin\n");
+        PLUGIN_LOG("Couldn't find class roamtouch.webkit.Plugin\n");
         return 0;
     }
     // Get Plugin(String, String, String, String, Context)
@@ -220,7 +220,7 @@ static jobject createPluginObject(const char *name,
             "Ljava/lang/String;"
             "Ljava/lang/String;)V");
     if(!pluginConstructor) {
-        PLUGIN_LOG("Couldn't get android.webkit.Plugin constructor\n");
+        PLUGIN_LOG("Couldn't get roamtouch.webkit.Plugin constructor\n");
         return 0;
     }
     // Make Java strings of name, path, fileName, description

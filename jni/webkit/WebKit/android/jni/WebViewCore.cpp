@@ -268,8 +268,8 @@ WebViewCore::WebViewCore(JNIEnv* env, jobject javaWebViewCore, WebCore::Frame* m
     m_javaGlue->m_geolocationPermissionsHidePrompt = GetJMethod(env, clazz, "geolocationPermissionsHidePrompt", "()V");
     m_javaGlue->m_addMessageToConsole = GetJMethod(env, clazz, "addMessageToConsole", "(Ljava/lang/String;ILjava/lang/String;)V");
     m_javaGlue->m_startFullScreenPluginActivity = GetJMethod(env, clazz, "startFullScreenPluginActivity", "(Ljava/lang/String;Ljava/lang/String;I)V");
-    m_javaGlue->m_createSurface = GetJMethod(env, clazz, "createSurface", "(Ljava/lang/String;Ljava/lang/String;IIIII)Landroid/webkit/ViewManager$ChildView;");
-    m_javaGlue->m_destroySurface = GetJMethod(env, clazz, "destroySurface", "(Landroid/webkit/ViewManager$ChildView;)V");
+    m_javaGlue->m_createSurface = GetJMethod(env, clazz, "createSurface", "(Ljava/lang/String;Ljava/lang/String;IIIII)Lroamtouch/webkit/ViewManager$ChildView;");
+    m_javaGlue->m_destroySurface = GetJMethod(env, clazz, "destroySurface", "(Lroamtouch/webkit/ViewManager$ChildView;)V");
     m_javaGlue->m_showRect = GetJMethod(env, clazz, "showRect", "(IIIIIIFFFF)V");
 
     env->SetIntField(javaWebViewCore, gWebViewCoreFields.m_nativeClass, (jint)this);
@@ -3134,47 +3134,47 @@ static JNINativeMethod gJavaWebViewCoreMethods[] = {
 
 int register_webviewcore(JNIEnv* env)
 {
-    jclass widget = env->FindClass("android/webkit/WebViewCore");
+    jclass widget = env->FindClass("roamtouch/webkit/WebViewCore");
     LOG_ASSERT(widget,
-            "Unable to find class android/webkit/WebViewCore");
+            "Unable to find class roamtouch/webkit/WebViewCore");
     gWebViewCoreFields.m_nativeClass = env->GetFieldID(widget, "mNativeClass",
             "I");
     LOG_ASSERT(gWebViewCoreFields.m_nativeClass,
-            "Unable to find android/webkit/WebViewCore.mNativeClass");
+            "Unable to find roamtouch/webkit/WebViewCore.mNativeClass");
     gWebViewCoreFields.m_viewportWidth = env->GetFieldID(widget,
             "mViewportWidth", "I");
     LOG_ASSERT(gWebViewCoreFields.m_viewportWidth,
-            "Unable to find android/webkit/WebViewCore.mViewportWidth");
+            "Unable to find roamtouch/webkit/WebViewCore.mViewportWidth");
     gWebViewCoreFields.m_viewportHeight = env->GetFieldID(widget,
             "mViewportHeight", "I");
     LOG_ASSERT(gWebViewCoreFields.m_viewportHeight,
-            "Unable to find android/webkit/WebViewCore.mViewportHeight");
+            "Unable to find roamtouch/webkit/WebViewCore.mViewportHeight");
     gWebViewCoreFields.m_viewportInitialScale = env->GetFieldID(widget,
             "mViewportInitialScale", "I");
     LOG_ASSERT(gWebViewCoreFields.m_viewportInitialScale,
-            "Unable to find android/webkit/WebViewCore.mViewportInitialScale");
+            "Unable to find roamtouch/webkit/WebViewCore.mViewportInitialScale");
     gWebViewCoreFields.m_viewportMinimumScale = env->GetFieldID(widget,
             "mViewportMinimumScale", "I");
     LOG_ASSERT(gWebViewCoreFields.m_viewportMinimumScale,
-            "Unable to find android/webkit/WebViewCore.mViewportMinimumScale");
+            "Unable to find roamtouch/webkit/WebViewCore.mViewportMinimumScale");
     gWebViewCoreFields.m_viewportMaximumScale = env->GetFieldID(widget,
             "mViewportMaximumScale", "I");
     LOG_ASSERT(gWebViewCoreFields.m_viewportMaximumScale,
-            "Unable to find android/webkit/WebViewCore.mViewportMaximumScale");
+            "Unable to find roamtouch/webkit/WebViewCore.mViewportMaximumScale");
     gWebViewCoreFields.m_viewportUserScalable = env->GetFieldID(widget,
             "mViewportUserScalable", "Z");
     LOG_ASSERT(gWebViewCoreFields.m_viewportUserScalable,
-            "Unable to find android/webkit/WebViewCore.mViewportUserScalable");
+            "Unable to find roamtouch/webkit/WebViewCore.mViewportUserScalable");
     gWebViewCoreFields.m_viewportDensityDpi = env->GetFieldID(widget,
             "mViewportDensityDpi", "I");
     LOG_ASSERT(gWebViewCoreFields.m_viewportDensityDpi,
-            "Unable to find android/webkit/WebViewCore.mViewportDensityDpi");
+            "Unable to find roamtouch/webkit/WebViewCore.mViewportDensityDpi");
     gWebViewCoreFields.m_webView = env->GetFieldID(widget,
-            "mWebView", "Landroid/webkit/WebView;");
+            "mWebView", "Lroamtouch/webkit/WebView;");
     LOG_ASSERT(gWebViewCoreFields.m_webView,
-            "Unable to find android/webkit/WebViewCore.mWebView");
+            "Unable to find roamtouch/webkit/WebViewCore.mWebView");
 
-    return jniRegisterNativeMethods(env, "android/webkit/WebViewCore",
+    return jniRegisterNativeMethods(env, "roamtouch/webkit/WebViewCore",
             gJavaWebViewCoreMethods, NELEM(gJavaWebViewCoreMethods));
 }
 
