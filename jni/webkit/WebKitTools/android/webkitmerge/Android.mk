@@ -17,7 +17,7 @@ include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := webkitmerge.cpp
 
-LOCAL_MODULE := webkitmerge
+LOCAL_MODULE := rtwebkitmerge
 
 LOCAL_MODULE_TAGS := eng
 

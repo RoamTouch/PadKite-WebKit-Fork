@@ -36,7 +36,7 @@ namespace WebCore {
 
 using JSC::Bindings::getJNIEnv;
 
-static const char* javaGeolocationServiceClassName = "android/webkit/GeolocationService";
+static const char* javaGeolocationServiceClassName = "roamtouch/webkit/GeolocationService";
 enum javaGeolocationServiceClassMethods {
     GeolocationServiceMethodInit = 0,
     GeolocationServiceMethodStart,

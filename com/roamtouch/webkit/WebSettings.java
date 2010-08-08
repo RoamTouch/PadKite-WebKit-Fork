@@ -959,11 +959,11 @@ public class WebSettings {
 
     /**
      * Tell the WebView to block all network load requests. If you set the
-     * value to false, you must call {@link android.webkit.WebView#reload} to
+     * value to false, you must call {@link roamtouch.webkit.WebView#reload} to
      * fetch remote resources. This flag supercedes the value passed to
      * {@link #setBlockNetworkImage}.
      * @param flag True if the WebView should block all network loads.
-     * @see android.webkit.WebView#reload
+     * @see roamtouch.webkit.WebView#reload
      */
     public synchronized void setBlockNetworkLoads(boolean flag) {
         if (mBlockNetworkLoads != flag) {
