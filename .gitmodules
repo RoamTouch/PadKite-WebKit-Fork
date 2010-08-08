@@ -1,3 +1,6 @@
 [submodule "google/platform/frameworks/base"]
 	path = google/platform/frameworks/base
 	url = git://android.git.kernel.org/platform/frameworks/base.git
+[submodule "google/platform/external/webkit"]
+	path = google/platform/external/webkit
+	url = git://android.git.kernel.org/platform/external/webkit.git
