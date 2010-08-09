@@ -628,6 +628,9 @@ public class WebView extends AbsoluteLayout
     static final int CENTER_FIT_RECT                    = 127;
     static final int REQUEST_KEYBOARD_WITH_SELECTION_MSG_ID = 128;
     static final int SET_SCROLLBAR_MODES                = 129;
+    /* ROAMTOUCH CHANGE BEGIN */
+    static final int UPDATE_CLIPBOARD			= 130;
+    /* ROAMTOUCH CHANGE END */
 
     private static final int FIRST_PACKAGE_MSG_ID = SCROLL_TO_MSG_ID;
     private static final int LAST_PACKAGE_MSG_ID = SET_SCROLLBAR_MODES;
@@ -675,6 +678,9 @@ public class WebView extends AbsoluteLayout
         "CENTER_FIT_RECT", //                = 127;
         "REQUEST_KEYBOARD_WITH_SELECTION_MSG_ID", // = 128;
         "SET_SCROLLBAR_MODES" //             = 129;
+/* ROAMTOUCH CHANGE BEGIN */
+        ,"UPDATE_CLIPBOARD" //             = 130;
+/* ROAMTOUCH CHANGE END */
     };
 
     // If the site doesn't use the viewport meta tag to specify the viewport,
@@ -4150,6 +4156,9 @@ public class WebView extends AbsoluteLayout
                     IClipboard clip = IClipboard.Stub.asInterface(
                             ServiceManager.getService("clipboard"));
                             clip.setClipboardText(selection);
+		    /* ROAMTOUCH CHANGE BEGIN */
+                    mCallbackProxy.onClipBoardUpdate("text/plain");
+		    /* ROAMTOUCH CHANGE END */
                 } catch (android.os.RemoteException e) {
                     Log.e(LOGTAG, "Clipboard failed", e);
                 }
