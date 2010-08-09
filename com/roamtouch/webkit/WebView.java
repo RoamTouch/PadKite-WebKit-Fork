@@ -6698,9 +6698,6 @@ public class WebView extends AbsoluteLayout
                         Log.e(LOGTAG, "Clipboard failed", e);
                     }
                     break;
-                case RESUME_WEBCORE_UPDATE:
-                    WebViewCore.resumeUpdate(mWebViewCore);
-                    break;
 
                 case LONG_PRESS_CENTER:
                     // as this is shared by keydown and trackballdown, reset all

@@ -865,7 +865,7 @@ final class WebViewCore {
         static final int ADD_PACKAGE_NAME = 185;
         static final int REMOVE_PACKAGE_NAME = 186;
         //ROAMTOUCH CHANGE >>
-        static final int EXECUTE_SELECTION_COMMAND = 182;
+        static final int EXECUTE_SELECTION_COMMAND = 187;
         //ROAMTOUCH CHANGE <<        
 
         // private message ids
