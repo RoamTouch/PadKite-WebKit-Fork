@@ -764,7 +764,7 @@ class CallbackProxy extends Handler {
             case REQUEST_LISTBOX_SINGLECHOICE:
                 if (mWebChromeClient != null) {
                     String[] array = msg.getData().getStringArray("array");
-                    boolean[] enabledArray = msg.getData().getBooleanArray("enabledArray");
+                    int[] enabledArray = msg.getData().getIntArray("enabledArray");
                     int selection = msg.getData().getInt("selection");
                     mWebChromeClient.onListBoxRequest(array, enabledArray, selection);
                 }
@@ -772,7 +772,7 @@ class CallbackProxy extends Handler {
             case REQUEST_LISTBOX_MULTICHOICE:
                 if (mWebChromeClient != null) {
                     String[] array = msg.getData().getStringArray("array");
-                    boolean[] enabledArray = msg.getData().getBooleanArray("enabledArray");
+                    int[] enabledArray = msg.getData().getIntArray("enabledArray");
                     int[] selectedArray = msg.getData().getIntArray("selectedArray");
                     mWebChromeClient.onListBoxRequest(array, enabledArray, selectedArray);
                 }
@@ -1419,14 +1419,14 @@ class CallbackProxy extends Handler {
      * Called by WebView to notify the browser to create a single choice listbox when
      * a <select> element is clicked in the webpage
      */
-    void requestListBox(String[] array, boolean[] enabledArray, int selection) {
+    void requestListBox(String[] array, int[] enabledArray, int selection) {
         if (mWebChromeClient == null) {
             return;
         }
 
         Message msg = obtainMessage(REQUEST_LISTBOX_SINGLECHOICE);
         msg.getData().putStringArray("array", array);
-        msg.getData().putBooleanArray("enabledArray", enabledArray);
+        msg.getData().putIntArray("enabledArray", enabledArray);
         msg.getData().putInt("selection", selection);
         sendMessage(msg);
     }
@@ -1435,7 +1435,7 @@ class CallbackProxy extends Handler {
      * Called by WebView to notify the browser to create a multi-choice listbox when
      * a <select> element is clicked in the webpage
      */
-    void requestListBox(String[] array, boolean[]enabledArray, int[]
+    void requestListBox(String[] array, int[] enabledArray, int[]
             selectedArray) {
         if (mWebChromeClient == null) {
             return;
@@ -1443,7 +1443,7 @@ class CallbackProxy extends Handler {
 
         Message msg = obtainMessage(REQUEST_LISTBOX_MULTICHOICE);
         msg.getData().putStringArray("array", array);
-        msg.getData().putBooleanArray("enabledArray", enabledArray);
+        msg.getData().putIntArray("enabledArray", enabledArray);
         msg.getData().putIntArray("selectedArray", selectedArray);
         sendMessage(msg);
     }

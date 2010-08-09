@@ -296,7 +296,7 @@ public class WebChromeClient {
      * @param enabledArray array of flags to indicate whether the corresponding item is enabled or not
      * @param selection default selected item index
      */
-    void onListBoxRequest(String[] array, boolean[]enabledArray, int selection) {}
+    void onListBoxRequest(String[] array, int[]enabledArray, int selection) {}
 
     /**
      * Request the application fo create a native listbox to display the multi selection <selet> element
@@ -305,7 +305,7 @@ public class WebChromeClient {
      * @param enabledArray array of flags to indicate whether the corresponding item is enabled or not
      * @param selection array of default selected items index
      */
-    void onListBoxRequest(String[] array, boolean[]enabledArray, int[] selectedArray) {}
+    void onListBoxRequest(String[] array, int[]enabledArray, int[] selectedArray) {}
     
     //Roamtouch Change - end
 
