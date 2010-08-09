@@ -31,10 +31,10 @@ LOCAL_SRC_FILES := \
 	main.cpp
 
 # Pull the webkit definitions from the base webkit makefile.
-LOCAL_SHARED_LIBRARIES := libwebcore $(WEBKIT_SHARED_LIBRARIES)
+LOCAL_SHARED_LIBRARIES := librtwebcore $(WEBKIT_SHARED_LIBRARIES)
 LOCAL_LDLIBS := $(WEBKIT_LDLIBS)
 
-LOCAL_MODULE := webcore_test
+LOCAL_MODULE := rtwebcore_test
 
 LOCAL_MODULE_TAGS := optional
 
