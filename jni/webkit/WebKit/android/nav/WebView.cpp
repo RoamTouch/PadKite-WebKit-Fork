@@ -918,17 +918,16 @@ bool motionUp(int x, int y, int slop)
 }
 
 //ROAMTOUCH CHANGE >>
-const CachedNode* findCachedNodeAt(int x, int y, int slop)
+const CachedNode* findCachedNodeAt(int x, int y, int slop, const CachedFrame** framePtr)
 {
     bool pageScrolled = false;
-    m_followedLink = false;
-    const CachedFrame* frame;
+    m_ring.m_followedLink = false;
     WebCore::IntRect rect = WebCore::IntRect(x - slop, y - slop, slop * 2, slop * 2);
     int rx, ry;
     CachedRoot* root = getFrameCache(AllowNewer);
     if (!root)
         return 0;
-    const CachedNode* result = findAt(root, rect, &frame, &rx, &ry);
+    const CachedNode* result = findAt(root, rect, framePtr, &rx, &ry);
     if (!result) {
         DBG_NAV_LOGD("No cached node found root=%p", root);
         return 0;
@@ -1650,14 +1649,18 @@ static jobject nativeGetHitTestResultAtPoint(JNIEnv *env, jobject obj,
 {
     WebView* view = GET_NATIVE_VIEW(env, obj);
     LOG_ASSERT(view, "view not set in %s", __FUNCTION__);
-    const CachedNode *result = view->findCachedNodeAt(x, y, slop);
+    const CachedFrame* frame;
+    const CachedNode *result = view->findCachedNodeAt(x, y, slop, &frame);
 
     WebCore::String extraString ;
     WebCore::String toolTipString ;
     WebCore::IntRect bounds;
     int type = WebView::HIT_TEST_UNKNOWN_TYPE;
     if (result) {
-        if (result->isTextField() || result->isTextArea()) {
+	 const CachedInput* input = frame->textInput(result);
+
+        //if (result->isTextField() || result->isTextArea()) {
+        if (input) {
             type = WebView::HIT_TEST_EDIT_TEXT_TYPE;
         } else if (result->isText()) {
             type = WebView::HIT_TEST_TEXT_TYPE;
@@ -1682,7 +1685,7 @@ static jobject nativeGetHitTestResultAtPoint(JNIEnv *env, jobject obj,
                 }
             }
         }
-        bounds = result->getBounds();
+        bounds = result->bounds(frame);
 
         if (type == WebView::HIT_TEST_UNKNOWN_TYPE 
             || type == WebView::HIT_TEST_SRC_ANCHOR_TYPE) {

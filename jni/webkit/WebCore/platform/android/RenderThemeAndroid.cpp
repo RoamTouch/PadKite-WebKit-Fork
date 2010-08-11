@@ -106,7 +106,7 @@ Color RenderThemeAndroid::platformActiveSelectionBackgroundColor() const
 
 Color RenderThemeAndroid::platformInactiveSelectionBackgroundColor() const
 {
-    return Color(SELECTION_COLOR)/* ROAMTOUCH CHANGE Color(Color::transparent)*/;
+    return Color(selectionColor) /* ROAMTOUCH CHANGE Color(Color::transparent)*/;
 }
 
 Color RenderThemeAndroid::platformActiveSelectionForegroundColor() const
