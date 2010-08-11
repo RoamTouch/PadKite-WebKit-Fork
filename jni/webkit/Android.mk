@@ -70,6 +70,7 @@ include $(CLEAR_VARS)
 # Define our module and find the intermediates directory
 LOCAL_MODULE := librtwebcore
 LOCAL_MODULE_CLASS := STATIC_LIBRARIES
+LOCAL_PRELINK_MODULE := false
 base_intermediates := $(call local-intermediates-dir)
 
 # Using := here prevents recursive expansion
