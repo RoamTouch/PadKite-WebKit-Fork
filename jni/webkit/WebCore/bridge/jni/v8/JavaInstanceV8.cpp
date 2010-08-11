@@ -32,9 +32,14 @@
 #include "JavaClassV8.h"
 
 #include <assert.h>
+#include <utils/Log.h>
 
 #define LOG_TAG "v8binding"
-#include <utils/Log.h>
+
+// ANDROID
+#include <cutils/log.h>
+#define LOG_TAG JavaInstanceV8.cpp
+// END ANDROID
 
 using namespace JSC::Bindings;
 
@@ -48,16 +53,6 @@ JavaInstance::~JavaInstance()
 {
     m_instance = 0;
     delete m_class;
-}
-
-#define NUM_LOCAL_REFS 64
-
-void JavaInstance::virtualBegin() {
-    getJNIEnv()->PushLocalFrame(NUM_LOCAL_REFS);
-}
-
-void JavaInstance::virtualEnd() {
-    getJNIEnv()->PopLocalFrame(0);
 }
 
 JavaClass* JavaInstance::getClass() const
