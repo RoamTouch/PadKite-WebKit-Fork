@@ -519,8 +519,8 @@ public class WebSettings {
      */
     public synchronized void setTextSize(TextSize t) {
         if (WebView.mLogEvent && mTextSize != t ) {
-            EventLog.writeEvent(EventLogTags.BROWSER_TEXT_SIZE_CHANGE,
-                    mTextSize.value, t.value);
+            //EventLog.writeEvent(EventLogTags.BROWSER_TEXT_SIZE_CHANGE,
+              //      mTextSize.value, t.value);
         }
         mTextSize = t;
         postSync();
