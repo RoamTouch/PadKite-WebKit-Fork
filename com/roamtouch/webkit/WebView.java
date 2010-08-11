@@ -4778,8 +4778,8 @@ public class WebView extends AbsoluteLayout
                     mWebViewCore.sendMessage(
                             EventHub.UPDATE_FRAME_CACHE_IF_LOADING);
                     if (mLogEvent && eventTime - mLastTouchUpTime < 1000) {
-                        EventLog.writeEvent(EventLogTags.BROWSER_DOUBLE_TAP_DURATION,
-                                (eventTime - mLastTouchUpTime), eventTime);
+                        //EventLog.writeEvent(EventLogTags.BROWSER_DOUBLE_TAP_DURATION,
+                          //      (eventTime - mLastTouchUpTime), eventTime);
                     }
                 }
                 // Trigger the link
@@ -5878,7 +5878,7 @@ public class WebView extends AbsoluteLayout
 
     private void doMotionUp(int contentX, int contentY) {
         if (mLogEvent && nativeMotionUp(contentX, contentY, mNavSlop)) {
-            EventLog.writeEvent(EventLogTags.BROWSER_SNAP_CENTER);
+            //EventLog.writeEvent(EventLogTags.BROWSER_SNAP_CENTER);
         }
         if (nativeHasCursorNode() && !nativeCursorIsTextInput()) {
             playSoundEffect(SoundEffectConstants.CLICK);
