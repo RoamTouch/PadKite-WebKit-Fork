@@ -2193,9 +2193,7 @@ static JNINativeMethod gJavaWebViewMethods[] = {
     { "nativeUpdateCachedTextfield", "(Ljava/lang/String;I)V",
         (void*) nativeUpdateCachedTextfield },
     { "nativeGetBlockLeftEdge", "(IIF)I",
-        (void*) nativeGetBlockLeftEdge },
-    { "nativeUpdatePluginReceivesEvents", "()V",
-        (void*) nativeUpdatePluginReceivesEvents }
+        (void*) nativeGetBlockLeftEdge }
     //ROAMTOUCH CHANGE >>    
     ,{ "nativeGetHitTestResultAtPoint", "(III)Lroamtouch/webkit/WebHitTestResult;",
         (void*) nativeGetHitTestResultAtPoint }
