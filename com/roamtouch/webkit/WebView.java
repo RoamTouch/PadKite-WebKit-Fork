@@ -3585,6 +3585,20 @@ public class WebView extends AbsoluteLayout
         return false;
     }
 
+    public boolean pasteText(String text) {
+        if (nativeCursorIsTextInput()) {
+            // This will bring up the WebTextView and put it in focus, for
+            // our view system's notion of focus
+            rebuildWebTextView();
+	    if (mWebTextView != null) {
+                // Now we need to set the Text to it
+                mWebTextView.setText(text);
+	        return true;
+            }
+        }
+        return false;
+    }
+
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         if (DebugFlags.WEB_VIEW) {
