@@ -1739,8 +1739,14 @@ public class WebView extends AbsoluteLayout
       int contentY = viewToContentY(y + mScrollY);
 
       WebHitTestResult result = nativeGetHitTestResultAtPoint(contentX, contentY, mNavSlop) ;
+ 
       Rect resultRect = contentToViewRect(result.getRect());
       result.setRect(resultRect);
+      
+      Point resultPoint = result.getPoint();
+      int pX = contentToViewX(resultPoint.x) - mScrollX;
+      int pY = contentToViewY(resultPoint.y) - mScrollY;
+      result.setPoint(pX, pY);
 
       return result;
     }
