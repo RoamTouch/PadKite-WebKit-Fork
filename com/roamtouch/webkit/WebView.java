@@ -867,21 +867,21 @@ public class WebView extends AbsoluteLayout
             neverRemember.obj = resumeMsg;
 
             new AlertDialog.Builder(getContext())
-                    .setTitle(com.android.internal.R.string.save_password_label)
-                    .setMessage(com.android.internal.R.string.save_password_message)
-                    .setPositiveButton(com.android.internal.R.string.save_password_notnow,
+                    .setTitle("Confirm")
+                    .setMessage("Do you want the browser to remember this password?")
+                    .setPositiveButton("Not now",
                     new DialogInterface.OnClickListener() {
                         public void onClick(DialogInterface dialog, int which) {
                             resumeMsg.sendToTarget();
                         }
                     })
-                    .setNeutralButton(com.android.internal.R.string.save_password_remember,
+                    .setNeutralButton("Remember",
                     new DialogInterface.OnClickListener() {
                         public void onClick(DialogInterface dialog, int which) {
                             remember.sendToTarget();
                         }
                     })
-                    .setNegativeButton(com.android.internal.R.string.save_password_never,
+                    .setNegativeButton("Never",
                     new DialogInterface.OnClickListener() {
                         public void onClick(DialogInterface dialog, int which) {
                             neverRemember.sendToTarget();
@@ -3711,7 +3711,7 @@ public class WebView extends AbsoluteLayout
             Region selection = new Region(nativeGetSelection());
             if (selection.isEmpty() == false) {
                 Toast.makeText(mContext
-                        , com.android.internal.R.string.text_copied
+                        , "Text copied to clipboard."
                         , Toast.LENGTH_SHORT).show();
                 mWebViewCore.sendMessage(EventHub.GET_SELECTION, selection);
                 copiedSomething = true;
@@ -4353,7 +4353,7 @@ public class WebView extends AbsoluteLayout
                         if (mInZoomOverview && count > 0) {
                             settings.setDoubleTapToastCount(--count);
                             Toast.makeText(mContext,
-                                    com.android.internal.R.string.double_tap_toast,
+                                    "Tip: double-tap to zoom in and out.",
                                     Toast.LENGTH_LONG).show();
                         }
                     }
