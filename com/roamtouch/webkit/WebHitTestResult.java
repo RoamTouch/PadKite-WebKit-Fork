@@ -85,6 +85,7 @@ public class WebHitTestResult {
 
     private int mType;
     private String mExtra;
+    private String mHref;
     private String mToolTip;
     private Rect mRect;
     private int mIdentifier;
@@ -103,6 +104,11 @@ public class WebHitTestResult {
     public void setExtra(String extra) {
         mExtra = extra;
     }
+
+    public void setHref(String href) {
+        mHref = href;
+    }
+
     public void setToolTip(String toolTip) {
         mToolTip = toolTip;
     }
@@ -125,6 +131,10 @@ public class WebHitTestResult {
 
     public int getType() {
         return mType;
+    }
+
+    public String getHref() {
+        return mHref;
     }
 
     public String getExtra() {
@@ -155,6 +165,7 @@ public class WebHitTestResult {
     public String toString() {
         return "WebHitTestResult mType=" + mType
             + ", mExtra=" + mExtra
+            + ", mHref=" + mHref
             + ", mToolTip=" + mToolTip
             + ", mIdentifier=" + mIdentifier
             + ", mPoint=" + mPoint
@@ -164,6 +175,7 @@ public class WebHitTestResult {
     public void dump() {
         Log.v(LOGTAG, "WebHitTestResult mType=" + mType
             + ", mExtra=" + mExtra
+            + ", mHref=" + mHref
             + ", mToolTip=" + mToolTip
             + ", mIdentifier=" + mIdentifier
             + ", mPoint=" + mPoint
