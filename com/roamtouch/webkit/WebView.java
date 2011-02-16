@@ -1051,21 +1051,21 @@ public class WebView extends AbsoluteLayout
             neverRemember.obj = resumeMsg;
 
             new AlertDialog.Builder(getContext())
-                    .setTitle(com.android.internal.R.string.save_password_label)
-                    .setMessage(com.android.internal.R.string.save_password_message)
-                    .setPositiveButton(com.android.internal.R.string.save_password_notnow,
+                    .setTitle("Confirm")
+                    .setMessage("Do you want the browser to remember this password?")
+                    .setPositiveButton("Not now",
                     new DialogInterface.OnClickListener() {
                         public void onClick(DialogInterface dialog, int which) {
                             resumeMsg.sendToTarget();
                         }
                     })
-                    .setNeutralButton(com.android.internal.R.string.save_password_remember,
+                    .setNeutralButton("Remember",
                     new DialogInterface.OnClickListener() {
                         public void onClick(DialogInterface dialog, int which) {
                             remember.sendToTarget();
                         }
                     })
-                    .setNegativeButton(com.android.internal.R.string.save_password_never,
+                    .setNegativeButton("Never",
                     new DialogInterface.OnClickListener() {
                         public void onClick(DialogInterface dialog, int which) {
                             neverRemember.sendToTarget();
@@ -1972,8 +1972,14 @@ public class WebView extends AbsoluteLayout
       int contentY = viewToContentY(y + mScrollY);
 
       WebHitTestResult result = nativeGetHitTestResultAtPoint(contentX, contentY, mNavSlop) ;
+ 
       Rect resultRect = contentToViewRect(result.getRect());
       result.setRect(resultRect);
+      
+      Point resultPoint = result.getPoint();
+      int pX = contentToViewX(resultPoint.x) - mScrollX;
+      int pY = contentToViewY(resultPoint.y) - mScrollY;
+      result.setPoint(pX, pY);
 
       return result;
     }
@@ -4124,6 +4130,20 @@ public class WebView extends AbsoluteLayout
         return false;
     }
 
+    public boolean pasteText(String text) {
+        if (nativeCursorIsTextInput()) {
+            // This will bring up the WebTextView and put it in focus, for
+            // our view system's notion of focus
+            rebuildWebTextView();
+	    if (mWebTextView != null) {
+                // Now we need to set the Text to it
+                mWebTextView.setText(text);
+	        return true;
+            }
+        }
+        return false;
+    }
+
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         if (DebugFlags.WEB_VIEW) {
@@ -4262,7 +4282,7 @@ public class WebView extends AbsoluteLayout
                     Log.v(LOGTAG, "commitCopy \"" + selection + "\"");
                 }
                 Toast.makeText(mContext
-                        , com.android.internal.R.string.text_copied
+                        , "Text copied to clipboard."
                         , Toast.LENGTH_SHORT).show();
                 copiedSomething = true;
                 try {
@@ -5387,7 +5407,7 @@ public class WebView extends AbsoluteLayout
             if (mInZoomOverview && count > 0) {
                 settings.setDoubleTapToastCount(--count);
                 Toast.makeText(mContext,
-                        com.android.internal.R.string.double_tap_toast,
+                        "Tip: double-tap to zoom in and out.",
                         Toast.LENGTH_LONG).show();
             }
         }

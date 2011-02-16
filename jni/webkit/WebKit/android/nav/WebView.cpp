@@ -1662,6 +1662,7 @@ static jobject nativeGetHitTestResultAtPoint(JNIEnv *env, jobject obj,
     const CachedNode *result = view->findCachedNodeAt(x, y, slop, &frame, &rx, &ry);
 
     WebCore::String extraString ;
+    WebCore::String hrefString ;
     WebCore::String toolTipString ;
     WebCore::IntRect bounds;
     int type = WebView::HIT_TEST_UNKNOWN_TYPE;
@@ -1696,6 +1697,7 @@ static jobject nativeGetHitTestResultAtPoint(JNIEnv *env, jobject obj,
                 } else if (result->isAnchor()) {
                     type = WebView::HIT_TEST_SRC_ANCHOR_TYPE;
                     extraString = text;
+                    hrefString = text;
                 }
             }
         }
@@ -1780,7 +1782,11 @@ static jobject nativeGetHitTestResultAtPoint(JNIEnv *env, jobject obj,
 
     jmethodID setExtra = env->GetMethodID(hitTestResultClass, "setExtra", "(Ljava/lang/String;)V");
     env->CallVoidMethod(hitTestResult, setExtra, extra) ;
+
+    jstring href = env->NewString(hrefString.characters(), hrefString.length());
     
+    jmethodID setHref = env->GetMethodID(hitTestResultClass, "setHref", "(Ljava/lang/String;)V");
+    env->CallVoidMethod(hitTestResult, setHref, href) ;
 
     return hitTestResult;
     
