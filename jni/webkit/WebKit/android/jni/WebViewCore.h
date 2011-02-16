@@ -397,6 +397,13 @@ namespace android {
 		void copySelectedContentToClipboard();
 		//ROAMTOUCH CHANGE <<
 
+        //ROAMTOUCH CHANGE >>
+        // Execute the selection command
+        void executeSelectionCommand(int x, int y, int cmd);
+
+        void copySelectedContentToClipboard(bool);
+        //ROAMTOUCH CHANGE <<
+
         // Notify the Java side whether it needs to pass down the touch events
         void needTouchEvents(bool);
 

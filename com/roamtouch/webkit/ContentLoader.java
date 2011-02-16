@@ -16,6 +16,7 @@
 
 package roamtouch.webkit;
 
+import android.content.Context;
 import roamtouch.net.http.EventHandler;
 import roamtouch.net.http.Headers;
 import android.net.Uri;

@@ -21,6 +21,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.database.Cursor;
 import android.graphics.Canvas;
+import android.graphics.Color; //RoamTouch Change
 import android.graphics.DrawFilter;
 import android.graphics.Paint;
 import android.graphics.PaintFlagsDrawFilter;
@@ -866,6 +867,8 @@ final class WebViewCore {
         static final int REMOVE_PACKAGE_NAME = 186;
         //ROAMTOUCH CHANGE >>
         static final int EXECUTE_SELECTION_COMMAND = 187;
+
+        static final int SET_SELECTION_COLOR = 188; 
         //ROAMTOUCH CHANGE <<        
 
         // private message ids
@@ -1314,7 +1317,6 @@ final class WebViewCore {
                         case POPULATE_VISITED_LINKS:
                             nativeProvideVisitedHistory((String[])msg.obj);
                             break;
-
                         case VALID_NODE_BOUNDS: {
                             MotionUpData motionUpData = (MotionUpData) msg.obj;
                             if (!nativeValidNodeAndBounds(
@@ -1364,6 +1366,10 @@ final class WebViewCore {
                         case EXECUTE_SELECTION_COMMAND:
                             Point pos = (Point)msg.obj;
                             nativeExecuteSelectionCommand(pos.x, pos.y, (int)msg.arg1);
+                            break;
+                        case SET_SELECTION_COLOR:
+                            int color = (int)msg.arg1;
+                            nativeSetSelectionColor(Color.red(color), Color.green(color), Color.blue(color),  Color.alpha(color)) ;
                             break;
                         //ROAMTOUCH CHANGE <<    
                     }
@@ -2488,6 +2494,7 @@ final class WebViewCore {
 
     //ROAMTOUCH CHANGE >>
     private native void     nativeExecuteSelectionCommand(int x, int y, int command);
+    private native void     nativeSetSelectionColor(int r, int g, int b, int a) ;    
     //ROAMTOUCH CHANGE <<
     
 }

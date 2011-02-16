@@ -1083,6 +1083,8 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
         String toolTip;
         bool isVideo = false;
         IntSize videoSize;
+        bool isSelect = false;
+        bool isInput = false;
         //RoamTouch change - end
         CachedNodeType type = NORMAL_CACHEDNODETYPE;
         CachedInput cachedInput;
@@ -1220,6 +1222,7 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
             HTMLInputElement::InputType inputType = input->inputType();
             if (input->isTextField()) {
                 type = TEXT_INPUT_CACHEDNODETYPE;
+                isInput = true;
                 cachedInput.init();
                 cachedInput.setFormPointer(input->form());
                 cachedInput.setIsTextField(true);
@@ -1243,7 +1246,12 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
             cachedInput.setInputType(HTMLInputElement::TEXT);
             cachedInput.setIsTextField(false);
             exported = area->value().threadsafeCopy();
-        } else if (node->hasTagName(HTMLNames::aTag)) {
+        //RoamTouch Change - begin
+        } else if (node->hasTagName(HTMLNames::selectTag)) {
+            isSelect = true;
+        }
+        //RoamTouch Change - end
+        else if (node->hasTagName(HTMLNames::aTag)) {
             const HTMLAnchorElement* anchorNode = 
                 (const HTMLAnchorElement*) node;
             if (!anchorNode->isFocusable() && !HasTriggerEvent(node))
@@ -1378,6 +1386,8 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
         cachedNode.setToolTip(toolTip); 
         cachedNode.setVideoSize(videoSize);
         cachedNode.setIsVideo(isVideo);
+        cachedNode.setIsInput(isInput);
+        cachedNode.setIsSelect(isSelect);
         //RoamTouch Change - end
         cachedNode.setHasCursorRing(hasCursorRing);
         cachedNode.setHasMouseOver(hasMouseOver);

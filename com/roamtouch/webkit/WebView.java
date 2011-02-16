@@ -957,7 +957,7 @@ public class WebView extends AbsoluteLayout
         WebSettings settings = getSettings();
         mSupportMultiTouch = context.getPackageManager().hasSystemFeature(
                 PackageManager.FEATURE_TOUCHSCREEN_MULTITOUCH)
-                && settings.supportZoom() && settings.getBuiltInZoomControls();
+                && settings.supportZoom(); // ROAMTOUCH CHANGE: HACK: Always allow MT scaling
         if (mSupportMultiTouch && (mScaleDetector == null)) {
             mScaleDetector = new ScaleGestureDetector(context,
                     new ScaleDetectorListener());
@@ -1979,8 +1979,8 @@ public class WebView extends AbsoluteLayout
     }
 
 
-    /* Select single word or link */
-    public static final int SELECT_WORD_OR_LINK    = 1;
+    /* Select single word*/
+    public static final int SELECT_WORD            = 1;
     /* Select single line */
     public static final int SELECT_LINE            = 2;
     /* Select single sentence */
@@ -1991,6 +1991,31 @@ public class WebView extends AbsoluteLayout
     public static final int COPY_TO_CLIPBOARD      = 5;
     /* Clear the selected contents on the page */
     public static final int CLEAR_SELECTION        = 6;
+    /* Start selection at given location */
+    public static final int START_SELECTION        = 7;
+    /* Extend selection from the start location to the given location */
+    public static final int EXTEND_SELECTION       = 8;
+    /* Extend selection from the start location to one character left */
+    public static final int EXTEND_SELECTION_LEFT  = 9;
+    /* Extend selection from the start location to one character right */
+    public static final int EXTEND_SELECTION_RIGHT = 10;
+    /* Extend selection from the start location to one line up */
+    public static final int EXTEND_SELECTION_UP    = 11;
+    /* Extend selection from the start location to one line down */
+    public static final int EXTEND_SELECTION_DOWN  = 12;
+
+    /* Stop selection, after this command the application can 
+     * copy the selected content to clipboard by COPY_TO_CKIPBOARD command 
+     */
+    public static final int STOP_SELECTION         = 13;
+    /* Select an object on the given point x,y */
+    public static final int SELECT_OBJECT          = 14;
+    /* Copy the HTML fragment of the copied content to clipboard */
+    public static final int COPY_HTML_FRAGMENT_TO_CLIPBOARD      = 15;
+    /* Select all web page content*/
+    public static final int SELECT_ALL              = 16;
+    /* Select the entire link*/
+    public static final int SELECT_LINK             = 17;
 
     /**
        * Executes the selection command on the given point. The x,y co-ordinates are
@@ -2015,13 +2040,6 @@ public class WebView extends AbsoluteLayout
       * @param y Y coordinate with respect to webview relative coordinate
       *       
       */
-	public void focusNodeAt(int x, int y) {
-		int contentX = viewToContentX(x + mScrollX);
-		int contentY = viewToContentY(y + mScrollY);
-		
-		nativeSetCursorAtPoint(contentX, contentY, mNavSlop) ;
-	}
-    //ROAMTOUCH CHANGE <<
 
     // Called by JNI when the DOM has changed the focus.  Clear the focus so
     // that new keys will go to the newly focused field
@@ -2030,6 +2048,101 @@ public class WebView extends AbsoluteLayout
             mPrivateHandler.obtainMessage(DOM_FOCUS_CHANGED).sendToTarget();
         }
     }
+
+    public void focusNodeAt(int x, int y) {
+        int contentX = viewToContentX(x + mScrollX);
+        int contentY = viewToContentY(y + mScrollY);
+
+        nativeSetCursorAtPoint(contentX, contentY, mNavSlop) ;
+    }
+
+    /**
+      * Sets the selection color of WebKit.
+      *
+      * @param c Selection color
+      *       
+      */
+    public void setSelectionColor(int color) {
+        mWebViewCore.sendMessage(EventHub.SET_SELECTION_COLOR,
+                                    color, 0, 0);
+    }
+
+    /**
+      * Sets the Search result highlight color of WebKit.
+      *
+      * @param c Search result highlight color
+      *       
+      */
+    public void setSearchHighlightColor(int color) {
+        if (mNativeClass != 0) {
+            nativeSetSelectionColor(Color.red(color), Color.green(color), Color.blue(color),  Color.alpha(color)) ;
+        }
+    }
+
+    /**
+      * Sets the WebKit focus ring outer colors
+      *
+      * @param c Focus ring outer colors
+      *       
+      */
+    public void     setCursorOuterColors(int normalRingSelect, int fakeRingSelect,
+                                      int normalRingPressed, int fakeRingPressed) {
+        if (mNativeClass != 0) {
+            nativeSetCursorOuterColors(normalRingSelect, fakeRingSelect,
+                                      normalRingPressed, fakeRingPressed) ;
+        }
+    }
+
+    /**
+      * Sets the WebKit focus ring inner colors
+      *
+      * @param c Focus ring inner colors
+      *       
+      */
+    public void     setCursorInnerColors(int normalRingSelect, int fakeRingSelect,
+                                      int normalRingPressed, int fakeRingPressed) {
+        if (mNativeClass != 0) {
+            nativeSetCursorInnerColors(normalRingSelect, fakeRingSelect,
+                                      normalRingPressed, fakeRingPressed) ;
+        }
+    }
+    
+    /**
+      * Sets the WebKit focus ring pressed state colors
+      *
+      * @param c Focus ring pressed state colors
+      *       
+      */
+    public void     setCursorPressedColors(int normalRingPressed, int fakeRingPressed) {
+        if (mNativeClass != 0) {
+            nativeSetCursorPressedColors(normalRingPressed, fakeRingPressed) ;
+        }
+    }
+    
+
+
+    /**
+     * Performs zoom operation in the webview with respect to the given anchor point
+     * @param zoomCenterX horizontal zoom anchor point
+     * @param zoomCenterY vertical zoom anchor point
+     * @param zoomMultiplier Zoom in/out multiplier 
+               (e.g 1.25f for 25% zoom in or 0.8f for 25% zoom out from
+               the current scale factor)
+     * @return TRUE if zoom in succeeds. FALSE if no zoom changes.
+     */
+    public boolean zoom(float zoomCenterX, float zoomCenterY, float zoomMultiplier) {
+        switchOutDrawHistory();
+        mInZoomOverview = false;
+        // Anchor zooming to the given zoomCente point of the screen.
+        mZoomCenterX = zoomCenterX;
+        mZoomCenterY = zoomCenterY;
+        mAnchorX = viewToContentX((int) mZoomCenterX + mScrollX);
+        mAnchorY = viewToContentY((int) mZoomCenterY + mScrollY);
+        return zoomWithPreview(mActualScale * zoomMultiplier);
+    }
+    
+    //ROAMTOUCH CHANGE <<
+
     /**
      * Request the href of an anchor element due to getFocusNodePath returning
      * "href." If hrefMsg is null, this method returns immediately and does not
@@ -7593,6 +7706,12 @@ public class WebView extends AbsoluteLayout
     private native int      nativeGetBlockLeftEdge(int x, int y, float scale);
     //ROAMTOUCH CHANGE >>
     private native WebHitTestResult  nativeGetHitTestResultAtPoint(int x, int y, int slop);
-    private native void  	nativeSetCursorAtPoint(int x, int y, int slop);
+    private native void     nativeSetCursorAtPoint(int x, int y, int slop);
+    private native void     nativeSetSelectionColor(int r, int g, int b, int a) ;
+    private native void     nativeSetCursorOuterColors(int normalRingSelect, int fakeRingSelect,
+                                      int normalRingPressed, int fakeRingPressed) ;
+    private native void     nativeSetCursorInnerColors(int normalRingSelect, int fakeRingSelect,
+                                      int normalRingPressed, int fakeRingPressed) ;
+    private native void     nativeSetCursorPressedColors(int normalRingPressed, int fakeRingPressed) ;
     //ROAMTOUCH CHANGE <<
 }

@@ -115,6 +115,8 @@ enum WebHitTestResultType {
         HIT_TEST_EDIT_TEXT_TYPE,
         HIT_TEST_VIDEO_TYPE,
         HIT_TEST_TEXT_TYPE,
+        HIT_TEST_INPUT_TYPE,
+        HIT_TEST_SELECT_TYPE,
         HIT_TEST_TYPE_END,
 };
 //ROAMTOUCH CHANGE <<
@@ -836,6 +838,12 @@ void selectBestAt(const WebCore::IntRect& rect)
     viewInvalidate();
 }
 
+void setSelectionColor(int r, int g, int b, int alpha)
+{
+    DBG_NAV_LOGD("Selection Color r=%d, g=%d, b=%d, alpha=%d", r, g, b, alpha);
+    m_findHighlightColor = SkColorSetARGB(alpha, r, g, b);
+}
+
 WebCore::IntRect getNavBounds()
 {
     CachedRoot* root = getFrameCache(DontAllowNewer);
@@ -918,22 +926,21 @@ bool motionUp(int x, int y, int slop)
 }
 
 //ROAMTOUCH CHANGE >>
-const CachedNode* findCachedNodeAt(int x, int y, int slop, const CachedFrame** framePtr)
+const CachedNode* findCachedNodeAt(int x, int y, int slop, const CachedFrame** framePtr, int* rxPtr, int* ryPtr)
 {
     bool pageScrolled = false;
     m_ring.m_followedLink = false;
     WebCore::IntRect rect = WebCore::IntRect(x - slop, y - slop, slop * 2, slop * 2);
-    int rx, ry;
     CachedRoot* root = getFrameCache(AllowNewer);
     if (!root)
         return 0;
-    const CachedNode* result = findAt(root, rect, framePtr, &rx, &ry);
+    const CachedNode* result = findAt(root, rect, framePtr, rxPtr, ryPtr);
     if (!result) {
         DBG_NAV_LOGD("No cached node found root=%p", root);
         return 0;
     }
     DBG_NAV_LOGD("CachedNode:%p (%d) x=%d y=%d rx=%d ry=%d", result,
-        result->index(), x, y, rx, ry);
+        result->index(), x, y, *rxPtr, *ryPtr);
     
     return result;
 }
@@ -1180,6 +1187,7 @@ private: // local state for WebView
     FindOnPage m_findOnPage;
     CursorRing m_ring;
     LayerAndroid* m_rootLayer;
+    SkColor m_findHighlightColor; //RoamTouch Change
 }; // end of WebView class
 
 /*
@@ -1649,8 +1657,9 @@ static jobject nativeGetHitTestResultAtPoint(JNIEnv *env, jobject obj,
 {
     WebView* view = GET_NATIVE_VIEW(env, obj);
     LOG_ASSERT(view, "view not set in %s", __FUNCTION__);
+    int rx=0, ry=0;
     const CachedFrame* frame;
-    const CachedNode *result = view->findCachedNodeAt(x, y, slop, &frame);
+    const CachedNode *result = view->findCachedNodeAt(x, y, slop, &frame, &rx, &ry);
 
     WebCore::String extraString ;
     WebCore::String toolTipString ;
@@ -1662,6 +1671,11 @@ static jobject nativeGetHitTestResultAtPoint(JNIEnv *env, jobject obj,
         //if (result->isTextField() || result->isTextArea()) {
         if (input) {
             type = WebView::HIT_TEST_EDIT_TEXT_TYPE;
+        } else if (result->isInput()) {
+            type = WebView::HIT_TEST_INPUT_TYPE;
+            extraString = result->getToolTip();
+        } else if (result->isSelect()) {
+            type = WebView::HIT_TEST_SELECT_TYPE;
         } else if (result->isText()) {
             type = WebView::HIT_TEST_TEXT_TYPE;
             //extraString = text;
@@ -1685,6 +1699,11 @@ static jobject nativeGetHitTestResultAtPoint(JNIEnv *env, jobject obj,
                 }
             }
         }
+        if (type == WebView::HIT_TEST_UNKNOWN_TYPE && result->isAnchor()) {
+            //This is probably an anchor node with javascript in its 'src' attribute.
+            type = WebView::HIT_TEST_SRC_ANCHOR_TYPE;
+        }
+
         bounds = result->bounds(frame);
 
         if (type == WebView::HIT_TEST_UNKNOWN_TYPE 
@@ -1720,6 +1739,9 @@ static jobject nativeGetHitTestResultAtPoint(JNIEnv *env, jobject obj,
     
     jmethodID setRect = env->GetMethodID(hitTestResultClass, "setRect", "(Landroid/graphics/Rect;)V");
     env->CallVoidMethod(hitTestResult, setRect, rect) ;
+
+    jmethodID setPoint = env->GetMethodID(hitTestResultClass, "setPoint", "(II)V");
+    env->CallVoidMethod(hitTestResult, setPoint, rx, ry) ;
 
     jmethodID setIdentifier = env->GetMethodID(hitTestResultClass, "setIdentifier", "(I)V");
     env->CallVoidMethod(hitTestResult, setIdentifier, (int)result) ;
@@ -1774,6 +1796,43 @@ static void nativeSetCursorAtPoint(JNIEnv *env, jobject obj,
 
     view->selectBestAt(rect) ;
 }
+
+static void nativeSetSelectionColor(JNIEnv *env, jobject obj,
+                                int r, int g, int b, int alpha)
+{
+    WebView* view = GET_NATIVE_VIEW(env, obj);
+    LOG_ASSERT(view, "view not set in %s", __FUNCTION__);
+
+    view->setSelectionColor(r, g, b, alpha);
+}
+
+static void nativeSetCursorOuterColors(JNIEnv *env, jobject obj,
+                                int color1, int color2, int color3, int color4)
+{
+    WebView* view = GET_NATIVE_VIEW(env, obj);
+    LOG_ASSERT(view, "view not set in %s", __FUNCTION__);
+
+    CursorRing::SetCursorOuterColors(color1, color2, color3, color4);
+}
+
+static void nativeSetCursorInnerColors(JNIEnv *env, jobject obj,
+                                int color1, int color2, int color3, int color4)
+{
+    WebView* view = GET_NATIVE_VIEW(env, obj);
+    LOG_ASSERT(view, "view not set in %s", __FUNCTION__);
+
+    CursorRing::SetCursorInnerColors(color1, color2, color3, color4);
+}
+
+static void nativeSetCursorPressedColors(JNIEnv *env, jobject obj,
+                                                int color1, int color2)
+{
+    WebView* view = GET_NATIVE_VIEW(env, obj);
+    LOG_ASSERT(view, "view not set in %s", __FUNCTION__);
+
+    CursorRing::SetCursorPressedColors(color1, color2);
+}
+
 //ROAMTOUCH CHANGE <<
 
 static bool nativeHasCursorNode(JNIEnv *env, jobject obj)
@@ -2195,10 +2254,18 @@ static JNINativeMethod gJavaWebViewMethods[] = {
     { "nativeGetBlockLeftEdge", "(IIF)I",
         (void*) nativeGetBlockLeftEdge },
     //ROAMTOUCH CHANGE >>    
-    { "nativeGetHitTestResultAtPoint", "(III)Lroamtouch/webkit/WebHitTestResult;",
-        (void*) nativeGetHitTestResultAtPoint },
-    { "nativeSetCursorAtPoint", "(III)V",
-        (void*) nativeSetCursorAtPoint },
+    ,{ "nativeGetHitTestResultAtPoint", "(III)Lroamtouch/webkit/WebHitTestResult;",
+        (void*) nativeGetHitTestResultAtPoint }
+    ,{ "nativeSetCursorAtPoint", "(III)V",
+        (void*) nativeSetCursorAtPoint }
+    ,{ "nativeSetSelectionColor", "(IIII)V",
+        (void*) nativeSetSelectionColor }
+    ,{ "nativeSetCursorOuterColors", "(IIII)V",
+        (void*) nativeSetCursorOuterColors }
+    ,{ "nativeSetCursorInnerColors", "(IIII)V",
+        (void*) nativeSetCursorInnerColors }
+    ,{ "nativeSetCursorPressedColors", "(II)V",
+        (void*) nativeSetCursorPressedColors }
     //ROAMTOUCH CHANGE <<    
 };
 

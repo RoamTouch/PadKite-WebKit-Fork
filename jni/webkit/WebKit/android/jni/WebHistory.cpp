@@ -816,7 +816,8 @@ int register_webhistory(JNIEnv* env)
     gWebHistoryItem.mUrl = env->GetFieldID(clazz, "mUrl", "Ljava/lang/String;");
     LOG_ASSERT(gWebHistoryItem.mUrl, "Could not find field mUrl in WebHistoryItem");
 
-    // Find the WebBackForwardList object and method.
+    // Find the WebBackForwardList object, the addHistoryItem and
+    // removeHistoryItem methods and the mCurrentIndex field.
     clazz = env->FindClass("roamtouch/webkit/WebBackForwardList");
     LOG_ASSERT(clazz, "Unable to find class roamtouch/webkit/WebBackForwardList");
     gWebBackForwardList.mAddHistoryItem = env->GetMethodID(clazz, "addHistoryItem",

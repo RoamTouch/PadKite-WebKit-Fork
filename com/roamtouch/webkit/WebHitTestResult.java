@@ -18,6 +18,7 @@ package roamtouch.webkit;
 
 import android.content.Context;
 import android.graphics.Rect;
+import android.graphics.Point;
 import android.util.Log;
 
 public class WebHitTestResult {
@@ -69,9 +70,18 @@ public class WebHitTestResult {
      */
     public static final int VIDEO_TYPE = 10;
     /**
-     * HitTestResult for hitting text a text node
+     * HitTestResult for hitting a text node
      */
     public static final int TEXT_TYPE = 11;
+    /**
+     * HitTestResult for hitting HTML <input> element other than EDIT_TEXT_TYPE
+     * getExtra() will return the 'type' attribute of <input> element.
+     */
+    public static final int INPUT_TYPE = 12;
+    /**
+     * HitTestResult for hitting HTML <select>element
+     */
+    public static final int SELECT_TYPE = 13;
 
     private int mType;
     private String mExtra;
@@ -79,6 +89,7 @@ public class WebHitTestResult {
     private Rect mRect;
     private int mIdentifier;
     private WebVideoInfo mVideoInfo = null;
+    private Point mPoint;
 
     WebHitTestResult() {
         mType = UNKNOWN_TYPE;
@@ -98,6 +109,10 @@ public class WebHitTestResult {
 
     public void setRect(Rect rect) {
         mRect = rect;
+    }
+
+    public void setPoint(int x, int y) {
+        mPoint = new Point(x, y);
     }
 
     public void setIdentifier(int identifier) {
@@ -120,6 +135,10 @@ public class WebHitTestResult {
         return mRect;
     }
 
+    public Point getPoint() {
+        return mPoint;
+    }
+
     public int getIdentifier() {
         return mIdentifier;
     }
@@ -132,11 +151,22 @@ public class WebHitTestResult {
         return mVideoInfo;
     }
 
+    @Override
+    public String toString() {
+        return "WebHitTestResult mType=" + mType
+            + ", mExtra=" + mExtra
+            + ", mToolTip=" + mToolTip
+            + ", mIdentifier=" + mIdentifier
+            + ", mPoint=" + mPoint
+            + ", mRect=" + mRect;
+    }
+
     public void dump() {
         Log.v(LOGTAG, "WebHitTestResult mType=" + mType
             + ", mExtra=" + mExtra
             + ", mToolTip=" + mToolTip
             + ", mIdentifier=" + mIdentifier
+            + ", mPoint=" + mPoint
             + ", mRect=" + mRect.toString()) ;
     }
 }

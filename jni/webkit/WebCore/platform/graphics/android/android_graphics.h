@@ -30,6 +30,9 @@
 #include "IntRect.h"
 #include "SkTypes.h"
 #include "wtf/Vector.h"
+#include "SkColor.h"//ROAMTOUCH CHANGE
+
+class SkCanvas;
 
 namespace WebCore {
     class GraphicsContext;
@@ -77,6 +80,13 @@ private:
     Flavor m_flavor;
     bool m_followedLink;
     bool m_isButton;
+    //ROAMTOUCH CHANGE >>
+    static void SetCursorOuterColors(SkColor normalRingSelect, SkColor fakeRingSelect,
+                                      SkColor normalRingPressed, SkColor fakeRingPressed);
+    static void SetCursorInnerColors(SkColor normalRingSelect, SkColor fakeRingSelect,
+                                      SkColor normalRingPressed, SkColor fakeRingPressed);
+    static void SetCursorPressedColors(SkColor normalRingPressed, SkColor fakeRingPressed);
+    //ROAMTOUCH CHANGE <<
 };
 
 }
