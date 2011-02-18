@@ -22,6 +22,8 @@ import android.content.res.AssetManager;
 import roamtouch.net.http.EventHandler;
 import roamtouch.net.http.Headers;
 import android.os.Environment;
+import android.util.Log;
+import android.util.TypedValue;
 
 import java.io.File;
 import java.io.FileInputStream;

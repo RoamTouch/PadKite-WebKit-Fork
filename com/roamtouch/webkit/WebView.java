@@ -2144,7 +2144,7 @@ public class WebView extends AbsoluteLayout
         mZoomCenterY = zoomCenterY;
         mAnchorX = viewToContentX((int) mZoomCenterX + mScrollX);
         mAnchorY = viewToContentY((int) mZoomCenterY + mScrollY);
-        return zoomWithPreview(mActualScale * zoomMultiplier);
+        return zoomWithPreview(mActualScale * zoomMultiplier, false);
     }
     
     //ROAMTOUCH CHANGE <<

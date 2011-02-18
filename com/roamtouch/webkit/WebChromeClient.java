@@ -309,34 +309,6 @@ public class WebChromeClient {
     
     //Roamtouch Change - end
 
-    //Roamtouch Change - begin
-    /**
-     * Report a Clipboard updated message to the host application. The ChromeClient
-     * should override this to get notification about the clipboard update.
-     * @param type Content type of the clipboard content.
-     */
-    public void onClipBoardUpdate(String type) {}
-
-    /**
-     * Request the application fo create a native listbox to display the single selection <selet> element
-     * items to the user. This client API will get called when user activates the select item on webpage.
-     * @param array array of listbox item text
-     * @param enabledArray array of flags to indicate whether the corresponding item is enabled or not
-     * @param selection default selected item index
-     */
-    void onListBoxRequest(String[] array, boolean[]enabledArray, int selection) {}
-
-    /**
-     * Request the application fo create a native listbox to display the multi selection <selet> element
-     * items to the user. This client API will get called when user activates the select item on webpage.
-     * @param array array of listbox item text
-     * @param enabledArray array of flags to indicate whether the corresponding item is enabled or not
-     * @param selection array of default selected items index
-     */
-    void onListBoxRequest(String[] array, boolean[]enabledArray, int[] selectedArray) {}
-    
-    //Roamtouch Change - end
-
     /**
      * When not playing, video elements are represented by a 'poster' image. The
      * image to use can be specified by the poster attribute of the video tag in
