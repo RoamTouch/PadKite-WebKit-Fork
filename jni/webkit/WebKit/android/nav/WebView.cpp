@@ -2260,7 +2260,7 @@ static JNINativeMethod gJavaWebViewMethods[] = {
     { "nativeGetBlockLeftEdge", "(IIF)I",
         (void*) nativeGetBlockLeftEdge },
     //ROAMTOUCH CHANGE >>    
-    ,{ "nativeGetHitTestResultAtPoint", "(III)Lroamtouch/webkit/WebHitTestResult;",
+    { "nativeGetHitTestResultAtPoint", "(III)Lroamtouch/webkit/WebHitTestResult;",
         (void*) nativeGetHitTestResultAtPoint }
     ,{ "nativeSetCursorAtPoint", "(III)V",
         (void*) nativeSetCursorAtPoint }

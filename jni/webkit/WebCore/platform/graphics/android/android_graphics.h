@@ -69,6 +69,15 @@ public:
     virtual ~CursorRing() {}
     virtual void draw(SkCanvas* , LayerAndroid* );
     bool setup();
+
+    //ROAMTOUCH CHANGE >>
+    static void SetCursorOuterColors(SkColor normalRingSelect, SkColor fakeRingSelect,
+                                      SkColor normalRingPressed, SkColor fakeRingPressed);
+    static void SetCursorInnerColors(SkColor normalRingSelect, SkColor fakeRingSelect,
+                                      SkColor normalRingPressed, SkColor fakeRingPressed);
+    static void SetCursorPressedColors(SkColor normalRingPressed, SkColor fakeRingPressed);
+    //ROAMTOUCH CHANGE <<
+
 private:
     friend class WebView;
     WebViewCore* m_viewImpl; // copy for convenience
@@ -80,13 +89,6 @@ private:
     Flavor m_flavor;
     bool m_followedLink;
     bool m_isButton;
-    //ROAMTOUCH CHANGE >>
-    static void SetCursorOuterColors(SkColor normalRingSelect, SkColor fakeRingSelect,
-                                      SkColor normalRingPressed, SkColor fakeRingPressed);
-    static void SetCursorInnerColors(SkColor normalRingSelect, SkColor fakeRingSelect,
-                                      SkColor normalRingPressed, SkColor fakeRingPressed);
-    static void SetCursorPressedColors(SkColor normalRingPressed, SkColor fakeRingPressed);
-    //ROAMTOUCH CHANGE <<
 };
 
 }

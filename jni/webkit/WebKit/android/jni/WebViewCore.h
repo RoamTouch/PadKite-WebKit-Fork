@@ -390,13 +390,6 @@ namespace android {
         // return the cursorNode if it is a plugin
         Node* cursorNodeIsPlugin();
 
-		//ROAMTOUCH CHANGE >>
-		// Execute the selection command
-		void executeSelectionCommand(int x, int y, int cmd);
-
-		void copySelectedContentToClipboard();
-		//ROAMTOUCH CHANGE <<
-
         //ROAMTOUCH CHANGE >>
         // Execute the selection command
         void executeSelectionCommand(int x, int y, int cmd);

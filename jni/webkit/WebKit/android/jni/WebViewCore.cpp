@@ -1643,119 +1643,6 @@ static void selectUsingGranularity(WebCore::Frame* frame, const WebCore::HitTest
     }
 }
 
-static void selectClosestWordOrLink(WebCore::Frame* frame, const WebCore::HitTestResult& result)
-{
-    if (!result.isLiveLink())
-        return selectUsingGranularity(frame, result, WebCore::WordGranularity);
-
-    Node* innerNode = targetNode(result);
-
-    if (innerNode && innerNode->renderer()) {
-        WebCore::VisibleSelection newSelection;
-        Element* URLElement = result.URLElement();
-        WebCore::VisiblePosition pos(innerNode->renderer()->positionForPoint(result.localPoint()));
-        if (pos.isNotNull() && pos.deepEquivalent().node()->isDescendantOf(URLElement))
-            newSelection = WebCore::VisibleSelection::selectionFromContentsOfNode(URLElement);
-    
-        if (newSelection.isRange()) {
-            frame->setSelectionGranularity(WebCore::WordGranularity);
-        }
-
-        if (frame->shouldChangeSelection(newSelection))
-            frame->selection()->setSelection(newSelection);
-    }
-}
-
-void WebViewCore::copySelectedContentToClipboard()
-{
-    /*Android clipboard supports only the text type.*/
-    WebCore::String text = m_mainFrame->displayStringModifiedByEncoding(m_mainFrame->selectedText());
-
-    JNIEnv* env = JSC::Bindings::getJNIEnv();
-    AutoJObject obj = m_javaGlue->object(env);
-    // if it is called during DESTROY is handled, the real object of WebViewCore
-    // can be gone. Check before using it.
-    if (!obj.get())
-        return;
-    jstring jStr = env->NewString((unsigned short *)text.characters(), text.length());
-    env->CallVoidMethod(obj.get(), m_javaGlue->m_updateClipboard, jStr);
-    env->DeleteLocalRef(jStr);
-    checkException(env);
-}
-
-void WebViewCore::executeSelectionCommand(int x, int y, int cmd) 
-{
-    WebCore::IntPoint pt = m_mousePos = WebCore::IntPoint(x, y);
-    WebCore::HitTestResult result = m_mainFrame->eventHandler()->hitTestResultAtPoint(pt, false, true);
-    WebCore::Frame* frame = result.innerNonSharedNode() ? result.innerNonSharedNode()->document()->frame() : 0;
-
-    if (!frame)
-        return ;
-
-    switch (cmd)
-    {
-    case 1:
-        selectClosestWordOrLink(frame, result) ;
-        break ;
-    case 2:
-        selectUsingGranularity(frame, result, WebCore::LineGranularity) ;
-        break ;
-    case 3:
-        selectUsingGranularity(frame, result, WebCore::SentenceGranularity) ;
-        break ;
-    case 4:
-        selectUsingGranularity(frame, result, WebCore::ParagraphGranularity) ;
-        break ;
-    case 5:
-        copySelectedContentToClipboard() ;
-        break;
-    default:
-        break ;
-    }
-
-}
-//ROAMTOUCH CHANGE <<
-
-//ROAMTOUCH CHANGE >>
-
-static WebCore::Node * targetNode(const WebCore::HitTestResult& result)
-{
-    Node* node = result.innerNode();
-    if (!node)
-        return 0;
-    if (node->inDocument())
-        return node;
-
-    Element* element = node->parentElement();
-    if (element && element->inDocument())
-        return element;
-
-    return node;
-}
-static void selectUsingGranularity(WebCore::Frame* frame, const WebCore::HitTestResult& result, 
-                                        WebCore::TextGranularity granularity)
-{
-    Node* innerNode = targetNode(result);
-    WebCore::VisibleSelection newSelection;
-
-    if (innerNode && innerNode->renderer()) {
-        WebCore::VisiblePosition pos(innerNode->renderer()->positionForPoint(result.localPoint()));
-        if (pos.isNotNull()) {
-            newSelection = WebCore::VisibleSelection(pos);
-            newSelection.expandUsingGranularity(granularity);
-        }
-    
-        if (newSelection.isRange()) {
-            frame->setSelectionGranularity(granularity);
-            if (frame->editor()->isSelectTrailingWhitespaceEnabled()) 
-                newSelection.appendTrailingWhitespace();            
-        }
-        
-        if (frame->shouldChangeSelection(newSelection))
-            frame->selection()->setSelection(newSelection);
-    }
-}
-
 static void selectLink(WebCore::Frame* frame, const WebCore::HitTestResult& result)
 {
     if (result.isLiveLink()) {
@@ -3433,19 +3320,6 @@ static bool PictureReady(JNIEnv* env, jobject obj)
 {
     return GET_NATIVE_VIEW(env, obj)->pictureReady();
 }
-
-//ROAMTOUCH CHANGE >>
-static void nativeExecuteSelectionCommand(JNIEnv* env, jobject obj, jint x, jint y, jint cmd)
-{
-#ifdef ANDROID_INSTRUMENT
-    TimeCounterAuto counter(TimeCounter::WebViewCoreTimeCounter);
-#endif
-    WebViewCore* viewImpl = GET_NATIVE_VIEW(env, obj);
-    LOG_ASSERT(viewImpl, "viewImpl not set in nativeUpdatePluginState");
-    viewImpl->executeSelectionCommand((int)x, (int)y, (int)cmd);
-}
-//ROAMTOUCH CHANGE <<
-
 
 //ROAMTOUCH CHANGE >>
 static void nativeExecuteSelectionCommand(JNIEnv* env, jobject obj, jint x, jint y, jint cmd)

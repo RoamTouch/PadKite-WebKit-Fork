@@ -1247,7 +1247,7 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
             cachedInput.setIsTextField(false);
             exported = area->value().threadsafeCopy();
         //RoamTouch Change - begin
-        } else if (node->hasTagName(HTMLNames::selectTag)) {
+        } else if (node->hasTagName(HTMLNames::selectTag)) {
             isSelect = true;
         }
         //RoamTouch Change - end
