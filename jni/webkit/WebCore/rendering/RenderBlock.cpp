@@ -541,6 +541,7 @@ void RenderBlock::removeChild(RenderObject* oldChild)
     bool canDeleteAnonymousBlocks = !documentBeingDestroyed() && !isInline() && !oldChild->isInline() && 
                                     (!oldChild->isRenderBlock() || !toRenderBlock(oldChild)->inlineContinuation()) && 
                                     (!prev || (prev->isAnonymousBlock() && prev->childrenInline())) &&
+                                    (!prev || (!prev->firstChild() || !prev->firstChild()->isInline() || !prev->firstChild()->isRunIn())) &&
                                     (!next || (next->isAnonymousBlock() && next->childrenInline()));
     if (canDeleteAnonymousBlocks && prev && next) {
         // Take all the children out of the |next| block and put them in
@@ -1005,7 +1006,8 @@ bool RenderBlock::handleRunInChild(RenderBox* child)
     if (runInNode)
         runInNode->setRenderer(inlineRunIn);
 
-    // Destroy the block run-in.
+    // Destroy the block run-in, which includes deleting its line box tree.
+    blockRunIn->deleteLineBoxTree();
     blockRunIn->destroy();
 
     // The block acts like an inline, so just null out its
@@ -1776,8 +1778,18 @@ void RenderBlock::paintObject(PaintInfo& paintInfo, int tx, int ty)
     if ((paintPhase == PaintPhaseOutline || paintPhase == PaintPhaseChildOutlines)) {
         if (inlineContinuation() && inlineContinuation()->hasOutline() && inlineContinuation()->style()->visibility() == VISIBLE) {
             RenderInline* inlineRenderer = toRenderInline(inlineContinuation()->node()->renderer());
-            if (!inlineRenderer->hasSelfPaintingLayer())
-                containingBlock()->addContinuationWithOutline(inlineRenderer);
+            RenderBlock* cb = containingBlock();
+
+            bool inlineEnclosedInSelfPaintingLayer = false;
+            for (RenderBoxModelObject* box = inlineRenderer; box != cb; box = box->parent()->enclosingBoxModelObject()) {
+                if (box->hasSelfPaintingLayer()) {
+                    inlineEnclosedInSelfPaintingLayer = true;
+                    break;
+                }
+            }
+
+            if (!inlineEnclosedInSelfPaintingLayer)
+                cb->addContinuationWithOutline(inlineRenderer);
             else if (!inlineRenderer->firstLineBox())
                 inlineRenderer->paintOutline(paintInfo.context, tx - x() + inlineRenderer->containingBlock()->x(),
                                              ty - y() + inlineRenderer->containingBlock()->y());
@@ -4225,11 +4237,7 @@ void RenderBlock::calcInlinePrefWidths()
                 // check.
                 bool hasBreakableChar, hasBreak;
                 int beginMin, endMin;
-#ifdef ANDROID_FIX // bug found by valgrind
-                bool beginWS = false, endWS = false;
-#else
                 bool beginWS, endWS;
-#endif
                 int beginMax, endMax;
                 t->trimmedPrefWidths(inlineMax, beginMin, beginWS, endMin, endWS,
                                      hasBreakableChar, hasBreak, beginMax, endMax,

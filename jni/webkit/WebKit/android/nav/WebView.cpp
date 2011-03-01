@@ -637,19 +637,19 @@ void getVisibleRect(WebCore::IntRect* rect)
     checkException(env);
 }
 
-static CachedFrame::Direction KeyToDirection(KeyCode keyCode)
+static CachedFrame::Direction KeyToDirection(int32_t keyCode)
 {
     switch (keyCode) {
-        case kKeyCodeDpadRight:
+        case AKEYCODE_DPAD_RIGHT:
             DBG_NAV_LOGD("keyCode=%s", "right");
             return CachedFrame::RIGHT;
-        case kKeyCodeDpadLeft:
+        case AKEYCODE_DPAD_LEFT:
             DBG_NAV_LOGD("keyCode=%s", "left");
             return CachedFrame::LEFT;
-        case kKeyCodeDpadDown:
+        case AKEYCODE_DPAD_DOWN:
             DBG_NAV_LOGD("keyCode=%s", "down");
             return CachedFrame::DOWN;
-        case kKeyCodeDpadUp:
+        case AKEYCODE_DPAD_UP:
             DBG_NAV_LOGD("keyCode=%s", "up");
             return CachedFrame::UP;
         default:
@@ -686,7 +686,7 @@ bool moveCursor(int keyCode, int count, bool ignoreScroll)
     }
 
     m_viewImpl->m_moveGeneration++;
-    CachedFrame::Direction direction = KeyToDirection((KeyCode) keyCode);
+    CachedFrame::Direction direction = KeyToDirection(keyCode);
     const CachedFrame* cachedFrame, * oldFrame = 0;
     const CachedNode* cursor = root->currentCursor(&oldFrame);
     WebCore::IntPoint cursorLocation = root->cursorLocation();
@@ -946,7 +946,7 @@ String getSelection()
     return m_selectText.getSelection();
 }
 
-void moveSelection(int x, int y, bool extendSelection)
+void moveSelection(int x, int y)
 {
     const CachedRoot* root = getFrameCache(DontAllowNewer);
     if (!root)
@@ -957,24 +957,79 @@ void moveSelection(int x, int y, bool extendSelection)
     IntRect visibleRect;
     getVisibleRect(&visibleRect);
     m_selectText.setVisibleRect(visibleRect);
-    m_selectText.moveSelection(picture, x, y, extendSelection);
+    m_selectText.moveSelection(picture, x, y);
 }
 
-void setSelectionPointer(bool set, float scale, int x, int y,
-    bool extendSelection)
+void selectAll()
+{
+    const CachedRoot* root = getFrameCache(DontAllowNewer);
+    if (!root)
+        return;
+    SkPicture* picture = root->pictureAt(0, 0);
+    m_selectText.selectAll(picture);
+}
+
+int selectionX()
+{
+    return m_selectText.selectionX();
+}
+
+int selectionY()
+{
+    return m_selectText.selectionY();
+}
+
+void resetSelection()
+{
+    m_selectText.reset();
+}
+
+bool startSelection(int x, int y)
+{
+    return m_selectText.startSelection(x, y);
+}
+
+bool wordSelection(int x, int y)
+{
+    startSelection(x, y);
+    if (!extendSelection(x, y))
+        return false;
+    m_selectText.setDrawPointer(false);
+    SkPicture* picture = getFrameCache(DontAllowNewer)->pictureAt(x, y);
+    return m_selectText.wordSelection(picture);
+}
+
+bool extendSelection(int x, int y)
+{
+    const CachedRoot* root = getFrameCache(DontAllowNewer);
+    if (!root)
+        return false;
+    SkPicture* picture = root->pictureAt(x, y);
+    IntRect visibleRect;
+    getVisibleRect(&visibleRect);
+    m_selectText.setVisibleRect(visibleRect);
+    m_selectText.extendSelection(picture, x, y);
+    return true;
+}
+
+bool hitSelection(int x, int y)
+{
+    return m_selectText.hitSelection(x, y);
+}
+
+void setExtendSelection()
+{
+    m_selectText.setExtendSelection(true);
+}
+
+void setSelectionPointer(bool set, float scale, int x, int y)
 {
     m_selectText.setDrawPointer(set);
     if (!set)
         return;
-    m_selectText.m_extendSelection = extendSelection;
     m_selectText.m_inverseScale = scale;
     m_selectText.m_selectX = x;
     m_selectText.m_selectY = y;
-}
-
-void setSelectionRegion(bool set)
-{
-    m_selectText.setDrawRegion(set);
 }
 
 void sendMoveFocus(WebCore::Frame* framePtr, WebCore::Node* nodePtr)
@@ -1033,6 +1088,11 @@ void setMatches(WTF::Vector<MatchInfo>* matches)
     if (!m_findOnPage.currentMatchIsInLayer())
         scrollRectOnScreen(m_findOnPage.currentMatchBounds());
     viewInvalidate();
+}
+
+int currentMatchIndex()
+{
+    return m_findOnPage.currentMatchIndex();
 }
 
 bool scrollBy(int dx, int dy)
@@ -1441,17 +1501,32 @@ static jobject nativeFocusCandidateName(JNIEnv *env, jobject obj)
     return env->NewString((jchar*)name.characters(), name.length());
 }
 
+static jobject createJavaRect(JNIEnv* env, int x, int y, int right, int bottom)
+{
+    jclass rectClass = env->FindClass("android/graphics/Rect");
+    jmethodID init = env->GetMethodID(rectClass, "<init>", "(IIII)V");
+    jobject rect = env->NewObject(rectClass, init, x, y, right, bottom);
+    return rect;
+}
+
 static jobject nativeFocusCandidateNodeBounds(JNIEnv *env, jobject obj)
 {
     const CachedFrame* frame;
     const CachedNode* node = getFocusCandidate(env, obj, &frame);
     WebCore::IntRect bounds = node ? node->bounds(frame)
         : WebCore::IntRect(0, 0, 0, 0);
-    jclass rectClass = env->FindClass("android/graphics/Rect");
-    jmethodID init = env->GetMethodID(rectClass, "<init>", "(IIII)V");
-    jobject rect = env->NewObject(rectClass, init, bounds.x(),
-        bounds.y(), bounds.right(), bounds.bottom());
-    return rect;
+    return createJavaRect(env, bounds.x(), bounds.y(), bounds.right(), bounds.bottom());
+}
+
+static jobject nativeFocusCandidatePaddingRect(JNIEnv *env, jobject obj)
+{
+    const CachedInput* input = getInputCandidate(env, obj);
+    if (!input)
+        return 0;
+    // Note that the Java Rect is being used to pass four integers, rather than
+    // being used as an actual rectangle.
+    return createJavaRect(env, input->paddingLeft(), input->paddingTop(),
+            input->paddingRight(), input->paddingBottom());
 }
 
 static jint nativeFocusCandidatePointer(JNIEnv *env, jobject obj)
@@ -1735,6 +1810,13 @@ static void nativeFindNext(JNIEnv *env, jobject obj, bool forward)
     view->findNext(forward);
 }
 
+static int nativeFindIndex(JNIEnv *env, jobject obj)
+{
+    WebView* view = GET_NATIVE_VIEW(env, obj);
+    LOG_ASSERT(view, "view not set in nativeFindIndex");
+    return view->currentMatchIndex();
+}
+
 static void nativeUpdateCachedTextfield(JNIEnv *env, jobject obj, jstring updatedText, jint generation)
 {
     WebView* view = GET_NATIVE_VIEW(env, obj);
@@ -1805,11 +1887,39 @@ static int nativeMoveGeneration(JNIEnv *env, jobject obj)
     return view->moveGeneration();
 }
 
-static void nativeMoveSelection(JNIEnv *env, jobject obj, int x, int y, bool ex)
+static void nativeMoveSelection(JNIEnv *env, jobject obj, int x, int y)
 {
-    WebView* view = GET_NATIVE_VIEW(env, obj);
-    LOG_ASSERT(view, "view not set in %s", __FUNCTION__);
-    view->moveSelection(x, y, ex);
+    GET_NATIVE_VIEW(env, obj)->moveSelection(x, y);
+}
+
+static void nativeResetSelection(JNIEnv *env, jobject obj)
+{
+    return GET_NATIVE_VIEW(env, obj)->resetSelection();
+}
+
+static void nativeSelectAll(JNIEnv* env, jobject obj)
+{
+    GET_NATIVE_VIEW(env, obj)->selectAll();
+}
+
+static void nativeSetExtendSelection(JNIEnv *env, jobject obj)
+{
+    GET_NATIVE_VIEW(env, obj)->setExtendSelection();
+}
+
+static jboolean nativeStartSelection(JNIEnv *env, jobject obj, int x, int y)
+{
+    return GET_NATIVE_VIEW(env, obj)->startSelection(x, y);
+}
+
+static jboolean nativeWordSelection(JNIEnv *env, jobject obj, int x, int y)
+{
+    return GET_NATIVE_VIEW(env, obj)->wordSelection(x, y);
+}
+
+static void nativeExtendSelection(JNIEnv *env, jobject obj, int x, int y)
+{
+    GET_NATIVE_VIEW(env, obj)->extendSelection(x, y);
 }
 
 static jobject nativeGetSelection(JNIEnv *env, jobject obj)
@@ -1820,15 +1930,25 @@ static jobject nativeGetSelection(JNIEnv *env, jobject obj)
     return env->NewString((jchar*)selection.characters(), selection.length());
 }
 
-static void nativeSetSelectionPointer(JNIEnv *env, jobject obj, jboolean set,
-    jfloat scale, jint x, jint y, bool ex)
+static jboolean nativeHitSelection(JNIEnv *env, jobject obj, int x, int y)
 {
-    GET_NATIVE_VIEW(env, obj)->setSelectionPointer(set, scale, x, y, ex);
+    return GET_NATIVE_VIEW(env, obj)->hitSelection(x, y);
 }
 
-static void nativeSetSelectionRegion(JNIEnv *env, jobject obj, jboolean set)
+static jint nativeSelectionX(JNIEnv *env, jobject obj)
 {
-    GET_NATIVE_VIEW(env, obj)->setSelectionRegion(set);
+    return GET_NATIVE_VIEW(env, obj)->selectionX();
+}
+
+static jint nativeSelectionY(JNIEnv *env, jobject obj)
+{
+    return GET_NATIVE_VIEW(env, obj)->selectionY();
+}
+
+static void nativeSetSelectionPointer(JNIEnv *env, jobject obj, jboolean set,
+    jfloat scale, jint x, jint y)
+{
+    GET_NATIVE_VIEW(env, obj)->setSelectionPointer(set, scale, x, y);
 }
 
 #ifdef ANDROID_DUMP_DISPLAY_TREE
@@ -1935,10 +2055,14 @@ static JNINativeMethod gJavaWebViewMethods[] = {
         (void*) nativeDumpDisplayTree },
     { "nativeEvaluateLayersAnimations", "()Z",
         (void*) nativeEvaluateLayersAnimations },
+    { "nativeExtendSelection", "(II)V",
+        (void*) nativeExtendSelection },
     { "nativeFindAll", "(Ljava/lang/String;Ljava/lang/String;)I",
         (void*) nativeFindAll },
     { "nativeFindNext", "(Z)V",
         (void*) nativeFindNext },
+    { "nativeFindIndex", "()I",
+        (void*) nativeFindIndex},
     { "nativeFocusCandidateFramePointer", "()I",
         (void*) nativeFocusCandidateFramePointer },
     { "nativeFocusCandidateHasNextTextfield", "()Z",
@@ -1955,6 +2079,8 @@ static JNINativeMethod gJavaWebViewMethods[] = {
         (void*) nativeFocusCandidateName },
     { "nativeFocusCandidateNodeBounds", "()Landroid/graphics/Rect;",
         (void*) nativeFocusCandidateNodeBounds },
+    { "nativeFocusCandidatePaddingRect", "()Landroid/graphics/Rect;",
+        (void*) nativeFocusCandidatePaddingRect },
     { "nativeFocusCandidatePointer", "()I",
         (void*) nativeFocusCandidatePointer },
     { "nativeFocusCandidateText", "()Ljava/lang/String;",
@@ -1979,6 +2105,8 @@ static JNINativeMethod gJavaWebViewMethods[] = {
         (void*) nativeHasFocusNode },
     { "nativeHideCursor", "()V",
         (void*) nativeHideCursor },
+    { "nativeHitSelection", "(II)Z",
+        (void*) nativeHitSelection },
     { "nativeImageURI", "(II)Ljava/lang/String;",
         (void*) nativeImageURI },
     { "nativeInstrumentReport", "()V",
@@ -1991,14 +2119,24 @@ static JNINativeMethod gJavaWebViewMethods[] = {
         (void*) nativeMoveCursorToNextTextInput },
     { "nativeMoveGeneration", "()I",
         (void*) nativeMoveGeneration },
-    { "nativeMoveSelection", "(IIZ)V",
+    { "nativeMoveSelection", "(II)V",
         (void*) nativeMoveSelection },
     { "nativePointInNavCache", "(III)Z",
         (void*) nativePointInNavCache },
     { "nativeRecordButtons", "(ZZZ)V",
         (void*) nativeRecordButtons },
+    { "nativeResetSelection", "()V",
+        (void*) nativeResetSelection },
+    { "nativeSelectAll", "()V",
+        (void*) nativeSelectAll },
     { "nativeSelectBestAt", "(Landroid/graphics/Rect;)V",
         (void*) nativeSelectBestAt },
+    { "nativeSelectionX", "()I",
+        (void*) nativeSelectionX },
+    { "nativeSelectionY", "()I",
+        (void*) nativeSelectionY },
+    { "nativeSetExtendSelection", "()V",
+        (void*) nativeSetExtendSelection },
     { "nativeSetFindIsEmpty", "()V",
         (void*) nativeSetFindIsEmpty },
     { "nativeSetFindIsUp", "(Z)V",
@@ -2009,16 +2147,18 @@ static JNINativeMethod gJavaWebViewMethods[] = {
         (void*) nativeSetHeightCanMeasure },
     { "nativeSetRootLayer", "(I)V",
         (void*) nativeSetRootLayer },
-    { "nativeSetSelectionPointer", "(ZFIIZ)V",
+    { "nativeSetSelectionPointer", "(ZFII)V",
         (void*) nativeSetSelectionPointer },
-    { "nativeSetSelectionRegion", "(Z)V",
-        (void*) nativeSetSelectionRegion },
+    { "nativeStartSelection", "(II)Z",
+        (void*) nativeStartSelection },
     { "nativeSubtractLayers", "(Landroid/graphics/Rect;)Landroid/graphics/Rect;",
         (void*) nativeSubtractLayers },
     { "nativeTextGeneration", "()I",
         (void*) nativeTextGeneration },
     { "nativeUpdateCachedTextfield", "(Ljava/lang/String;I)V",
         (void*) nativeUpdateCachedTextfield },
+    {  "nativeWordSelection", "(II)Z",
+        (void*) nativeWordSelection },
     { "nativeGetBlockLeftEdge", "(IIF)I",
         (void*) nativeGetBlockLeftEdge },
 };
