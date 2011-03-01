@@ -1112,8 +1112,10 @@ void Document::removeElementById(const AtomicString& elementId, Element* element
 
     if (m_elementsById.get(elementId.impl()) == element)
         m_elementsById.remove(elementId.impl());
-    else
+    else {
+        ASSERT(m_inRemovedLastRefFunction || m_duplicateIds.contains(elementId.impl()));
         m_duplicateIds.remove(elementId.impl());
+    }
 }
 
 Element* Document::getElementByAccessKey(const String& key) const
@@ -4887,6 +4889,24 @@ bool Document::isXHTMLMPDocument() const
 InspectorTimelineAgent* Document::inspectorTimelineAgent() const 
 {
     return page() ? page()->inspectorTimelineAgent() : 0;
+}
+#endif
+
+#if ENABLE(TOUCH_EVENTS)
+PassRefPtr<Touch> Document::createTouch(DOMWindow* window, EventTarget* target, int identifier, int pageX, int pageY, int screenX, int screenY, ExceptionCode&) const
+{
+    // FIXME: It's not clear from the documentation at
+    // http://developer.apple.com/library/safari/#documentation/UserExperience/Reference/DocumentAdditionsReference/DocumentAdditions/DocumentAdditions.html
+    // when this method should throw and nor is it by inspection of iOS behavior. It would be nice to verify any cases where it throws under iOS
+    // and implement them here. See https://bugs.webkit.org/show_bug.cgi?id=47819
+    // Ditto for the createTouchList method below.
+    Frame* frame = window ? window->frame() : this->frame();
+    return Touch::create(frame, target, identifier, screenX, screenY, pageX, pageY);
+}
+
+PassRefPtr<TouchList> Document::createTouchList(ExceptionCode&) const
+{
+    return TouchList::create();
 }
 #endif
 

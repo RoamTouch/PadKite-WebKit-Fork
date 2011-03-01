@@ -279,7 +279,6 @@ LOCAL_SHARED_LIBRARIES := \
 	libui \
 	libcutils \
 	libicuuc \
-	libicudata \
 	libicui18n \
 	libmedia \
 	libsurfaceflinger_client

@@ -963,7 +963,7 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
         FocusTracker* last = &tracker.last();
         int lastChildIndex = cachedFrame->size() - 1;
         while (node == last->mLastChild) {
-            if (CleanUpContainedNodes(cachedFrame, last, lastChildIndex))
+            if (CleanUpContainedNodes(cachedRoot, cachedFrame, last, lastChildIndex))
                 cacheIndex--;
             tracker.removeLast();
             lastChildIndex = last->mCachedNodeIndex;
@@ -1315,6 +1315,10 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
                         || style->textAlign() == WebCore::RIGHT
                         || style->textAlign() == WebCore::WEBKIT_RIGHT);
             }
+            cachedInput.setPaddingLeft(renderText->paddingLeft() + renderText->borderLeft());
+            cachedInput.setPaddingTop(renderText->paddingTop() + renderText->borderTop());
+            cachedInput.setPaddingRight(renderText->paddingRight() + renderText->borderRight());
+            cachedInput.setPaddingBottom(renderText->paddingBottom() + renderText->borderBottom());
         }
         takesFocus = true;
         bounds = absBounds;
@@ -1434,14 +1438,14 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
     while (tracker.size() > 1) {
         FocusTracker* last = &tracker.last();
         int lastChildIndex = cachedFrame->size() - 1;
-        if (CleanUpContainedNodes(cachedFrame, last, lastChildIndex))
+        if (CleanUpContainedNodes(cachedRoot, cachedFrame, last, lastChildIndex))
             cacheIndex--;
         tracker.removeLast();
     }
 }
 
-bool CacheBuilder::CleanUpContainedNodes(CachedFrame* cachedFrame, 
-    const FocusTracker* last, int lastChildIndex)
+bool CacheBuilder::CleanUpContainedNodes(CachedRoot* cachedRoot,
+    CachedFrame* cachedFrame, const FocusTracker* last, int lastChildIndex)
 {
     // if outer is body, disable outer
     // or if there's more than one inner, disable outer
@@ -1470,9 +1474,12 @@ bool CacheBuilder::CleanUpContainedNodes(CachedFrame* cachedFrame,
         HasTriggerEvent(lastNode) == false;
     if (onlyChildCached->parent() == lastCached)
         onlyChildCached->setParentIndex(lastCached->parentIndex());
+    bool hasFocus = lastCached->isFocus() || onlyChildCached->isFocus();
     if (outerIsMouseMoveOnly || onlyChild->isKeyboardFocusable(NULL))
         *lastCached = *onlyChildCached;
     cachedFrame->removeLast();
+    if (hasFocus)
+        cachedRoot->setCachedFocus(cachedFrame, cachedFrame->lastNode());
     return true;
 }
 
