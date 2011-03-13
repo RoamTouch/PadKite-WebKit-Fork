@@ -28,6 +28,7 @@ LOCAL_NO_STANDARD_LIBRARIES := true
 LOCAL_JAVA_LIBRARIES := core core-junit ext framework bouncycastle
 
 LOCAL_MODULE := RoamTouchWebKit
+LOCAL_MODULE_TAGS := optional
 
 LOCAL_MODULE_CLASS := JAVA_LIBRARIES
 
