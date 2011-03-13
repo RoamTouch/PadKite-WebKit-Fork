@@ -25,7 +25,7 @@ LOCAL_SRC_FILES := $(call all-subdir-java-files)
 
 #LOCAL_PACKAGE_NAME := RoamTouchWebKit
 LOCAL_NO_STANDARD_LIBRARIES := true
-LOCAL_JAVA_LIBRARIES := core ext framework
+LOCAL_JAVA_LIBRARIES := core core-junit ext framework bouncycastle
 
 LOCAL_MODULE := RoamTouchWebKit
 

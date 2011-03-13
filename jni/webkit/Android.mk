@@ -69,6 +69,7 @@ include $(CLEAR_VARS)
 
 # Define our module and find the intermediates directory
 LOCAL_MODULE := librtwebcore
+LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE_CLASS := STATIC_LIBRARIES
 LOCAL_PRELINK_MODULE := false
 base_intermediates := $(call local-intermediates-dir)
@@ -317,6 +318,7 @@ ifeq ($(JAVASCRIPT_ENGINE),jsc)
 # Now build libjs as a static library.
 include $(CLEAR_VARS)
 LOCAL_MODULE := librtjs
+LOCAL_MODULE_TAGS := optional
 LOCAL_LDLIBS := $(WEBKIT_LDLIBS)
 LOCAL_SHARED_LIBRARIES := $(WEBKIT_SHARED_LIBRARIES)
 LOCAL_STATIC_LIBRARIES := $(WEBKIT_STATIC_LIBRARIES)
@@ -347,6 +349,7 @@ include $(CLEAR_VARS)
 # if you need to make webcore huge (for debugging), enable this line
 #LOCAL_PRELINK_MODULE := false
 LOCAL_MODULE := librtwebcore
+LOCAL_MODULE_TAGS := optional
 LOCAL_LDLIBS := $(WEBKIT_LDLIBS)
 LOCAL_SHARED_LIBRARIES := $(WEBKIT_SHARED_LIBRARIES)
 LOCAL_STATIC_LIBRARIES := librtwebcore $(WEBKIT_STATIC_LIBRARIES)

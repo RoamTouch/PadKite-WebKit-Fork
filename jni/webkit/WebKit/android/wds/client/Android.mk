@@ -35,5 +35,6 @@ LOCAL_SRC_FILES := \
 LOCAL_STATIC_LIBRARIES := liblog libutils libcutils
 
 LOCAL_MODULE:= rtwdsclient
+LOCAL_MODULE_TAGS := optional
 
 include $(BUILD_HOST_EXECUTABLE)
