@@ -24,6 +24,9 @@
 #if ENABLE(WML)
 #include "FormDataBuilder.h"
 #include "WMLTaskElement.h"
+#if ENABLE(WMLSCRIPT)
+#include "CachedWMLScript.h"
+#endif
 
 namespace WebCore {
 
@@ -31,7 +34,11 @@ class FormData;
 class ResourceRequest;
 class WMLPostfieldElement;
 
-class WMLGoElement : public WMLTaskElement {
+class WMLGoElement : public WMLTaskElement
+#if ENABLE(WMLSCRIPT)
+    ,public WMLScriptLoader
+#endif
+{
 public:
     WMLGoElement(const QualifiedName& tagName, Document*);
 

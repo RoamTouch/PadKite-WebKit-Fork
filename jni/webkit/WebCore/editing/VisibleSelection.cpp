@@ -291,16 +291,27 @@ void VisibleSelection::setStartAndEndFromBaseAndExtentRespectingGranularity()
             VisiblePosition start = VisiblePosition(m_start, m_affinity);
             VisiblePosition originalEnd(m_end, m_affinity);
             EWordSide side = RightWordIfOnBoundary;
-            if (isEndOfDocument(start) || (isEndOfLine(start) && !isStartOfLine(start) && !isEndOfParagraph(start)))
+			bool endOfDocument;
+			if ( (endOfDocument = isEndOfDocument(start)) || ( (isEndOfLine(start) || isStartOfSpace(start)) && !isStartOfLine(start) /*&& !isEndOfParagraph(start) SAMSUNG CHANGE*/)) {
                 side = LeftWordIfOnBoundary;
+				//SAMSUNG CHANGE >>
+				if (!endOfDocument && isEndOfParagraph(start)) {
+					originalEnd = start;
+				}
+				//SAMSUNG CHANGE <<
+			}
             m_start = startOfWord(start, side).deepEquivalent();
             side = RightWordIfOnBoundary;
-            if (isEndOfDocument(originalEnd) || (isEndOfLine(originalEnd) && !isStartOfLine(originalEnd) && !isEndOfParagraph(originalEnd)))
+		     if (isStartOfSpace(start)) {
+			 	side = LeftWordIfOnBoundary;
+		     	}
+            if (isEndOfDocument(originalEnd) || (isEndOfLine(originalEnd) && !isStartOfLine(originalEnd) /*&& !isEndOfParagraph(originalEnd) SAMSUNG CHANGE*/))
                 side = LeftWordIfOnBoundary;
                 
             VisiblePosition wordEnd(endOfWord(originalEnd, side));
             VisiblePosition end(wordEnd);
             
+#if 0 //SAMSUNg CHANGE >>
             if (isEndOfParagraph(originalEnd) && !isEmptyTableCell(m_start.node())) {
                 // Select the paragraph break (the space from the end of a paragraph to the start of 
                 // the next one) to match TextEdit.
@@ -319,6 +330,7 @@ void VisibleSelection::setStartAndEndFromBaseAndExtentRespectingGranularity()
                     end = wordEnd;
                     
             }
+#endif //SAMSUNG CHANGE <<
                 
             m_end = end.deepEquivalent();
             break;

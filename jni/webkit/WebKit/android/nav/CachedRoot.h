@@ -46,6 +46,19 @@ class FindCanvas;
 
 class CachedRoot : public CachedFrame {
 public:
+	//SAMSUNG CHANGE >>
+    enum FormInputAction {
+        FORM_INPUT_NONE         = 0x00,
+        FORM_INPUT_PREV_TEXT    = 0x01,
+        FORM_INPUT_PREV_SELECT  = 0x02,
+        FORM_INPUT_NEXT_TEXT    = 0x04,
+        FORM_INPUT_NEXT_SELECT  = 0x08,
+        FORM_INPUT_GO           = 0x10,
+        FORM_INPUT_DONE         = 0x20
+    };
+    int cursorInputFieldAction(const WebCore::String &nodeName, void * nodePointer) const;
+	//SAMSUNG CHANGE <<
+    
     bool adjustForScroll(BestData* , Direction , WebCore::IntPoint* scrollPtr,
         bool findClosest);
     const SkRegion& baseUncovered() const { return mBaseUncovered; }
@@ -64,6 +77,9 @@ public:
     int getAndResetSelectionEnd();
     int getAndResetSelectionStart();
     int getBlockLeftEdge(int x, int y, float scale) const;
+    //SAMSUNG CHANGES+
+        int getBlockWidth(int x, int y) const;
+    //SAMSUNG CHANGES-
     void getSimulatedMousePosition(WebCore::IntPoint* ) const;
     void init(WebCore::Frame* , CachedHistory* );
     bool innerDown(const CachedNode* , BestData* ) const;

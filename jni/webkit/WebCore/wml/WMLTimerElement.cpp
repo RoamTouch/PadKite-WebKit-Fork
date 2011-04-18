@@ -116,11 +116,22 @@ void WMLTimerElement::start(int interval)
 {
     if (!m_card || m_timer.isActive())
         return;
-
+    //SAMSUNG_FIX +
+    bool ignoreTimer = false ;
     if (interval <= 0 && !m_name.isEmpty()) {
-        if (WMLPageState* pageState = wmlPageStateForDocument(document()))
-            interval = pageState->getVariable(m_name).toInt();
+        if (WMLPageState* pageState = wmlPageStateForDocument(document())) {
+            String intervalValue = pageState->getVariable(m_name) ;
+            if(intervalValue == "0")
+                ignoreTimer = true ;
+            else
+                interval = intervalValue.toInt();
+            //interval = pageState->getVariable(m_name).toInt();
+        }
     }
+
+    if(ignoreTimer)
+        return;
+    //SAMSUNG_FIX -
 
     if (interval <= 0)
         interval = value().toInt();
@@ -139,6 +150,11 @@ void WMLTimerElement::storeIntervalToPageState()
 {
     if (!m_timer.isActive())
         return;
+
+    //SAMSUNG_FIX +
+    if (m_name.isEmpty())
+        return;
+    //SAMSUNG_FIX -
 
     int interval = static_cast<int>(m_timer.nextFireInterval()) * 10;
 

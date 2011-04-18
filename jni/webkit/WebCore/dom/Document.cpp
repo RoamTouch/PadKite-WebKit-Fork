@@ -133,6 +133,8 @@
 #include "XMLNSNames.h"
 #include "XMLNames.h"
 #include "XMLTokenizer.h"
+//SAMSUNG CHANGE
+#include "XMLValidatingTokenizer.h"
 #include "htmlediting.h"
 #include <wtf/CurrentTime.h>
 #include <wtf/HashFunctions.h>
@@ -1677,7 +1679,10 @@ void Document::setVisuallyOrdered()
 Tokenizer* Document::createTokenizer()
 {
     // FIXME: this should probably pass the frame instead
-    return new XMLTokenizer(this, view());
+    //SAMSUNG FIX >>
+    //return new XMLTokenizer(this, view());
+    return new XMLValidatingTokenizer(this, view());
+    //SAMSUNG FIX <<
 }
 
 void Document::open(Document* ownerDocument)
@@ -2371,8 +2376,16 @@ void Document::processHttpEquiv(const String& equiv, const String& content)
         if (frameLoader->shouldInterruptLoadForXFrameOptions(content, url())) {
             frameLoader->stopAllLoaders();
             frame->redirectScheduler()->scheduleLocationChange(blankURL(), String());
-        }
-    }
+       		 }
+	 // SAMSUNG CHANGE- no-cache, no-store add compareString.	Pineone.SoobinPark  2010.07.26 ADD START
+	} else if ((equalIgnoringCase(equiv, "Cache-Control")) ||(equalIgnoringCase(equiv, "Pragma"))) {
+			if((equalIgnoringCase(content.substring(0,8), "no-cache")) ||(equalIgnoringCase(content.substring(0,8), "no-store"))) { 
+				if (FrameView* frameView = view()) {
+					android::WebViewCore::getWebViewCore(frameView)->HttpEquivhandle(url().string());
+			}
+		}
+	// no-cache, no-store add compareString.	Pineone.SoobinPark  2010.07.26 ADD END
+	}    
 }
 
 MouseEventWithHitTestResults Document::prepareMouseEvent(const HitTestRequest& request, const IntPoint& documentPoint, const PlatformMouseEvent& event)

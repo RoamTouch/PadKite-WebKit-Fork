@@ -1039,7 +1039,10 @@ void XMLTokenizer::internalSubset(const xmlChar* name, const xmlChar* externalID
             && extId != "-//WAPFORUM//DTD WML 1.2//EN"
             && extId != "-//WAPFORUM//DTD WML 1.1//EN"
             && extId != "-//WAPFORUM//DTD WML 1.0//EN")
-            handleError(fatal, "Invalid DTD Public ID", lineNumber(), columnNumber());
+            // SAMSUNG_WML_FIXES+
+            // wml/semantics/unknown/1
+            handleError(warning, "Invalid DTD Public ID", lineNumber(), columnNumber());
+            // SAMSUNG_WML_FIXES-
 #endif
 #if ENABLE(XHTMLMP)
         String dtdName = toString(name);

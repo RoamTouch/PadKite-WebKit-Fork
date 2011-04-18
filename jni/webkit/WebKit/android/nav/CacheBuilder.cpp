@@ -22,7 +22,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
+#include <config.h> //Added to make ENABLE(WML) flag visible - SISO
 #include "CachedPrefix.h"
 #include "CachedNode.h"
 #include "CachedRoot.h"
@@ -62,6 +62,10 @@
 #include "WebCoreViewBridge.h"
 #include "Widget.h"
 #include <wtf/unicode/Unicode.h>
+#if ENABLE(WML)
+#include "WMLInputElement.h"
+#endif
+
 
 #ifdef DUMP_NAV_CACHE_USING_PRINTF
     FILE* gNavCacheLogFile = NULL;
@@ -1064,6 +1068,8 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
             }
 #endif
         }
+
+
         bool more = walk.mMore;
         walk.reset();
      //   GetGlobalBounds(node, &bounds, false);
@@ -1075,6 +1081,8 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
         bool takesFocus = false;
         int columnGap = 0;
         TextDirection direction = LTR;
+        //SAMSUNG CHANGE
+        String name;
         String exported;
         CachedNodeType type = NORMAL_CACHEDNODETYPE;
         CachedInput cachedInput;
@@ -1175,10 +1183,11 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
                                  // used to produce it
             goto keepTextNode;
         }
+#if !ENABLE(WML)    
         if (node->hasTagName(WebCore::HTMLNames::inputTag)) {
             HTMLInputElement* input = static_cast<HTMLInputElement*>(node);
             HTMLInputElement::InputType inputType = input->inputType();
-            if (input->isTextField()) {
+            if (input->isTextField() && !input->readOnly()/*SAMSUNG FIX*/) {
                 type = TEXT_INPUT_CACHEDNODETYPE;
                 cachedInput.init();
                 cachedInput.setFormPointer(input->form());
@@ -1189,10 +1198,55 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
     // If this does not need to be threadsafe, we can use crossThreadString().
     // See http://trac.webkit.org/changeset/49160.
                 cachedInput.setName(input->name().string().threadsafeCopy());
+                //SAMSUNG CHANGE
+                name = input->name().string().threadsafeCopy();
     // can't detect if this is drawn on top (example: deviant.com login parts)
                 isUnclipped = isTransparent;
-            } else if (inputType == HTMLInputElement::HIDDEN)
+            } else if (inputType == HTMLInputElement::HIDDEN || input->readOnly()/*SAMSUNG FIX*/)
                 continue;
+#else
+        if (node->isElementNode() && toInputElement(static_cast<Element*>(node)) ) {
+            if(node->isHTMLElement()) {
+                HTMLInputElement* input = static_cast<HTMLInputElement*>(node);
+                HTMLInputElement::InputType inputType = input->inputType();
+                if (input->isTextField() && !input->readOnly()/*SAMSUNG FIX*/) {
+                    type = TEXT_INPUT_CACHEDNODETYPE;
+                    cachedInput.init();
+                    cachedInput.setFormPointer(input->form());
+                    cachedInput.setIsTextField(true);
+                    exported = input->value().threadsafeCopy();
+                    cachedInput.setMaxLength(input->maxLength());
+                    cachedInput.setInputType(inputType);
+                    cachedInput.setName(input->name().string().threadsafeCopy());
+                    //SAMSUNG CHANGE
+                    name = input->name().string().threadsafeCopy();
+
+                    isUnclipped = isTransparent;
+                } else if (inputType == HTMLInputElement::HIDDEN || input->readOnly()/*SAMSUNG FIX*/)
+                    continue;
+            }else if(node->isWMLElement()) {
+                WMLInputElement* input = static_cast<WMLInputElement*>( node);
+                if (input->isTextField() && !input->readOnly()/*SAMSUNG FIX*/) {
+                    type = TEXT_INPUT_CACHEDNODETYPE;
+                    cachedInput.init();
+                    cachedInput.setFormPointer(0);
+                    cachedInput.setIsTextField(true);
+                    exported = input->value().threadsafeCopy();
+                    cachedInput.setMaxLength(input->maxLength());
+					if (input->isPasswordField()) {
+						cachedInput.setInputType(HTMLInputElement::PASSWORD);
+					} else {
+						cachedInput.setInputType(HTMLInputElement::TEXT);
+					}
+                    cachedInput.setName(input->name().threadsafeCopy());
+                    //SAMSUNG CHANGE
+                    name = input->name().threadsafeCopy();
+
+                    isUnclipped = isTransparent;
+                } else if (input->isInputTypeHidden() || input->readOnly()/*SAMSUNG FIX*/)
+                    continue;
+            }
+#endif
         } else if (node->hasTagName(HTMLNames::textareaTag)) {
             cachedInput.init();
             type = TEXT_INPUT_CACHEDNODETYPE;
@@ -1203,6 +1257,13 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
             cachedInput.setInputType(HTMLInputElement::TEXT);
             cachedInput.setIsTextField(false);
             exported = area->value().threadsafeCopy();
+        //SAMSUNG CHANGE >>
+            name = area->formControlName().string().threadsafeCopy();
+        } else if (node->isElementNode() && WebCore::toSelectElement(static_cast<WebCore::Element*>(node))) {
+            type = SELECT_CACHEDNODETYPE;
+            name = static_cast<Element*>(node)->formControlName().string().threadsafeCopy();
+            //LOGD("buildFrame : [Select Node] cachedFrame = %x, name = %s, pointer = %x", cachedFrame, name.latin1().data(), node ) ;
+        //SAMSUNG CHANGE <<
         } else if (node->hasTagName(HTMLNames::aTag)) {
             const HTMLAnchorElement* anchorNode = 
                 (const HTMLAnchorElement*) node;
@@ -1308,6 +1369,8 @@ void CacheBuilder::BuildFrame(Frame* root, Frame* frame,
         cachedNode.setIsTransparent(isTransparent);
         cachedNode.setIsUnclipped(isUnclipped);
         cachedNode.setOriginalAbsoluteBounds(originalAbsBounds);
+        //SAMSUNG CHANGE
+        cachedNode.setName(name);
         cachedNode.setParentIndex(last->mCachedNodeIndex);
         cachedNode.setParentGroup(ParentWithChildren(node));
         cachedNode.setTabIndex(tabIndex);
@@ -2315,13 +2378,14 @@ nextAt:
     return FOUND_NONE;
 }
 
-#define PHONE_PATTERN "(200) /-.\\ 100 -. 0000" // poor man's regex: parens optional, any one of punct, digit smallest allowed
+#define PHONE_PATTERN "(2099) /-.\\ 00099S-. 99999" // poor man's regex: parens optional, any one of punct, digit smallest allowed
 
 CacheBuilder::FoundState CacheBuilder::FindPartialNumber(const UChar* chars, unsigned length, 
     FindState* s)
 {
     char* pattern = s->mPattern;
     UChar* store = s->mStorePtr;
+    int len = 0;
     const UChar* start = chars;
     const UChar* end = chars + length;
     const UChar* lastDigit = NULL;
@@ -2343,12 +2407,27 @@ CacheBuilder::FoundState CacheBuilder::FindPartialNumber(const UChar* chars, uns
                             }
                     case '0':
                     case '1':
-                        if (ch < patternChar || ch > '9')
-                            goto resetPattern;
+                        if (ch < '0' || ch > '9')
+                            if ( ch != '+' )
+                            	goto resetPattern;
                         *store++ = ch;
+			len++;
                         pattern++;
                         lastDigit = chars;
                         goto nextChar;
+                    case '9':
+                        if (ch < '0' || ch > '9')
+			{
+                            break;
+			}
+			else
+			{
+				*store++ = ch;
+				len++;
+                        pattern++;
+                        lastDigit = chars;
+                        goto nextChar;
+			}
                     case '\0':
                         if (WTF::isASCIIDigit(ch) == false) {
                             *store = '\0';
@@ -2356,7 +2435,8 @@ CacheBuilder::FoundState CacheBuilder::FindPartialNumber(const UChar* chars, uns
                         }
                         goto resetPattern;
                     case ' ':
-                        if (ch == patternChar)
+                    case 'S':
+                        if (ch == ' ')
                             goto nextChar;
                         break;
                     case '(':
@@ -2387,6 +2467,7 @@ resetPattern:
         FindResetNumber(s);
         pattern = s->mPattern;
         store = s->mStorePtr;
+        len = 0;
     } while (++chars < end);
 checkMatch:
     if (WTF::isASCIIDigit(s->mBackOne != '1' ? s->mBackOne : s->mBackTwo))
@@ -2396,8 +2477,15 @@ checkMatch:
     s->mPattern = pattern;
     s->mEndResult = lastDigit - start + 1;
     char pState = pattern[0];
-    return pState == '\0' ? FOUND_COMPLETE : pState == '(' || (WTF::isASCIIDigit(pState) && WTF::isASCIIDigit(pattern[-1])) ? 
-        FOUND_NONE : FOUND_PARTIAL;
+
+    if ( len > 6 && len < 15)
+        if ( (pState == '\0') || (pState == '9') || (pState == 'S') )
+            return FOUND_COMPLETE;
+
+    if ( pState == '(' || (WTF::isASCIIDigit(pState) && WTF::isASCIIDigit(pattern[-1])) )
+        return FOUND_NONE;
+    else
+        return FOUND_PARTIAL;
 }
 
 CacheBuilder::FoundState CacheBuilder::FindPhoneNumber(const UChar* chars, unsigned length, 

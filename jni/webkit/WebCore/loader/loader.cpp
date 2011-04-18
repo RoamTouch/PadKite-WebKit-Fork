@@ -104,6 +104,9 @@ Loader::Priority Loader::determinePriority(const CachedResource* resource) const
         case CachedResource::XBL:
 #endif
             return High;
+#if ENABLE(WML) && ENABLE(WMLSCRIPT)
+        case CachedResource::WmlScript:
+#endif
         case CachedResource::Script: 
         case CachedResource::FontResource:
             return Medium;

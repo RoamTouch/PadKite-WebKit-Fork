@@ -69,8 +69,11 @@ void HTMLMetaElement::insertedIntoDocument()
 void HTMLMetaElement::process()
 {
 #ifdef ANDROID_META_SUPPORT
-    if (!inDocument() || m_content.isNull())
+    //SAMSUNG FIX +
+    //if (!inDocument() || m_content.isNull())
+    if (!inDocument() || m_content.isNull() ||(!document()->frame() || !document()->frame()->page()))
         return;
+    //SAMSUNG FIX -
     bool updateViewport = false;
     if (equalIgnoringCase(name(), "viewport")) {
         document()->processMetadataSettings(m_content);

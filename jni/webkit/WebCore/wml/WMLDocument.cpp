@@ -31,18 +31,27 @@
 #include "WMLErrorHandling.h"
 #include "WMLPageState.h"
 #include "WMLTemplateElement.h"
-
+#if ENABLE(WMLSCRIPT)
+#include "WMLScriptInterface.h"
+#endif
 namespace WebCore {
 
 WMLDocument::WMLDocument(Frame* frame)
-    : Document(frame, false, false) 
+    : Document(frame, false, false)
     , m_activeCard(0)
+    , m_intrinsicEventTimer(this,& WMLDocument:: intrinsicEventTimerFired) // SAMSUNG_WML_FIXES
+#if ENABLE(WMLSCRIPT)
+    , m_wmlScript(new WMLScript(this))
+#endif
 {
     clearXMLVersion();
 }
 
 WMLDocument::~WMLDocument()
 {
+#if ENABLE(WMLSCRIPT)
+    delete m_wmlScript;
+#endif
 }
 
 void WMLDocument::finishedParsing()
@@ -75,14 +84,27 @@ void WMLDocument::finishedParsing()
         HistoryItem* item = list->backItem();
         if (!item)
             return;
-
+        // SAMSUNG_WML_FIXES+
+        // http://spe.mobilephone.net/wit/wmlv2/strucaccess.wml
+        wmlPageState->resetAccessControlData();
+        // SAMSUNG_WML_FIXES-
         page->goToItem(item, FrameLoadTypeBackWMLDeckNotAccessible);
         return;
     }
 
+    if (m_activeCard && !m_intrinsicEventTimer.isActive())
+        m_intrinsicEventTimer.startOneShot(0.0f); 	// SAMSUNG_WML_FIXES
+    //if (m_activeCard)
+    //    m_activeCard->handleIntrinsicEventIfNeeded();
+}
+// SAMSUNG_WML_FIXES+
+void WMLDocument::intrinsicEventTimerFired(Timer<WMLDocument>*)
+{
     if (m_activeCard)
         m_activeCard->handleIntrinsicEventIfNeeded();
 }
+// SAMSUNG_WML_FIXES-
+
 
 bool WMLDocument::initialize(bool aboutToFinishParsing)
 {

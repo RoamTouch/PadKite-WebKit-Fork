@@ -168,11 +168,13 @@ void RenderTableCell::setOverrideSize(int size)
     RenderBlock::setOverrideSize(size);
 }
 
-IntSize RenderTableCell::offsetFromContainer(RenderObject* o) const
+//Samsung - patch from r54784 
+IntSize RenderTableCell::offsetFromContainer(RenderObject* o, const IntPoint& point) const
 {
     ASSERT(o == container());
 
-    IntSize offset = RenderBlock::offsetFromContainer(o);
+    //Samsung - patch from r54784 
+    IntSize offset = RenderBlock::offsetFromContainer(o, point);
     if (parent())
         offset.expand(-parentBox()->x(), -parentBox()->y());
 

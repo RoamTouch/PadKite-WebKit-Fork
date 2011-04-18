@@ -309,7 +309,7 @@ const CachedNode* CachedFrame::currentCursor(const CachedFrame** framePtr) const
 {
     if (framePtr)
         *framePtr = this;
-    if (mCursorIndex < CURSOR_SET)
+    if (mCursorIndex < CURSOR_SET || mCursorIndex >= mCachedNodes.size()) //SAMSUNG FIX
         return NULL;
     const CachedNode* result = &mCachedNodes[mCursorIndex];
     const CachedFrame* frame = hasFrame(result);
@@ -853,7 +853,11 @@ const CachedNode* CachedFrame::frameUp(const CachedNode* test,
 
 const CachedFrame* CachedFrame::hasFrame(const CachedNode* node) const
 {
-    return node->isFrame() ? &mCachedFrames[node->childFrameIndex()] : NULL;
+    //SAMSUNG FIX
+	if (node && node->isFrame() && node->childFrameIndex() < mCachedFrames.size())
+        return &mCachedFrames[node->childFrameIndex()] ;
+
+    return NULL;
 }
 
 void CachedFrame::hideCursor()
@@ -952,6 +956,107 @@ const CachedNode* CachedFrame::nextTextField(const CachedNode* start,
     }
     return 0;
 }
+//SAMSUNG CHANGE >>
+
+const CachedNode* CachedFrame::nextInputField(const CachedNode* start,
+        const CachedFrame** framePtr, bool includeTextAreas) const
+{
+    LOGD("CachedFrame::nextInputField this=%x, start=%x, begin=%x end=%x", this, start, mCachedNodes.begin(), mCachedNodes.end()) ;
+    CachedNode* test;
+    if (start) {
+        test = const_cast<CachedNode*>(start);
+        test++;
+    } else {
+        test = const_cast<CachedNode*>(mCachedNodes.begin());
+    }
+    while (test != mCachedNodes.end()) {
+        CachedFrame* frame = const_cast<CachedFrame*>(hasFrame(test));
+        if (frame) {
+            const CachedNode* node
+                    = frame->nextInputField(0, framePtr, includeTextAreas);
+            if (node)
+                return node;
+        } else if (test->isTextInput() || test->isSelect()) {
+            if (framePtr)
+                *framePtr = this;
+            return test;
+        }
+        test++;
+    }
+    return 0;
+}
+
+const CachedNode* CachedFrame::previousInputField(const CachedNode* start,
+        const CachedFrame** framePtr, bool includeTextAreas) const
+{
+    CachedNode* test = NULL;
+    LOGD("CachedFrame::previousInputField this=%x, start=%x, begin=%x end=%x", this, start, mCachedNodes.begin(), mCachedNodes.end()) ;
+    
+    if (start) {
+        test = const_cast<CachedNode*>(start);
+        if (test != mCachedNodes.begin())
+            test--;
+        else
+            test = NULL ;
+    } else {
+        test = const_cast<CachedNode*>(mCachedNodes.end());
+        if (test != mCachedNodes.begin() )
+            test --;
+        else
+            test = NULL;
+    }
+    while (test) {
+        CachedFrame* frame = const_cast<CachedFrame*>(hasFrame(test));
+        if (frame) {
+            const CachedNode* node
+                    = frame->previousInputField(0, framePtr, includeTextAreas);
+            if (node)
+                return node;
+        } else if (test->isTextInput() || test->isSelect()) {
+            if (framePtr)
+                *framePtr = this;
+            return test;
+        }
+        if ( test == mCachedNodes.begin() )
+            test = 0 ;
+        else
+            test--;
+    }
+    return 0;
+}
+
+const CachedNode* CachedFrame::searchNode(const WebCore::String & nodeName, 
+                            void * nodePtr, const CachedFrame** framePtr) const
+{
+    
+
+    const CachedFrame* b = this;
+    if (b->mCachedNodes.size() == 0)
+        return 0;
+
+    CachedNode* test = const_cast<CachedNode*>(mCachedNodes.begin());
+    while (test != mCachedNodes.end()) {
+        if ( test->nodePointer() == nodePtr && test->name() == nodeName) {
+            if (framePtr)
+                *framePtr = this;
+            return test ;
+        }
+
+        test++;
+    }
+
+    const CachedFrame* child = b->mCachedFrames.begin();
+
+    for ( ; child != b->mCachedFrames.end(); child++) {
+        const CachedNode* result = child->searchNode(nodeName, nodePtr, framePtr) ;
+        if(result)
+            return result;
+    }
+
+    return 0;
+}
+
+//SAMSUNG CHANGE <<
 
 bool CachedFrame::moveInFrame(MoveInDirection moveInDirection,
     const CachedNode* test, BestData* bestData) const

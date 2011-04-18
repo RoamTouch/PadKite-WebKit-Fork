@@ -584,8 +584,9 @@ void FindOnPage::draw(SkCanvas* canvas, LayerAndroid* layer) {
             const SkRegion& region = (*m_matches)[i].getLocation();
             // Do not draw matches which intersect the current one, or if it is
             // offscreen
-            if (currentMatchRegion.intersects(region))
-                continue;
+            /*SAMSUNG CHANGE*/
+            //if (currentMatchRegion.intersects(region))
+              //  continue;
             SkRect bounds;
             bounds.set(region.getBounds());
             if (canvas->quickReject(bounds, SkCanvas::kAA_EdgeType))

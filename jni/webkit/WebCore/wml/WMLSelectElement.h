@@ -80,6 +80,9 @@ public:
     virtual int activeSelectionStartListIndex() const;
     virtual int activeSelectionEndListIndex() const;
 
+    //SAMSUNG_WML_FIX
+    virtual Node* item(unsigned index);
+
     void accessKeySetSelectedIndex(int);
     void setRecalcListItems();
     void scrollToSelection();
@@ -105,6 +108,7 @@ private:
     String iname() const;
     String ivalue() const;
 
+    AtomicString m_name; //SAMSUNG_WML_FIX
     SelectElementData m_data;
     bool m_initialized;
     Vector<unsigned> m_defaultOptionIndices;

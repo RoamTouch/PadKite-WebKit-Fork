@@ -162,6 +162,28 @@ bool containsVariableReference(const String& text, bool& isValid)
     return foundReference;
 }
 
+// SAMSUNG_WML_CRASH_FIX+
+bool containsSelfReference(const String &aname, const String &avalue)
+{
+    String value = avalue;
+    String name = aname;	
+    
+    if(value[0]=='$')
+    {
+        if(value[1]!='(') {
+            value.remove(0, 1);
+        } else {
+            value.remove(0, 2);
+            int endpos = value.find(")");
+            value.remove(endpos, 1);
+        }
+        if(value == name) 
+            return true;
+    }
+    return false;
+}
+// SAMSUNG_WML_CRASH_FIX-
+
 String substituteVariableReferences(const String& reference, Document* document, WMLVariableEscapingMode escapeMode)
 {
     ASSERT(document);
@@ -243,6 +265,11 @@ String substituteVariableReferences(const String& reference, Document* document,
         if (containsVariableReference(variableValue, isValid)) {
             if (!isValid)
                 break;
+
+			// SAMSUNG_WML_CRASH_FIX+
+            if (containsSelfReference(variableName, variableValue))
+                continue;
+            // SAMSUNG_WML_CRASH_FIX-
 
             variableValue = substituteVariableReferences(variableValue, document, escapeMode);
             continue;

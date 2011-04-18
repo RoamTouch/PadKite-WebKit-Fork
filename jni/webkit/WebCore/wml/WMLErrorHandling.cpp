@@ -47,8 +47,14 @@ void reportWMLError(Document* doc, WMLErrorCode error)
         // in an infinite error reporting loop.
         if (!tokenizer->wellFormed())
             return;
-
-        tokenizer->handleError(XMLTokenizer::fatal, errorMessage.latin1().data(), tokenizer->lineNumber(), tokenizer->columnNumber());
+        // SAMSUNG_WML_FIXES+
+        // wml/state/variables/substitution/8 
+        if(error==WMLErrorInvalidVariableName || error==WMLErrorInvalidVariableReference) {
+            tokenizer->handleError(XMLTokenizer::warning, errorMessage.latin1().data(), tokenizer->lineNumber(), tokenizer->columnNumber());
+        } else {    
+            tokenizer->handleError(XMLTokenizer::fatal, errorMessage.latin1().data(), tokenizer->lineNumber(), tokenizer->columnNumber());  
+        }
+        // SAMSUNG_WML_FIXES-
     } else {
         Frame* frame = doc->frame();
         if (!frame)

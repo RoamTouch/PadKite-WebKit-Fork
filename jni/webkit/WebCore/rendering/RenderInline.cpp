@@ -709,22 +709,17 @@ void RenderInline::computeRectForRepaint(RenderBoxModelObject* repaintContainer,
     
     o->computeRectForRepaint(repaintContainer, rect, fixed);
 }
-
-IntSize RenderInline::offsetFromContainer(RenderObject* container) const
+//Samsung - patch from r54784
+IntSize RenderInline::offsetFromContainer(RenderObject* container, const IntPoint& point) const
 {
     ASSERT(container == this->container());
 
     IntSize offset;    
     if (isRelPositioned())
         offset += relativePositionOffset();
-
-    if (!isInline() || isReplaced()) {
-        RenderBlock* cb;
-        if (container->isBlockFlow() && (cb = toRenderBlock(container))->hasColumns()) {
-            IntRect rect(0, 0, 1, 1);
-            cb->adjustRectForColumns(rect);
-        }
-    }
+    
+	//Samsung - patch from r54784
+    container->adjustForColumns(offset, point);
 
     if (container->hasOverflowClip())
         offset -= toRenderBox(container)->layer()->scrolledContentOffset();
@@ -752,8 +747,9 @@ void RenderInline::mapLocalToContainer(RenderBoxModelObject* repaintContainer, b
     RenderObject* o = container(repaintContainer, &containerSkipped);
     if (!o)
         return;
-
-    IntSize containerOffset = offsetFromContainer(o);
+    
+	//Samsung - patch from r54784
+    IntSize containerOffset = offsetFromContainer(o, roundedIntPoint(transformState.mappedPoint()));
 
     bool preserve3D = useTransforms && (o->style()->preserves3D() || style()->preserves3D());
     if (useTransforms && shouldUseTransformFromContainer(o)) {
@@ -784,8 +780,9 @@ void RenderInline::mapAbsoluteToLocalPoint(bool fixed, bool useTransforms, Trans
         return;
 
     o->mapAbsoluteToLocalPoint(fixed, useTransforms, transformState);
-
-    IntSize containerOffset = offsetFromContainer(o);
+    
+	//Samsung - patch from r54784
+    IntSize containerOffset = offsetFromContainer(o, IntPoint());
 
     bool preserve3D = useTransforms && (o->style()->preserves3D() || style()->preserves3D());
     if (useTransforms && shouldUseTransformFromContainer(o)) {

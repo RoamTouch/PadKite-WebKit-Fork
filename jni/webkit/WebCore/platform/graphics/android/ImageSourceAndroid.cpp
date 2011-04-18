@@ -228,9 +228,9 @@ void ImageSource::setData(SharedBuffer* data, bool allDataReceived)
 {
 #ifdef ANDROID_ANIMATED_GIF
     // This is only necessary if we allow ourselves to partially decode GIF
-    if (m_decoder.m_gifDecoder
-            && !m_decoder.m_gifDecoder->failed()) {
-        m_decoder.m_gifDecoder->setData(data, allDataReceived);
+    if (m_decoder.m_gifDecoder) { //SAMSUNG FIX - GA0100090700, GA0100092752
+        if (!m_decoder.m_gifDecoder->failed())
+            m_decoder.m_gifDecoder->setData(data, allDataReceived);
         return;
     }
 #endif
@@ -289,7 +289,7 @@ void ImageSource::setData(SharedBuffer* data, bool allDataReceived)
     }
 
     PrivateAndroidImageSourceRec* decoder = m_decoder.m_image;
-    if (allDataReceived && !decoder->fAllDataReceived) {
+    if (allDataReceived && decoder && !decoder->fAllDataReceived) { /*SAMSUNG FIX - GA0100090700, GA0100092752*/
         decoder->fAllDataReceived = true;
 
         SkBitmap* bm = &decoder->bitmap();

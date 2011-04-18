@@ -255,6 +255,36 @@ void Range::setEnd(PassRefPtr<Node> refNode, int offset, ExceptionCode& ec)
         collapse(false, ec);
 }
 
+//SAMSUNG CHANGe >>
+void Range::setRect(int x, int y, int width, int height, ExceptionCode& ec)
+{
+    int x2 = x+width ;
+    int y2 = y+height ;
+
+    VisiblePosition startVisiblePosition = m_ownerDocument->renderer()->positionForCoordinates(x, y);
+    VisiblePosition endVisiblePosition = m_ownerDocument->renderer()->positionForCoordinates(x2, y2);
+
+    ec = 0 ;
+    if (startVisiblePosition.isNull()) {
+        ec = INDEX_SIZE_ERR ;
+        return;
+    }
+    Position start = startVisiblePosition.deepEquivalent();
+
+    if (endVisiblePosition.isNull()) {
+        ec = INDEX_SIZE_ERR ;
+        return ;
+    }
+    Position end = endVisiblePosition.deepEquivalent();
+
+    setStart(start.node(), start.deprecatedEditingOffset(), ec) ;
+    if(ec)
+        return;
+
+    setEnd(end.node(), end.deprecatedEditingOffset(), ec) ;
+}
+//SAMSUNG CHANGE <<
+
 void Range::collapse(bool toStart, ExceptionCode& ec)
 {
     if (!m_start.container()) {

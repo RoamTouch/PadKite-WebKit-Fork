@@ -222,6 +222,9 @@ namespace WebCore {
          onto another graphics context.
          */
         static GraphicsContext* createOffscreenContext(int width, int height);
+	 //SAMSUNG CHANGE :Advanced Text Selection.
+        void fillTransparentRect(const IntRect&, const Color&);
+
 #endif
 
         void save();

@@ -49,8 +49,11 @@ WMLSelectElement::~WMLSelectElement()
 
 const AtomicString& WMLSelectElement::formControlName() const
 {
-    AtomicString name = this->name();
-    return name.isNull() ? emptyAtom : name;
+    //SAMSUNG_WML_FIX >>
+    //AtomicString name = this->name();
+    //return name.isNull() ? emptyAtom : name;
+    return m_name ;
+    //SAMSUNG_WML_FIX <<
 }
 
 const AtomicString& WMLSelectElement::formControlType() const
@@ -106,12 +109,30 @@ int WMLSelectElement::selectedIndex() const
 void WMLSelectElement::setSelectedIndex(int optionIndex, bool deselect)
 {
     SelectElement::setSelectedIndex(m_data, this, optionIndex, deselect, false, false);
+
+    //SAMSUNG_WML_FIX
+    updateVariables();
 }
 
 void WMLSelectElement::setSelectedIndexByUser(int optionIndex, bool deselect, bool fireOnChangeNow)
 {
     SelectElement::setSelectedIndex(m_data, this, optionIndex, deselect, fireOnChangeNow, true);
+	
+    //SAMSUNG_WML_FIX
+    updateVariables();
 }
+
+
+//SAMSUNG_WML_FIX >>
+Node* WMLSelectElement::item(unsigned index)
+{
+    const Vector<Element*>& items = m_data.listItems(this);
+    if (items.isEmpty())
+        return 0;
+
+    return static_cast<Node*>(items[index]);
+}
+//SAMSUNG_WML_FIX <<
 
 bool WMLSelectElement::saveFormControlState(String& value) const
 {
@@ -131,8 +152,14 @@ void WMLSelectElement::childrenChanged(bool changedByParser, Node* beforeChange,
 
 void WMLSelectElement::parseMappedAttribute(MappedAttribute* attr) 
 {
-    if (attr->name() == HTMLNames::multipleAttr)
+    // SAMSUNG_WML_FIXES+
+    // wml/struct/control/select/element/iname/10 
+    // wml/struct/control/select/element/iname/11 
+    if (attr->name() == HTMLNames::multipleAttr && attr->value()=="true")
         SelectElement::parseMultipleAttribute(m_data, this, attr);
+    else if (attr->name() == HTMLNames::nameAttr)
+        m_name = parseValueForbiddingVariableReferences(attr->value());
+    // SAMSUNG_WML_FIXES-    
     else
         WMLFormControlElement::parseMappedAttribute(attr);
 }
@@ -458,9 +485,12 @@ Vector<unsigned> WMLSelectElement::valueStringToOptionIndices(const String& valu
 
     Vector<String>::const_iterator end = indexStrings.end();
     for (Vector<String>::const_iterator it = indexStrings.begin(); it != end; ++it) {
-        String value = *it;
-
-        for (unsigned i = 0; i < items.size(); ++i) {
+       String value = *(it);
+        // SAMSUNG_WML_FIXES+
+        // wml/struct/control/select/element/value/3 
+        // reset the optionIndex = 0
+        for (unsigned i = 0, optionIndex = 0; i < items.size(); ++i) {
+        // SAMSUNG_WML_FIXES-   
             if (!isOptionElement(items[i]))
                 continue;
 

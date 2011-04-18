@@ -25,11 +25,15 @@
 #include "Document.h"
 #include "WMLErrorHandling.h"
 #include "WMLPageState.h"
+#include "Timer.h"
 
 namespace WebCore {
 
 class WMLCardElement;
 
+#if ENABLE(WMLSCRIPT)
+class WMLScript ; 
+#endif
 class WMLDocument : public Document {
 public:
     static PassRefPtr<WMLDocument> create(Frame* frame)
@@ -44,11 +48,27 @@ public:
 
     bool initialize(bool aboutToFinishParsing = false);
 
+    // SAMSUNG_WML_FIXES+
+    void intrinsicEventTimerFired(Timer<WMLDocument>*);
+    void setActiveCard(WMLCardElement *card) { m_activeCard = card; }
+    // SAMSUNG_WML_FIXES-
     WMLCardElement* activeCard() const { return m_activeCard; }
 
+#if ENABLE(WMLSCRIPT)
+    WMLScript* scriptInterface (){return m_wmlScript;}
+    void setActiveCardId(const String& cardId) { m_activeCardId = cardId; } 
+    const String& activeCardId() { return m_activeCardId; }
+#endif
 private:
     WMLDocument(Frame*);
     WMLCardElement* m_activeCard;
+#if ENABLE(WMLSCRIPT)
+    WMLScript* m_wmlScript ; 
+    String m_activeCardId;
+#endif
+    // SAMSUNG_WML_FIXES+
+    Timer<WMLDocument> m_intrinsicEventTimer;
+    // SAMSUNG_WML_FIXES-
 };
 
 WMLPageState* wmlPageStateForDocument(Document*);

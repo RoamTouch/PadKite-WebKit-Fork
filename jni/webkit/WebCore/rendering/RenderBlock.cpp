@@ -1972,24 +1972,29 @@ GapRects RenderBlock::selectionGapRectsForRepaint(RenderBoxModelObject* repaintC
 
 void RenderBlock::paintSelection(PaintInfo& paintInfo, int tx, int ty)
 {
-    if (shouldPaintSelectionGaps() && paintInfo.phase == PaintPhaseForeground) {
-        int lastTop = 0;
-        int lastLeft = leftSelectionOffset(this, lastTop);
-        int lastRight = rightSelectionOffset(this, lastTop);
-        paintInfo.context->save();
-        IntRect gapRectsBounds = fillSelectionGaps(this, tx, ty, tx, ty, lastTop, lastLeft, lastRight, &paintInfo);
-        if (!gapRectsBounds.isEmpty()) {
-            if (RenderLayer* layer = enclosingLayer()) {
-                gapRectsBounds.move(IntSize(-tx, -ty));
-                if (!hasLayer()) {
-                    FloatRect localBounds(gapRectsBounds);
-                    gapRectsBounds = localToContainerQuad(localBounds, layer->renderer()).enclosingBoundingBox();
+    //SAMSUNG CHANGE BEGIN : Advance Text Selection
+    if(false  == (document()->settings() && document()->settings()->advancedSelectionEnabled() )){
+        if (shouldPaintSelectionGaps() && paintInfo.phase == PaintPhaseForeground) {
+            int lastTop = 0;
+            int lastLeft = leftSelectionOffset(this, lastTop);
+            int lastRight = rightSelectionOffset(this, lastTop);
+            paintInfo.context->save();
+            IntRect gapRectsBounds = fillSelectionGaps(this, tx, ty, tx, ty, lastTop, lastLeft, lastRight, &paintInfo);
+            if (!gapRectsBounds.isEmpty()) {
+                if (RenderLayer* layer = enclosingLayer()) {
+                    gapRectsBounds.move(IntSize(-tx, -ty));
+                    if (!hasLayer()) {
+                        FloatRect localBounds(gapRectsBounds);
+                        gapRectsBounds = localToContainerQuad(localBounds, layer->renderer()).enclosingBoundingBox();
+                    }
+                    layer->addBlockSelectionGapsBounds(gapRectsBounds);
                 }
-                layer->addBlockSelectionGapsBounds(gapRectsBounds);
             }
+            paintInfo.context->restore();
         }
-        paintInfo.context->restore();
-    }
+   }
+   //SAMSUNG CHANGE END
+
 }
 
 #ifndef BUILDING_ON_TIGER
@@ -2174,7 +2179,15 @@ IntRect RenderBlock::fillHorizontalSelectionGap(RenderObject* selObj, int xPos, 
         return IntRect();
     IntRect gapRect(xPos, yPos, width, height);
     if (paintInfo && selObj->style()->visibility() == VISIBLE)
-        paintInfo->context->fillRect(gapRect, selObj->selectionBackgroundColor(), selObj->style()->colorSpace());
+    {
+        //SAMSUNG CHANGE BEGIN : Advance Text Selection
+        if(true  ==(document()->settings() && document()->settings()->advancedSelectionEnabled() )){
+            paintInfo->context->fillTransparentRect(gapRect, selObj->selectionBackgroundColor());
+        }else{
+            paintInfo->context->fillRect(gapRect, selObj->selectionBackgroundColor(), selObj->style()->colorSpace());
+        }
+
+    }
     return gapRect;
 }
 
@@ -2195,7 +2208,14 @@ IntRect RenderBlock::fillVerticalSelectionGap(int lastTop, int lastLeft, int las
 
     IntRect gapRect(left, top, width, height);
     if (paintInfo)
-        paintInfo->context->fillRect(gapRect, selectionBackgroundColor(), style()->colorSpace());
+    {
+        //SAMSUNG CHANGE BEGIN : Advance Text Selection
+        if(true  == (document()->settings() && document()->settings()->advancedSelectionEnabled() )){
+             paintInfo->context->fillTransparentRect(gapRect, selectionBackgroundColor());
+        }else{
+            paintInfo->context->fillRect(gapRect, selectionBackgroundColor(), style()->colorSpace());
+        }
+    }
     return gapRect;
 }
 
@@ -2210,8 +2230,15 @@ IntRect RenderBlock::fillLeftSelectionGap(RenderObject* selObj, int xPos, int yP
         return IntRect();
 
     IntRect gapRect(left, top, width, height);
-    if (paintInfo)
-        paintInfo->context->fillRect(gapRect, selObj->selectionBackgroundColor(), selObj->style()->colorSpace());
+    
+    if (paintInfo){
+         //SAMSUNG CHANGE BEGIN : Advance Text Selection
+        if(true  == (document()->settings() && document()->settings()->advancedSelectionEnabled() )){
+            paintInfo->context->fillTransparentRect(gapRect, selObj->selectionBackgroundColor());
+        }else {
+            paintInfo->context->fillRect(gapRect, selObj->selectionBackgroundColor(), selObj->style()->colorSpace());
+        }
+    }
     return gapRect;
 }
 
@@ -2227,7 +2254,14 @@ IntRect RenderBlock::fillRightSelectionGap(RenderObject* selObj, int xPos, int y
 
     IntRect gapRect(left, top, width, height);
     if (paintInfo)
-        paintInfo->context->fillRect(gapRect, selObj->selectionBackgroundColor(), selObj->style()->colorSpace());
+    {
+        //SAMSUNG CHANGE BEGIN : Advance Text Selection
+        if(true  == (document()->settings() && document()->settings()->advancedSelectionEnabled() ) ){
+            paintInfo->context->fillTransparentRect(gapRect, selObj->selectionBackgroundColor());   
+        }else {
+            paintInfo->context->fillRect(gapRect, selObj->selectionBackgroundColor(), selObj->style()->colorSpace());
+        }
+    }
     return gapRect;
 }
 
@@ -3464,7 +3498,9 @@ static VisiblePosition positionForPointRespectingEditingBoundaries(RenderBox* pa
         ancestor = ancestor->parent();
 
     // If we can't find an ancestor to check editability on, or editability is unchanged, we recur like normal
-    if (!ancestor || ancestor->node()->isContentEditable() == childNode->isContentEditable())
+    //For Document and Html Elements content editable property is not set, so content editable should not be checked for elements
+    //if (!ancestor || ancestor->node()->isContentEditable() == childNode->isContentEditable())
+    if (!ancestor || !ancestor->parent() || ancestor->node()->hasTagName(HTMLNames::htmlTag) || ancestor->node()->isContentEditable() == childNode->isContentEditable())
         return child->positionForPoint(pointInChildCoordinates);
 
     // Otherwise return before or after the child, depending on if the click was left or right of the child
@@ -3896,7 +3932,37 @@ void RenderBlock::adjustRectForColumns(IntRect& r) const
 
     r = result;
 }
+//Samsung - patch from r54784 begin
+void RenderBlock::adjustForColumns(IntSize& offset, const IntPoint& point) const
+{
+    if (!hasColumns())
+        return;
 
+    // FIXME: This is incorrect for right-to-left columns.
+
+    Vector<IntRect>& columnRects = *this->columnRects();
+
+    int gapWidth = columnGap();
+    int xOffset = 0;
+    int yOffset = 0;
+ //SAMSUNG CHANGE BEGIN : 
+    int xOffsetEx = 0;
+    int yOffsetEx = 0;
+    size_t columnCount = columnRects.size();
+    for (size_t i = 0; i < columnCount; ++i) {
+        IntRect columnRect = columnRects[i];
+        if (point.y() < columnRect.bottom() + yOffset - 1) {
+            xOffsetEx = xOffset > 0 ? (xOffset-1) : xOffset ;
+            yOffsetEx = yOffset > 0 ? (yOffset-1) : yOffset ;
+            offset.expand(xOffsetEx, -yOffsetEx);
+            return;
+        }
+ //SAMSUNG CHANGE END:
+        xOffset += columnRect.width() + gapWidth;
+        yOffset += columnRect.height();
+    }
+}
+//Samsung - patch from r54784 end
 void RenderBlock::calcPrefWidths()
 {
     ASSERT(prefWidthsDirty());

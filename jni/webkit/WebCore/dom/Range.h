@@ -61,6 +61,8 @@ public:
     static Node* commonAncestorContainer(Node* containerA, Node* containerB);
     void setStart(PassRefPtr<Node> container, int offset, ExceptionCode&);
     void setEnd(PassRefPtr<Node> container, int offset, ExceptionCode&);
+    //SAMSUNG CHANGE
+    void setRect(int x, int y, int width, int height, ExceptionCode&);
     void collapse(bool toStart, ExceptionCode&);
     bool isPointInRange(Node* refNode, int offset, ExceptionCode&);
     short comparePoint(Node* refNode, int offset, ExceptionCode&) const;

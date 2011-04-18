@@ -117,6 +117,7 @@ Settings::Settings(Page* page)
     , m_enforceCSSMIMETypeInStrictMode(true)
     , m_usesEncodingDetector(false)
     , m_allowScriptsToCloseWindows(false)
+    , m_advancedSelectionEnabled(false)
     , m_editingBehavior(
 #if PLATFORM(MAC) || (PLATFORM(CHROMIUM) && OS(DARWIN))
         // (PLATFORM(MAC) is always false in Chromium, hence the extra condition.)
@@ -765,5 +766,11 @@ void Settings::setLoadDeferringEnabled(bool enabled)
 {
     m_loadDeferringEnabled = enabled;
 }
+//SAMSUNG CHANGE
+void Settings::setAdvancedSelectionEnabled(bool enabled)
+{
+    m_advancedSelectionEnabled = enabled;
+}
+
 
 } // namespace WebCore

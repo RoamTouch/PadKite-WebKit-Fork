@@ -42,6 +42,10 @@ module ranges {
         [OldStyleObjC] void setEnd(in Node refNode, 
                                    in long offset)
             raises(RangeException, DOMException);
+        //SAMSUNG CHANGE    
+        [OldStyleObjC] void setRect(in long x, in long y, 
+                                   in long width, in long height)
+            raises(RangeException, DOMException);
         void setStartBefore(in Node refNode)
             raises(RangeException, DOMException);
         void setStartAfter(in Node refNode)

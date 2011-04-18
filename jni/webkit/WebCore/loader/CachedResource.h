@@ -57,6 +57,9 @@ public:
         CSSStyleSheet,
         Script,
         FontResource
+#if ENABLE(WML) && ENABLE(WMLSCRIPT)
+        , WmlScript
+#endif
 #if ENABLE(XSLT)
         , XSLStyleSheet
 #endif

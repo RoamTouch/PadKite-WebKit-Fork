@@ -307,6 +307,10 @@ TextResourceDecoder::ContentType TextResourceDecoder::determineContentType(const
         return CSS;
     if (equalIgnoringCase(mimeType, "text/html"))
         return HTML;
+#if ENABLE(WML) //SAMSUNG_WML_FIX
+    if (equalIgnoringCase(mimeType, "text/vnd.wap.wml"))
+        return WML;
+#endif
     if (DOMImplementation::isXMLMIMEType(mimeType))
         return XML;
     return PlainText;
@@ -316,6 +320,10 @@ const TextEncoding& TextResourceDecoder::defaultEncoding(ContentType contentType
 {
     // Despite 8.5 "Text/xml with Omitted Charset" of RFC 3023, we assume UTF-8 instead of US-ASCII 
     // for text/xml. This matches Firefox.
+#if ENABLE(WML) //SAMSUNG_WML_FIX
+    if (contentType == WML)
+        return UTF8Encoding();
+#endif
     if (contentType == XML)
         return UTF8Encoding();
     if (!specifiedDefaultEncoding.isValid())
@@ -568,7 +576,7 @@ bool TextResourceDecoder::checkForHeadCharset(const char* data, size_t len, bool
         if (xmlDeclarationEnd == pEnd)
             return false;
         // No need for +1, because we have an extra "?" to lose at the end of XML declaration.
-        int len;
+        int len = 0;//SAMSUNG Merge Opensource Fix "variable may be used before being set" r60529
         int pos = findXMLEncoding(ptr, xmlDeclarationEnd - ptr, len);
         if (pos != -1)
             setEncoding(findTextEncoding(ptr + pos, len), EncodingFromXMLHeader);
@@ -797,6 +805,11 @@ String TextResourceDecoder::decode(const char* data, size_t len)
     if ((m_contentType == HTML || m_contentType == XML) && !m_checkedForHeadCharset) // HTML and XML
         if (!checkForHeadCharset(data, len, movedDataToBuffer))
             return "";
+
+#if ENABLE(WML) //SAMSUNG_WML_FIX
+    if (m_contentType == WML && !m_checkedForHeadCharset) // WML
+        checkForHeadCharset(data, len, movedDataToBuffer);
+#endif
 
     // FIXME: It is wrong to change the encoding downstream after we have already done some decoding.
     if (shouldAutoDetect()) {

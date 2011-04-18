@@ -28,6 +28,7 @@
 namespace WebCore {
 
 class WMLTaskElement;
+class WMLEventHandlingElement; // SAMSUNG_WML_FIXES+
 
 class WMLOnEventElement : public WMLElement {
 public:
@@ -38,8 +39,18 @@ public:
     void registerTask(WMLTaskElement*);
     void deregisterTask(WMLTaskElement*);
 
+// SAMSUNG_WML_FIXES+
+	static WMLEventHandlingElement* eventHandlingParent(Node* parent) ;
+
+	void setNoop(bool noop) { m_isNoop = noop;}
+	bool isNoop() const { return m_isNoop; }
+
+	WMLIntrinsicEventType eventType() const { return m_type; }
+// SAMSUNG_WML_FIXES-
+
 private:
     WMLIntrinsicEventType m_type;
+    bool m_isNoop;// SAMSUNG_WML_FIXES+
 };
 
 }

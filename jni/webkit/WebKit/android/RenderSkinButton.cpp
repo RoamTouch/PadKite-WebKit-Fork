@@ -37,6 +37,10 @@
 #include "SkRect.h"
 #include <utils/Debug.h>
 #include <utils/Log.h>
+//SAMSUNG CHANGES +
+#include "SkGradientShader.h"
+#define SAMSUNG_DRAW_BUTTON    1
+//SAMSUNG CHANGES -
 
 struct PatchData {
     const char* name;
@@ -94,6 +98,72 @@ void RenderSkinButton::Draw(SkCanvas* canvas, const IntRect& r, RenderSkinAndroi
     SkASSERT(static_cast<unsigned>(newState) < 
             static_cast<unsigned>(RenderSkinAndroid::kNumStates));
 
+#if defined(SAMSUNG_DRAW_BUTTON) //SAMSUNG CHANGES +
+    SkPaint paint;
+    SkRect dstR = r;
+    float StrokeWidth = 1.0f;
+    float Margin = 4.0f;
+    float Thickness = 1.0f;
+    SkColor fillcolors[4] ;
+    SkColor bordercolors[4] ;
+    SkPoint points[4] ;
+
+    bordercolors[0] = SK_ColorGRAY ;
+    bordercolors[1] = SK_ColorGRAY ;
+    bordercolors[2] = SK_ColorDKGRAY ;
+    bordercolors[3] = SK_ColorDKGRAY ;
+
+    if (newState == RenderSkinAndroid::kDisabled) {
+        fillcolors[0] = SK_ColorGRAY ;
+        fillcolors[1] = SK_ColorGRAY ;
+        fillcolors[2] = SK_ColorGRAY ;
+        fillcolors[3] = SK_ColorGRAY ;
+        bordercolors[0] = SK_ColorDKGRAY ;
+        bordercolors[1] = SK_ColorDKGRAY ;
+        bordercolors[2] = SK_ColorDKGRAY ;
+        bordercolors[3] = SK_ColorDKGRAY ;
+    }
+    else if (newState == RenderSkinAndroid::kNormal) {
+        fillcolors[0] = 0xFFEBEBEB ;
+        fillcolors[1] = 0xFFEBEBEB ;
+        fillcolors[2] = SK_ColorLTGRAY;
+        fillcolors[3] = SK_ColorLTGRAY;
+    }
+    else if (newState == RenderSkinAndroid::kFocused) {
+        fillcolors[0] = 0xFF0065D2;
+        fillcolors[1] = 0xFF0065D2;
+        fillcolors[2] = 0xFF00499B;
+        fillcolors[3] = 0xFF00499B;
+    }
+    else if (newState == RenderSkinAndroid::kPressed) {
+        fillcolors[0] = 0xFF00C7EA ;
+        fillcolors[1] = 0xFF00C7EA ;
+        fillcolors[2] = 0xFF009BB7 ;
+        fillcolors[3] = 0xFF009BB7 ;
+    }
+
+    //Inflating original rect to avoid button overlaps
+    dstR.inset(Margin, Margin);
+
+    points[0].set(dstR.fLeft, dstR.fTop) ;
+    points[1].set(dstR.fLeft, dstR.fBottom) ;
+    points[2].set(dstR.fRight, dstR.fTop) ;
+    points[3].set(dstR.fRight, dstR.fBottom) ;
+
+    paint.setShader(SkGradientShader::CreateLinear(points, fillcolors, NULL, 4, SkShader::kMirror_TileMode))->unref();
+    
+    paint.setAntiAlias(true);
+    paint.setStyle(SkPaint::kFill_Style);
+    canvas->drawRect(dstR, paint);
+
+    paint.setShader(SkGradientShader::CreateLinear(points, bordercolors, NULL, 4, SkShader::kMirror_TileMode))->unref();
+
+    paint.setStyle(SkPaint::kStroke_Style);
+    paint.setStrokeWidth(StrokeWidth);
+    paint.setColor(SK_ColorDKGRAY);
+    canvas->drawRect(dstR, paint);
+
+#else  //SAMSUNG CHANGES -
     // Set up the ninepatch information for drawing.
     SkRect bounds(r);
     const PatchData& pd = gFiles[newState];
@@ -114,6 +184,7 @@ void RenderSkinButton::Draw(SkCanvas* canvas, const IntRect& r, RenderSkinAndroi
     }
     // Draw to the canvas.
     SkNinePatch::DrawNine(canvas, bounds, gButton[newState], margin);
+#endif	
 }
 
 } //WebCore

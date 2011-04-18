@@ -183,6 +183,7 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	dom/XMLTokenizer.cpp \
 	dom/XMLTokenizerLibxml2.cpp \
 	dom/XMLTokenizerScope.cpp \
+	dom/XMLValidatingTokenizer.cpp \
 	dom/default/PlatformMessagePortChannel.cpp \
 	\
 	editing/AppendNodeCommand.cpp \
@@ -477,6 +478,11 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	platform/graphics/android/PlatformGraphicsContext.cpp \
 	platform/graphics/android/SharedBufferStream.cpp \
 	platform/graphics/android/android_graphics.cpp \
+
+ifeq ($(ENABLE_WML), true)
+LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
+	loader/CachedWMLScript.cpp 
+endif
 
 ifeq ($(ENABLE_SVG), true)
 LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
@@ -917,6 +923,47 @@ LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
 	svg/graphics/filters/SVGFilter.cpp \
 	svg/graphics/filters/SVGFilterBuilder.cpp \
 	svg/graphics/filters/SVGLightSource.cpp
+endif
+
+ifeq ($(ENABLE_WML), true)
+LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
+	wml/WMLAccessElement.cpp \
+	wml/WMLAElement.cpp \
+	wml/WMLAnchorElement.cpp \
+	wml/WMLBRElement.cpp \
+	wml/WMLCardElement.cpp \
+	wml/WMLDocument.cpp \
+	wml/WMLDoElement.cpp \
+	wml/WMLElement.cpp \
+	wml/WMLErrorHandling.cpp \
+	wml/WMLEventHandlingElement.cpp \
+	wml/WMLFieldSetElement.cpp \
+	wml/WMLFormControlElement.cpp \
+	wml/WMLGoElement.cpp \
+	wml/WMLImageElement.cpp \
+	wml/WMLImageLoader.cpp \
+	wml/WMLInputElement.cpp \
+	wml/WMLInsertedLegendElement.cpp \
+	wml/WMLIntrinsicEvent.cpp \
+	wml/WMLIntrinsicEventHandler.cpp \
+	wml/WMLMetaElement.cpp \
+	wml/WMLNoopElement.cpp \
+	wml/WMLOnEventElement.cpp \
+	wml/WMLOptGroupElement.cpp \
+	wml/WMLOptionElement.cpp \
+	wml/WMLPageState.cpp \
+	wml/WMLPElement.cpp \
+	wml/WMLPostfieldElement.cpp \
+	wml/WMLPrevElement.cpp \
+	wml/WMLRefreshElement.cpp \
+	wml/WMLScriptInterface.cpp \
+	wml/WMLSelectElement.cpp \
+	wml/WMLSetvarElement.cpp \
+	wml/WMLTableElement.cpp \
+	wml/WMLTaskElement.cpp \
+	wml/WMLTemplateElement.cpp \
+	wml/WMLTimerElement.cpp \
+	wml/WMLVariables.cpp 
 endif
 
 LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \

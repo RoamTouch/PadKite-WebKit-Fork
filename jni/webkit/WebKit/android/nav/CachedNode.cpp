@@ -43,6 +43,7 @@ void CachedNode::clearCursor(CachedFrame* parent)
 {
     if (isFrame()) {
         CachedFrame* child = const_cast<CachedFrame*>(parent->hasFrame(this));
+        if (child) //SAMSUNG FIX
         child->clearCursor();
     }
     mIsCursor = false;
@@ -224,6 +225,7 @@ void CachedNode::hideCursor(CachedFrame* parent)
 {
     if (isFrame()) {
         CachedFrame* child = const_cast<CachedFrame*>(parent->hasFrame(this));
+        if (child) //SAMSUNG FIX
         child->hideCursor();
     }
     mIsHidden = true;

@@ -41,6 +41,13 @@
 #include "MouseEvent.h"
 #include "RenderBox.h"
 #include "WMLNames.h"
+#if ENABLE(WMLSCRIPT)
+#include "WMLDocument.h"
+#include "DocLoader.h"
+#include "WMLScriptInterface.h"
+#include "CachedWMLScript.h"
+#endif
+#include "WMLVariables.h"
 
 namespace WebCore {
 
@@ -63,6 +70,16 @@ void WMLAElement::parseMappedAttribute(MappedAttribute* attr)
             if (protocolIs(value, "http") || protocolIs(value, "https") || value.startsWith("//"))
                 prefetchDNS(document()->completeURL(value).host());
         }
+#if ENABLE(WMLSCRIPT)
+        if (isLink()) {
+            String urlStr = WMLScript::getScriptURL(attr->value(), document()) ;
+            if ( !urlStr.isEmpty() ) {
+                WMLScriptLoader::m_script = document()->docLoader()->requestWMLScript(urlStr, getAttribute(HTMLNames::charsetAttr));
+                WMLScriptLoader::m_wmlDoc = static_cast<WMLDocument *>(document()) ;
+                WMLScriptLoader::m_script->addClient(static_cast<WMLScriptLoader*>(this)) ;
+            }
+        }
+#endif
     } else if (attr->name() == HTMLNames::nameAttr
                || attr->name() == HTMLNames::titleAttr
                || attr->name() == HTMLNames::relAttr) {
@@ -123,6 +140,26 @@ void WMLAElement::defaultEventHandler(Event* event)
         if (event->type() == eventNames().keydownEvent && event->isKeyboardEvent())
             k = static_cast<KeyboardEvent*>(event);
 
+#if ENABLE(WMLSCRIPT)
+        if (e) {
+            KURL url = document()->completeURL(deprecatedParseURL(getAttribute(HTMLNames::hrefAttr)));
+            String scriptURL = WMLScript::getScriptURL(url.string(), document()) ;
+            if(!scriptURL.isEmpty()) {
+                String urlFragment = WMLScript::getScriptFragment(url.string()) ;
+
+                WMLDocument *doc = static_cast<WMLDocument *>(document()) ;
+                Node *parent = parentNode() ;
+                ASSERT (parent) ;
+                if (parent->hasTagName(oneventTag))
+                    doc->scriptInterface()->setWmlsecOnEventParams(scriptURL, urlFragment) ;
+                else
+                    doc->scriptInterface()->exeScript(scriptURL, urlFragment);
+
+                return ;
+            }
+
+        }
+#endif
         if (e && e->button() == RightButton) {
             WMLElement::defaultEventHandler(event);
             return;
@@ -140,7 +177,11 @@ void WMLAElement::defaultEventHandler(Event* event)
         }
  
         if (!event->defaultPrevented() && document()->frame()) {
-            String url = document()->completeURL(deprecatedParseURL(getAttribute(HTMLNames::hrefAttr)));
+            //KURL url = document()->completeURL(deprecatedParseURL(getAttribute(HTMLNames::hrefAttr)));
+            // SAMSUNG_WML_FIXES+
+            // http://wap2.samsungmobile.com/test   
+            KURL url = document()->completeURL(substituteVariableReferences(deprecatedParseURL(getAttribute(HTMLNames::hrefAttr)), document(), WMLVariableEscapingEscape));
+            // SAMSUNG_WML_FIXES-       
             document()->frame()->loader()->urlSelected(url, target(), event, false, false, true, SendReferrer);
         }
 

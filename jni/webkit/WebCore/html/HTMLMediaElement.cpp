@@ -1388,11 +1388,13 @@ KURL HTMLMediaElement::selectNextSourceChild(ContentType *contentType, InvalidSo
             if (!screenEval.eval(media.get())) 
                 goto check_again;
         }
-
-        if (source->hasAttribute(typeAttr)) {
-            if (!MediaPlayer::supportsType(ContentType(source->type())))
-                goto check_again;
-        }
+	//SAMSUNG CHANGES >>
+	//Support for Type attribute of HTML5 Video
+        //if (source->hasAttribute(typeAttr)) {
+        //    if (!MediaPlayer::supportsType(ContentType(source->type())))
+        //        goto check_again;
+        //}
+	//SAMSUNG CHANGES <<
 
         // Is it safe to load this url?
         mediaURL = source->src();

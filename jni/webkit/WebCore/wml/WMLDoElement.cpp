@@ -67,11 +67,22 @@ void WMLDoElement::defaultEventHandler(Event* event)
     if (event->isKeyboardEvent()
         && static_cast<KeyboardEvent*>(event)->keyIdentifier() != "Enter")
         return;
-
-    if (m_type == "accept" || m_type == "options") {
+    // SAMSUNG_WML_FIXES+
+    // http://spe.mobilephone.net/wit/wmlv2/formselect.wml
+    // http://spe.mobilephone.net/wit/wmlv2/formempty.wml
+    //if (m_type == "accept" || m_type == "options") {
+	String type = m_type.lower() ;
+	if (type == "accept" || type == "options" || type == "go" || type == "help" 
+		|| type == "delete" || type=="select" || type == "option" || type == "unknown") {
+    // SAMSUNG_WML_FIXES-    
         if (m_task)
             m_task->executeTask();
     } else if (m_type == "prev") {
+        // SAMSUNG_WML_FIXES+
+        // wml/struct/control/select/option/5    
+        if (m_task) {
+            m_task->executeTask();
+        } else {
         ASSERT(document()->isWMLDocument());
         WMLDocument* document = static_cast<WMLDocument*>(this->document());
 
@@ -86,6 +97,8 @@ void WMLDoElement::defaultEventHandler(Event* event)
         }
 
         pageState->page()->goBack();
+        }
+        // SAMSUNG_WML_FIXES-   
     } else if (m_type == "reset") {
         WMLPageState* pageState = wmlPageStateForDocument(document());
         if (!pageState)

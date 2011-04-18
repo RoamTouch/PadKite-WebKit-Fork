@@ -40,6 +40,9 @@ class CachedCSSStyleSheet;
 class CachedFont;
 class CachedImage;
 class CachedScript;
+#if ENABLE(WML) && ENABLE(WMLSCRIPT)
+class CachedWMLScript;
+#endif
 class CachedXSLStyleSheet;
 class Document;
 class Frame;
@@ -60,6 +63,9 @@ public:
     CachedCSSStyleSheet* requestCSSStyleSheet(const String& url, const String& charset);
     CachedCSSStyleSheet* requestUserCSSStyleSheet(const String& url, const String& charset);
     CachedScript* requestScript(const String& url, const String& charset);
+#if ENABLE(WML) && ENABLE(WMLSCRIPT)
+    CachedWMLScript* requestWMLScript(const String& url, const String& charset);    
+#endif
     CachedFont* requestFont(const String& url);
 
 #if ENABLE(XSLT)

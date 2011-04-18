@@ -152,6 +152,11 @@
 #define ANDROID_MULTIPLE_WINDOWS
 #define ANDROID_CSS_TAP_HIGHLIGHT_COLOR
 
+//This flag provides an option in XML parsing error message to forcefully
+//parse the document as HTML document.
+#define SAMSUNG_ANDROID_FORCE_HTML    1
+
+
 #define ANDROID_BLOCK_NETWORK_IMAGE
 
 // Changes needed to support native plugins (npapi.h). If the change is generic,

@@ -29,6 +29,8 @@
 #include "RenderTheme.h"
 #include "RenderView.h"
 #include "VisiblePosition.h"
+#include "Settings.h"
+
 
 using namespace std;
 
@@ -153,7 +155,14 @@ void RenderReplaced::paint(PaintInfo& paintInfo, int tx, int ty)
     if (drawSelectionTint) {
         IntRect selectionPaintingRect = localSelectionRect();
         selectionPaintingRect.move(tx, ty);
-        paintInfo.context->fillRect(selectionPaintingRect, selectionBackgroundColor(), style()->colorSpace());
+        
+        //SAMSUNG CHANGE BEGIN : Advance Text Selection
+        if(true  == (document()->settings() && document()->settings()->advancedSelectionEnabled() )){
+            paintInfo.context->fillTransparentRect(selectionPaintingRect, selectionBackgroundColor());
+        }else {
+            paintInfo.context->fillRect(selectionPaintingRect, selectionBackgroundColor(), style()->colorSpace());
+        }
+
     }
 }
 

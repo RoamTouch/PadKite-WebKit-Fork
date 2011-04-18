@@ -360,12 +360,21 @@ void FrameLoaderClientAndroid::dispatchDidFailProvisionalLoad(const ResourceErro
         }
     }
 
+
     // Replace all occurances of %s with the failing url.
     String s = UTF8Encoding().decode((const char*)a->getBuffer(false), a->getLength());
+
+	// samsung shkim 
+	// \frameworks\base\core\res\res\raw-XX\nodomain.html or loaderror.html
+	// These error pages does not have <viewport> tag, it is loaded as low zoom scale
+	if( s.contains( "viewport" ) == false )
+		s = s.replace( "<head>", "<head> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, user-scalable=no\"/>" );
+	
     s = s.replace("%s", String(url.data(), url.size()));
 
     // Replace all occurances of %e with the error text
     s = s.replace("%e", error.localizedDescription());
+
 
     // Create the request and the substitute data and tell the FrameLoader to
     // load with the replacement data.
@@ -486,6 +495,14 @@ void FrameLoaderClientAndroid::dispatchDecidePolicyForMIMEType(FramePolicyFuncti
             else
                 action = PolicyDownload;
         }
+	//SAMSUNG CHANGE +	
+	 //when svg is not supported ,make svg  downloadable when it is  Main frame 
+        #if  !ENABLE(SVG)
+	    if ((MIMEType == "image/svg+xml") &&  (m_frame->ownerElement() == 0)) {
+	    	action = PolicyDownload;
+	    }
+       #endif	   
+	 //SAMSUNG CHANGE -
     }
     // A status code of 204 indicates no content change. Ignore the result.
     WebCore::DocumentLoader* docLoader = m_frame->loader()->activeDocumentLoader();

@@ -1764,7 +1764,12 @@ void RenderObject::mapLocalToContainer(RenderBoxModelObject* repaintContainer, b
     RenderObject* o = parent();
     if (!o)
         return;
-
+    //Samsung - patch from r54784 begin
+    IntSize columnOffset;
+    o->adjustForColumns(columnOffset, roundedIntPoint(transformState.mappedPoint()));
+    if (!columnOffset.isZero())
+        transformState.move(columnOffset);
+    //Samsung - patch from r54784 end
     if (o->hasOverflowClip())
         transformState.move(-toRenderBox(o)->layer()->scrolledContentOffset());
 
@@ -1821,18 +1826,23 @@ void RenderObject::getTransformFromContainer(const RenderObject* containerObject
 
 FloatQuad RenderObject::localToContainerQuad(const FloatQuad& localQuad, RenderBoxModelObject* repaintContainer, bool fixed) const
 {
-    TransformState transformState(TransformState::ApplyTransformDirection, FloatPoint(), &localQuad);
+    //Samsung - patch from r54784 
+    TransformState transformState(TransformState::ApplyTransformDirection, localQuad.boundingBox().location(), &localQuad);
     mapLocalToContainer(repaintContainer, fixed, true, transformState);
     transformState.flatten();
     
     return transformState.lastPlanarQuad();
 }
 
-IntSize RenderObject::offsetFromContainer(RenderObject* o) const
+//Samsung - patch from r54784 
+IntSize RenderObject::offsetFromContainer(RenderObject* o, const IntPoint& point) const
 {
     ASSERT(o == container());
 
     IntSize offset;
+    //Samsung - patch from r54784 begin
+    o->adjustForColumns(offset, point);
+
     if (o->hasOverflowClip())
         offset -= toRenderBox(o)->layer()->scrolledContentOffset();
 
@@ -1842,6 +1852,8 @@ IntSize RenderObject::offsetFromContainer(RenderObject* o) const
 IntSize RenderObject::offsetFromAncestorContainer(RenderObject* container) const
 {
     IntSize offset;
+    //Samsung - patch from r54784 begin	
+    IntPoint referencePoint;
     const RenderObject* currContainer = this;
     do {
         RenderObject* nextContainer = currContainer->container();
@@ -1849,7 +1861,11 @@ IntSize RenderObject::offsetFromAncestorContainer(RenderObject* container) const
         if (!nextContainer)
             break;
         ASSERT(!currContainer->hasTransform());
-        offset += currContainer->offsetFromContainer(nextContainer);
+        //Samsung - patch from r54784 begin		
+        IntSize currentOffset = currContainer->offsetFromContainer(nextContainer, referencePoint);
+        offset += currentOffset;
+        referencePoint.move(currentOffset);
+        //Samsung - patch from r54784 end		
         currContainer = nextContainer;
     } while (currContainer != container);
 

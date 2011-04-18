@@ -45,6 +45,9 @@ public:
     virtual bool isChecked() const { return false; }
     virtual bool isAutofilled() const { return false; }
     virtual bool isIndeterminate() const { return false; }
+    //SAMSUNG WML FIX >>
+    virtual bool readOnly() const { return isReadOnlyFormControl(); }
+    //SAMSUNG WML FIX <<
     virtual bool isTextFormControl() const { return true; }
     virtual bool isRadioButton() const { return false; }
     virtual bool isTextField() const { return true; }
@@ -58,6 +61,10 @@ public:
     virtual const AtomicString& formControlName() const;
     virtual const String& suggestedValue() const;
     virtual String value() const;
+    // SAMSUNG_WML_FIXES+
+    // wml/struct/control/input/format/1
+    virtual void setValuePreserveSelectionPos(const String&);
+    // SAMSUNG_WML_FIXES-
     virtual void setValue(const String&, bool sendChangeEvent = false);
     virtual void setValueForUser(const String&);
     virtual void setValueFromRenderer(const String&);
@@ -88,6 +95,10 @@ public:
 
     bool isConformedToInputMask(const String&);
     bool isConformedToInputMask(UChar, unsigned, bool isUserInput = true);
+    // SAMSUNG_WML_FIXES+
+    String filterInvalidChars(const String&);
+    int maxLength() const { return m_data.maxLength(); }
+    // SAMSUNG_WML_FIXES-
 
 private:
     friend class WMLCardElement;

@@ -60,6 +60,9 @@ public:
     virtual void setSelectedIndex(int index, bool deselect = true) = 0;
     virtual void setSelectedIndexByUser(int index, bool deselect = true, bool fireOnChangeNow = false) = 0;
 
+    //SAMSUNG WML FIX
+    virtual Node* item(unsigned index) = 0;
+
 protected:
     virtual ~SelectElement() { }
 

@@ -541,6 +541,13 @@ void RenderFrameSet::positionFrames()
             Length l = rowLengths[r];
             if (l.isFixed())
                 rowHeight = l.value();
+            // SAMSUNG_FIX W0100093080 +
+            // if a row height is 0% we set its height to 0 dont flatten	
+            if(l.isPercent() && l.percent() == 0) {
+                 rowHeight = 0;
+                 height    = 0;
+             }
+             // SAMSUNG_FIX W0100093080 -
         }
         for (int c = 0; c < cols && child; c++) {
             child->setX(xPos);
@@ -552,6 +559,14 @@ void RenderFrameSet::positionFrames()
                 Length l = colLengths[c];
                 if (l.isFixed())
                     colWidth = l.value();
+                 // SAMSUNG_FIX W0100093080 +
+                 // if a col width is 0% we set its width to 0 
+                 if(l.isPercent() && l.percent() == 0) {
+                     colWidth = 0;
+                     child->setWidth(0);
+                 }
+                 // SAMSUNG_FIX W0100093080 -
+
             }
             if (colWidth && rowHeight) {
                 child->setNeedsLayout(true);

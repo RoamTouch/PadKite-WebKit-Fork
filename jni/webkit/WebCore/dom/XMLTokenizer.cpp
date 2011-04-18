@@ -242,6 +242,18 @@ static inline RefPtr<Element> createXHTMLParserErrorHeader(Document* doc, const 
     fixed->setAttribute(styleAttr, "font-family:monospace;font-size:12px");
     fixed->appendChild(doc->createTextNode(errorMessages), ec);
 
+#ifdef SAMSUNG_ANDROID_FORCE_HTML
+    if (doc->frame() && !doc->frame()->tree()->parent()) {
+        RefPtr<Element> br = doc->createElement(brTag, false);
+        reportElement->appendChild(br.get(), ec);
+        RefPtr<Element> reparse = doc->createElement(aTag, false);
+        reportElement->appendChild(reparse.get(), ec);
+        reparse->setAttribute(hrefAttr, "android:forcehtml");
+        reparse->setAttribute(styleAttr, "color: #0174a7 !important; font-weight: 700; text-shadow: 0px 1px 0px") ;
+        reparse->appendChild(doc->createTextNode("Reparse document as HTML"), ec);
+    }
+#endif
+
     h3 = doc->createElement(h3Tag, false);
     reportElement->appendChild(h3.get(), ec);
     h3->appendChild(doc->createTextNode("Below is a rendering of the page up to the first error."), ec);

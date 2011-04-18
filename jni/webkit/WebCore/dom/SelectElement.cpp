@@ -446,6 +446,15 @@ void SelectElement::restoreFormControlState(SelectElementData& data, Element* el
 void SelectElement::parseMultipleAttribute(SelectElementData& data, Element* element, MappedAttribute* attribute)
 {
     bool oldUsesMenuList = data.usesMenuList();
+
+#if ENABLE(WML)
+    if (element->isWMLElement()) {
+        if (attribute->value()=="true")
+            data.setMultiple(true);
+        else
+            data.setMultiple(false); 
+    } else
+#endif
     data.setMultiple(!attribute->isNull());
     if (oldUsesMenuList != data.usesMenuList() && element->attached()) {
         element->detach();

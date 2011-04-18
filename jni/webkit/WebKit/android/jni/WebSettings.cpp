@@ -114,6 +114,8 @@ struct FieldIds {
         mShrinksStandaloneImagesToFit = env->GetFieldID(clazz, "mShrinksStandaloneImagesToFit", "Z");
         mUseDoubleTree = env->GetFieldID(clazz, "mUseDoubleTree", "Z");
         mPageCacheCapacity = env->GetFieldID(clazz, "mPageCacheCapacity", "I");
+      //SAMSUNG CHANGE
+        mAdvanceTextSelection =  env->GetFieldID(clazz, "mAdvanceTextSelection", "Z");
 
         LOG_ASSERT(mLayoutAlgorithm, "Could not find field mLayoutAlgorithm");
         LOG_ASSERT(mTextSize, "Could not find field mTextSize");
@@ -150,6 +152,8 @@ struct FieldIds {
         LOG_ASSERT(mShrinksStandaloneImagesToFit, "Could not find field mShrinksStandaloneImagesToFit");
         LOG_ASSERT(mUseDoubleTree, "Could not find field mUseDoubleTree");
         LOG_ASSERT(mPageCacheCapacity, "Could not find field mPageCacheCapacity");
+        //SAMSUNG CHANGE	
+        LOG_ASSERT(mAdvanceTextSelection, "Could not find field mAdvanceTextSelection");
 
         jclass c = env->FindClass("java/lang/Enum");
         LOG_ASSERT(c, "Could not find Enum class!");
@@ -211,6 +215,9 @@ struct FieldIds {
     jfieldID mDatabasePath;
     jfieldID mDatabasePathHasBeenSet;
 #endif
+    //SAMSUNG CHANGE
+    jfieldID mAdvanceTextSelection;
+
 };
 
 static struct FieldIds* gFieldIds;
@@ -282,7 +289,15 @@ public:
         s->setFantasyFontFamily(to_string(env, str));
 
         str = (jstring)env->GetObjectField(obj, gFieldIds->mDefaultTextEncoding);
-        s->setDefaultTextEncodingName(to_string(env, str));
+//SAMSUNG Change >>
+        WebCore::String defaultEncoding = to_string(env, str) ;
+        if (defaultEncoding == "AutoDetect") {
+            s->setUsesEncodingDetector(true);
+        } else {
+            s->setUsesEncodingDetector(false);
+            s->setDefaultTextEncodingName(defaultEncoding);
+        }
+//SAMSUNG Change <<
 
         str = (jstring)env->GetObjectField(obj, gFieldIds->mUserAgent);
         WebFrame::getWebFrame(pFrame)->setUserAgent(to_string(env, str));
@@ -375,6 +390,9 @@ public:
             }
         }
 #endif
+        //SAMSUNG CHANGE	
+         flag = env->GetBooleanField(obj, gFieldIds->mAdvanceTextSelection);
+         s->setAdvancedSelectionEnabled(flag);
 
         flag = env->GetBooleanField(obj, gFieldIds->mGeolocationEnabled);
         GeolocationPermissions::setAlwaysDeny(!flag);
