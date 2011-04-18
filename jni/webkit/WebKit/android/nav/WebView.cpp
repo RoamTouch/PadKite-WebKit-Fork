@@ -2848,7 +2848,7 @@ static JNINativeMethod gJavaWebViewMethods[] = {
     ,{ "nativeSetCursorInnerColors", "(IIII)V",
         (void*) nativeSetCursorInnerColors }
     ,{ "nativeSetCursorPressedColors", "(II)V",
-        (void*) nativeSetCursorPressedColors }
+        (void*) nativeSetCursorPressedColors },
     //ROAMTOUCH CHANGE <<    
 //SAMSUNG CHANGES >
     { "nativeInputFieldAction", "(Ljava/lang/String;I)I",
