@@ -667,6 +667,29 @@ void GraphicsContext::fillRoundedRect(const IntRect& rect, const IntSize& topLef
     GC2Canvas(this)->drawPath(path, paint);
 }
 
+//SAMSUNG CHANGE BEGIN : Advanced Text Selection.
+void GraphicsContext::fillTransparentRect(const IntRect& ori_rect, const Color& color)
+{
+    if (paintingDisabled())
+        return;
+
+    if (!color.alpha())	
+        return;
+
+    SkRect r = ori_rect;
+    SkPaint paint;
+
+    m_data->setup_paint_common(&paint);
+    extactShader(&paint,
+                 m_common->state.fillPattern.get(),
+                 m_common->state.fillGradient.get());
+     paint.setColor(color.rgb());
+     paint.setAlpha(80);
+    GC2Canvas(this)->drawRect(r, paint);
+}
+//SAMSUNG CHANGE END
+
+
 void GraphicsContext::fillRect(const FloatRect& rect)
 {
     SkPaint paint;

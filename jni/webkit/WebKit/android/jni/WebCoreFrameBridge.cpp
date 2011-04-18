@@ -1413,6 +1413,7 @@ static jboolean HasPasswordField(JNIEnv *env, jobject obj)
     // class, but just normal Element class.
     while (node && !found && !node->namespaceURI().isNull() &&
            !node->namespaceURI().isEmpty()) {
+			   if (node->isHTMLElement()) { /*SAMSUNG FIX*/
         WTF::Vector<WebCore::HTMLFormControlElement*>& elements =
         		((WebCore::HTMLFormElement*)node)->formElements;
         size_t size = elements.size();
@@ -1422,6 +1423,7 @@ static jboolean HasPasswordField(JNIEnv *env, jobject obj)
                 if (((WebCore::HTMLInputElement*)e)->inputType() ==
                 		WebCore::HTMLInputElement::PASSWORD)
                     found = true;
+                }
             }
         }
         node = form->nextItem();
@@ -1444,6 +1446,7 @@ static jobjectArray GetUsernamePassword(JNIEnv *env, jobject obj)
     WebCore::Node* node = form->firstItem();
     while (node && !found && !node->namespaceURI().isNull() &&
            !node->namespaceURI().isEmpty()) {
+        if (node->isHTMLElement()) {  /*SAMSUNG FIX*/
         WTF::Vector<WebCore::HTMLFormControlElement*>& elements =
         		((WebCore::HTMLFormElement*)node)->formElements;
         size_t size = elements.size();
@@ -1459,6 +1462,7 @@ static jobjectArray GetUsernamePassword(JNIEnv *env, jobject obj)
                     username = input->value();
                 if (!username.isNull() && !password.isNull())
                     found = true;
+                }
             }
         }
         node = form->nextItem();
@@ -1490,6 +1494,7 @@ static void SetUsernamePassword(JNIEnv *env, jobject obj,
     WebCore::Node* node = form->firstItem();
     while (node && !found && !node->namespaceURI().isNull() &&
            !node->namespaceURI().isEmpty()) {
+        if (node->isHTMLElement()) {  /*SAMSUNG FIX*/
         WTF::Vector<WebCore::HTMLFormControlElement*>& elements =
         		((WebCore::HTMLFormElement*)node)->formElements;
         size_t size = elements.size();
@@ -1505,6 +1510,7 @@ static void SetUsernamePassword(JNIEnv *env, jobject obj,
                     usernameEle = input;
                 if (usernameEle != NULL && passwordEle != NULL)
                     found = true;
+                }
             }
         }
         node = form->nextItem();
@@ -1541,6 +1547,7 @@ static jobject GetFormTextData(JNIEnv *env, jobject obj)
         for (WebCore::Node* node = collection->firstItem();
              node && !node->namespaceURI().isNull() && !node->namespaceURI().isEmpty();
              node = collection->nextItem()) {
+            if (node->isHTMLElement()) {  /*SAMSUNG FIX*/
             form = static_cast<WebCore::HTMLFormElement*>(node);
             if (form->autoComplete()) {
                 WTF::Vector<WebCore::HTMLFormControlElement*> elements = form->formElements;
@@ -1561,6 +1568,7 @@ static jobject GetFormTextData(JNIEnv *env, jobject obj)
                                 env->CallObjectMethod(hashMap, put, key, val);
                                 env->DeleteLocalRef(key);
                                 env->DeleteLocalRef(val);
+                            }
                             }
                         }
                     }

@@ -216,6 +216,10 @@ static void initializeSupportedNonImageMimeTypes()
 #if ENABLE(WML)
         "text/vnd.wap.wml",
         "application/vnd.wap.wmlc",
+#if ENABLE(WMLSCRIPT)
+        "text/vnd.wap.wmlscript",
+        "text/vnd.wap.wmlsc",
+#endif
 #endif
         "text/html",
         "text/xml",

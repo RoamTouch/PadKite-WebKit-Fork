@@ -28,10 +28,17 @@
 
 #if ENABLE(WML)
 #include "WMLElement.h"
+#if ENABLE(WMLSCRIPT)
+#include "CachedWMLScript.h"
+#endif
 
 namespace WebCore {
 
-class WMLAElement : public WMLElement {
+class WMLAElement : public WMLElement 
+#if ENABLE(WMLSCRIPT)
+    ,public WMLScriptLoader
+#endif
+{
 public:
     WMLAElement(const QualifiedName& tagName, Document*);
 

@@ -260,7 +260,7 @@ void RenderThemeAndroid::adjustTextAreaStyle(CSSStyleSelector*, RenderStyle* sty
 
 bool RenderThemeAndroid::paintTextArea(RenderObject* obj, const RenderObject::PaintInfo& info, const IntRect& rect)
 {
-    if (!obj->isListBox())
+    if (!obj->isListBox() && !obj->isMenuList()/*SAMSUNG WML FIX*/)
         return true;
 
     paintCombo(obj, info, rect);
@@ -271,7 +271,11 @@ bool RenderThemeAndroid::paintTextArea(RenderObject* obj, const RenderObject::Pa
     if (!node || !node->hasTagName(HTMLNames::selectTag))
         return true;
 
+#if ENABLE(WML)
+    SelectElement* select = toSelectElement(static_cast<Element*>(node));
+#else
     HTMLSelectElement* select = static_cast<HTMLSelectElement*>(node);
+#endif
     // The first item may be visible.  Make sure it does not draw.
     // If it has a style, it overrides the RenderListBox's style, so we
     // need to make sure both are set to transparent.
@@ -292,7 +296,11 @@ bool RenderThemeAndroid::paintTextArea(RenderObject* obj, const RenderObject::Pa
     if (!node || !node->hasTagName(HTMLNames::optionTag))
         return true;
 
+#if ENABLE(WML)
+    OptionElement* option = toOptionElement(static_cast<Element*>(node));
+#else
     HTMLOptionElement* option = static_cast<HTMLOptionElement*>(node);
+#endif
     String label = option->textIndentedToRespectGroupLabel();
     SkRect r(rect);
 

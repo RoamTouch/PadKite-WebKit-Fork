@@ -128,6 +128,8 @@ public:
     void clearTruncation();
 
     void adjustRectForColumns(IntRect&) const;
+    //Samsung - patch from r54784
+    virtual void adjustForColumns(IntSize&, const IntPoint&) const;
 
     void addContinuationWithOutline(RenderInline*);
 

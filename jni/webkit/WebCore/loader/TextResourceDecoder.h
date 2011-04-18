@@ -66,8 +66,11 @@ public:
 private:
     TextResourceDecoder(const String& mimeType, const TextEncoding& defaultEncoding,
                         bool usesEncodingDetector);
-
+#if ENABLE(WML) //SAMSUNG_WML_FIX
+    enum ContentType { PlainText, HTML, XML, CSS, WML };
+#else
     enum ContentType { PlainText, HTML, XML, CSS }; // PlainText only checks for BOM.
+#endif    
     static ContentType determineContentType(const String& mimeType);
     static const TextEncoding& defaultEncoding(ContentType, const TextEncoding& defaultEncoding);
 

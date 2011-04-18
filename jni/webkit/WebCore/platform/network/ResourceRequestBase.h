@@ -119,7 +119,10 @@ namespace WebCore {
 
         FormData* httpBody() const;
         void setHTTPBody(PassRefPtr<FormData> httpBody);
-        
+#ifdef SAMSUNG_ANDROID_FORCE_HTML
+        bool forceHTML() const { return m_forceHTML; }
+        void setForceHTML(bool force) { m_forceHTML = force; }
+#endif
         bool allowCookies() const;
         void setAllowCookies(bool allowCookies);
 
@@ -141,6 +144,9 @@ namespace WebCore {
             , m_platformRequestUpdated(true)
             , m_reportUploadProgress(false)
             , m_targetType(TargetIsSubresource)
+#ifdef SAMSUNG_ANDROID_FORCE_HTML
+            , m_forceHTML(false)
+#endif
         {
         }
 
@@ -154,6 +160,10 @@ namespace WebCore {
             , m_platformRequestUpdated(false)
             , m_reportUploadProgress(false)
             , m_targetType(TargetIsSubresource)
+#ifdef SAMSUNG_ANDROID_FORCE_HTML
+            , m_forceHTML(false)
+#endif
+
         {
         }
 
@@ -174,6 +184,9 @@ namespace WebCore {
         mutable bool m_platformRequestUpdated;
         bool m_reportUploadProgress;
         TargetType m_targetType;
+#ifdef SAMSUNG_ANDROID_FORCE_HTML
+        bool m_forceHTML;
+#endif
 
     private:
         const ResourceRequest& asResourceRequest() const;

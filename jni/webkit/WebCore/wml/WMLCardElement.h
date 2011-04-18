@@ -25,13 +25,20 @@
 #include "WMLEventHandlingElement.h"
 
 #include <wtf/Vector.h>
+#if ENABLE(WMLSCRIPT)
+#include "CachedWMLScript.h"
+#endif
 
 namespace WebCore {
 
 class WMLTemplateElement;
 class WMLTimerElement;
 
-class WMLCardElement : public WMLElement, public WMLEventHandlingElement {
+class WMLCardElement : public WMLElement, public WMLEventHandlingElement 
+#if ENABLE(WMLSCRIPT)
+    ,public WMLScriptLoader
+#endif
+{
 public:
     WMLCardElement(const QualifiedName&, Document*);
     virtual ~WMLCardElement();

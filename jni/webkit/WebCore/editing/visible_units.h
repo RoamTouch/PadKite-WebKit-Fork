@@ -56,6 +56,7 @@ bool inSameLine(const VisiblePosition &, const VisiblePosition &);
 bool inSameLogicalLine(const VisiblePosition &, const VisiblePosition &);
 bool isStartOfLine(const VisiblePosition &);
 bool isEndOfLine(const VisiblePosition &);
+bool isStartOfSpace(const VisiblePosition &); //SAMSUNG CHANGE
 VisiblePosition logicalStartOfLine(const VisiblePosition &);
 VisiblePosition logicalEndOfLine(const VisiblePosition &);
 

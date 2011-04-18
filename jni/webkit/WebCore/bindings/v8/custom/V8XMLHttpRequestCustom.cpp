@@ -143,7 +143,11 @@ v8::Handle<v8::Value> V8XMLHttpRequest::sendCallback(const v8::Arguments& args)
         xmlHttpRequest->send(ec);
     else {
         v8::Handle<v8::Value> arg = args[0];
-        if (IsDocumentType(arg)) {
+        //SAMSUNG FIX GA0100085645- mobile.twitter.com favourite tweet issue - begin
+        if (arg->IsNull() || arg->IsUndefined()) {
+            xmlHttpRequest->send(ec);
+        //SAMSUNG FIX - end
+        } else if (IsDocumentType(arg)) {
             v8::Handle<v8::Object> object = v8::Handle<v8::Object>::Cast(arg);
             Document* document = V8Document::toNative(object);
             ASSERT(document);

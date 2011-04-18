@@ -61,4 +61,27 @@ PassRefPtr<Text> CDATASection::virtualCreate(const String& data)
     return create(document(), data);
 }
 
+#if ENABLE(WML)
+// SAMSUNG_WML_FIXES+
+// We don't want to do variable substitution for text inside contained in a CDATA.
+// http://spe.mobilephone.net/wit/wmlv2/strucgen.wml
+void CDATASection::attach()
+{
+
+    if (document()->isWMLDocument() && !containsOnlyWhitespace()) {
+        String text = data();
+        ASSERT(!text.isEmpty());
+        ExceptionCode code = 0;
+        setData(text, code);
+        ASSERT(!code);
+    }
+
+
+    createRendererIfNeeded();
+    CharacterData::attach();
+}
+// SAMSUNG_WML_FIXES-
+#endif
+
+
 } // namespace WebCore

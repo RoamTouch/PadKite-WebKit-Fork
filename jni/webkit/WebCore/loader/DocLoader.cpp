@@ -45,6 +45,12 @@
 #include "SecurityOrigin.h"
 #include "Settings.h"
 
+#if ENABLE(WML) && ENABLE(WMLSCRIPT)
+#include "CachedWMLScript.h"
+#include "WMLDocument.h"
+#include "WMLScriptInterface.h"
+#endif
+
 #define PRELOAD_DEBUG 0
 
 namespace WebCore {
@@ -162,6 +168,17 @@ CachedScript* DocLoader::requestScript(const String& url, const String& charset)
     return static_cast<CachedScript*>(requestResource(CachedResource::Script, url, charset));
 }
 
+#if ENABLE(WML) && ENABLE(WMLSCRIPT)
+CachedWMLScript* DocLoader::requestWMLScript(const String& url, const String& charset)
+{
+    CachedWMLScript *cachedScript = 0 ;
+    if( frame()->document()->isWMLDocument()) {
+        WMLDocument *document = static_cast<WMLDocument*>(doc()) ;
+        cachedScript = static_cast<CachedWMLScript*>(requestResource(CachedResource::WmlScript, url, charset));
+    }
+    return cachedScript;
+}
+#endif
 #if ENABLE(XSLT)
 CachedXSLStyleSheet* DocLoader::requestXSLStyleSheet(const String& url)
 {
@@ -185,6 +202,9 @@ bool DocLoader::canRequest(CachedResource::Type type, const KURL& url)
     case CachedResource::ImageResource:
     case CachedResource::CSSStyleSheet:
     case CachedResource::Script:
+#if ENABLE(WML) && ENABLE(WMLSCRIPT)
+    case CachedResource::WmlScript:
+#endif
     case CachedResource::FontResource:
         // These types of resources can be loaded from any origin.
         // FIXME: Are we sure about CachedResource::FontResource?

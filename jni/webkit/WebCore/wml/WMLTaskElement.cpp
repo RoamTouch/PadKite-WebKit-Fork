@@ -110,8 +110,13 @@ void WMLTaskElement::storeVariableState(WMLPageState* pageState)
         // name value pair in the page state, as the whole page state is replaced soon by this new map
         pageState->storeVariable(name, value);
     }
-
-    pageState->storeVariables(variables);
+    // SAMSUNG_WML_FIXES+
+    // http://spe.mobilephone.net/wit/wmlv2/strucvar.wml
+    // [0] In the go task we set a variable and go to another card.
+    // [1] On the second card we have a refresh element. and we call  storeVariableState for intresic event and overwrite the variable set in [0]
+    // [2] So do not overwrite with the new map.
+    // pageState->storeVariables(variables);
+    // SAMSUNG_WML_FIXES-
 }
 
 }

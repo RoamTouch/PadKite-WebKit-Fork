@@ -394,7 +394,14 @@ void SelectText::drawSelectionPointer(SkCanvas* canvas)
     if (m_extendSelection)
         getSelectionCaret(&path);
     else
-        getSelectionArrow(&path);
+    {
+    	// P1TF_BEGIN
+      	// Commenting the below to avoid creation of arrow cursor when 'Select text' option is clicked.
+      	//  getSelectionArrow(&path);
+    	// If its not extended selection, do nothing, just return
+    	return;
+    	// P1TF_END
+    }  
     SkPaint paint;
     paint.setAntiAlias(true);
     paint.setStyle(SkPaint::kStroke_Style);

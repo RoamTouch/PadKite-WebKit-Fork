@@ -149,6 +149,11 @@ public:
 
 #if ENABLE(CONTEXT_MENUS)
     bool sendContextMenuEvent(const PlatformMouseEvent&);
+    //SAMSUNG CHANGE >>
+    //SAMSUNG CHANGE BEGIN : ADVANCED_COPY_PASTE
+    bool sendContextMenuEventForWordSelection(const PlatformMouseEvent&, bool longClick);
+    //SAMSUNG CHANGE END : ADVANCED_COPY_PASTE
+    //SAMSUNG CHANGE <<
 #endif
 
     void setMouseDownMayStartAutoscroll() { m_mouseDownMayStartAutoscroll = true; }

@@ -354,6 +354,51 @@ IntRect Frame::firstRectForRange(Range* range) const
                    startCaretRect.height());
 }
 
+/* SAMSUNG CHANGE - Advanced Copy paste feature: Begin */
+IntRect Frame::lastRectForRange(Range* range) const
+{
+    ExceptionCode ec = 0;
+    int extraWidthToEndOfLine = 0;
+    ASSERT(range->startContainer(ec));
+    ASSERT(range->endContainer(ec));
+
+    InlineBox* startInlineBox;
+    int startCaretOffset;
+    range->startPosition().getInlineBoxAndOffset(DOWNSTREAM, startInlineBox, startCaretOffset);
+
+    RenderObject* startRenderer = range->startContainer(ec)->renderer();
+    IntRect startCaretRect = startRenderer->localCaretRect(startInlineBox, startCaretOffset, &extraWidthToEndOfLine);
+    if (startCaretRect != IntRect())
+        startCaretRect = startRenderer->localToAbsoluteQuad(FloatRect(startCaretRect)).enclosingBoundingBox();
+
+	
+    InlineBox* endInlineBox;
+    int endCaretOffset;
+    range->endPosition().getInlineBoxAndOffset(UPSTREAM, endInlineBox, endCaretOffset);	
+    RenderObject* endRenderer = range->endContainer(ec)->renderer();
+    if (!endRenderer)
+		return WebCore::IntRect();
+	
+    IntRect endCaretRect = endRenderer->localCaretRect(endInlineBox, endCaretOffset);
+    if (endCaretRect != IntRect())
+        endCaretRect = endRenderer->localToAbsoluteQuad(FloatRect(endCaretRect)).enclosingBoundingBox();
+
+
+    if (startCaretRect.y() == endCaretRect.y()) {
+        // start and end are on the same line
+        return IntRect(max(startCaretRect.x(), endCaretRect.x()),
+                       endCaretRect.y(),
+                       endCaretRect.width(),
+                       max(startCaretRect.height(), endCaretRect.height()));
+    }
+
+    return IntRect(endCaretRect.x(), 
+                   endCaretRect.y(),
+                   endCaretRect.width(),
+                   endCaretRect.height());
+}
+/* SAMSUNG CHANGE - Advanced Copy paste feature: End */
+
 SelectionController* Frame::selection() const
 {
     return &m_selectionController;

@@ -27,6 +27,10 @@
 #include "CachedFont.h"
 #include "CachedImage.h"
 #include "CachedScript.h"
+#if ENABLE(WML) && ENABLE(WMLSCRIPT)
+#include "WMLDocument.h"
+#include "CachedWMLScript.h"
+#endif
 #include "CachedXSLStyleSheet.h"
 #include "DocLoader.h"
 #include "Document.h"
@@ -76,6 +80,10 @@ static CachedResource* createResource(CachedResource::Type type, const KURL& url
         return new CachedCSSStyleSheet(url.string(), charset);
     case CachedResource::Script:
         return new CachedScript(url.string(), charset);
+#if ENABLE(WML) && ENABLE(WMLSCRIPT)
+    case CachedResource::WmlScript:
+        return new CachedWMLScript(url.string(), charset);
+#endif
     case CachedResource::FontResource:
         return new CachedFont(url.string());
 #if ENABLE(XSLT)

@@ -25,6 +25,7 @@
 
 #define LOG_TAG "webcoreglue"
 
+
 #include "config.h"
 #include "WebViewCore.h"
 
@@ -59,6 +60,7 @@
 #include "HTMLImageElement.h"
 #include "HTMLInputElement.h"
 #include "HTMLLabelElement.h"
+#include "HTMLLinkElement.h"
 #include "HTMLMapElement.h"
 #include "HTMLNames.h"
 #include "HTMLOptGroupElement.h"
@@ -67,6 +69,11 @@
 #include "HTMLTextAreaElement.h"
 #include "HistoryItem.h"
 #include "HitTestResult.h"
+#if ENABLE(WML)
+#include "WMLOptGroupElement.h"
+#include "WMLOptionElement.h"
+#include "WMLSelectElement.h"
+#endif
 #include "InlineTextBox.h"
 #include "KeyboardCodes.h"
 #include "markup.h" //RoamTouch Change
@@ -141,6 +148,12 @@ FILE* gRenderTreeFile = 0;
 #include "GraphicsLayerAndroid.h"
 #include "RenderLayerCompositor.h"
 #endif
+
+//SAMSUNG CHANGE BEGIN : ADVANCED_COPY_PASTE
+//#include <FrameView.h>
+#include <visible_units.h>
+//SAMSUNG CHANGE END : ADVANCED_COPY_PASTE
+
 
 /*  We pass this flag when recording the actual content, so that we don't spend
     time actually regionizing complex path clips, when all we really want to do
@@ -257,7 +270,8 @@ struct WebViewCore::JavaGlue {
     jmethodID   m_setScrollbarModes;
     //ROAMTOUCH CHANGE
     jmethodID   m_updateClipboard;
-
+    jmethodID   m_sendOrientationChangeEvent; //SAMSUNG FIX
+    jmethodID   m_HttpEquivhandle; //SAMSUNG CHANGE
     AutoJObject object(JNIEnv* env) {
         return getRealObject(env, m_obj);
     }
@@ -310,9 +324,11 @@ WebViewCore::WebViewCore(JNIEnv* env, jobject javaWebViewCore, WebCore::Frame* m
     m_javaGlue->m_scrollTo = GetJMethod(env, clazz, "contentScrollTo", "(II)V");
     m_javaGlue->m_scrollBy = GetJMethod(env, clazz, "contentScrollBy", "(IIZ)V");
     m_javaGlue->m_contentDraw = GetJMethod(env, clazz, "contentDraw", "()V");
-    m_javaGlue->m_requestListBox = GetJMethod(env, clazz, "requestListBox", "([Ljava/lang/String;[I[I)V");
+    //SAMSUNG CHANGE
+    m_javaGlue->m_requestListBox = GetJMethod(env, clazz, "requestListBox", "([Ljava/lang/String;Ljava/lang/String;[I[II)V");
     m_javaGlue->m_openFileChooser = GetJMethod(env, clazz, "openFileChooser", "()Ljava/lang/String;");
-    m_javaGlue->m_requestSingleListBox = GetJMethod(env, clazz, "requestListBox", "([Ljava/lang/String;[II)V");
+    //SAMSUNG CHANGE
+    m_javaGlue->m_requestSingleListBox = GetJMethod(env, clazz, "requestListBox", "([Ljava/lang/String;Ljava/lang/String;[III)V");
     m_javaGlue->m_jsAlert = GetJMethod(env, clazz, "jsAlert", "(Ljava/lang/String;Ljava/lang/String;)V");
     m_javaGlue->m_jsConfirm = GetJMethod(env, clazz, "jsConfirm", "(Ljava/lang/String;Ljava/lang/String;)Z");
     m_javaGlue->m_jsPrompt = GetJMethod(env, clazz, "jsPrompt", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
@@ -346,12 +362,15 @@ WebViewCore::WebViewCore(JNIEnv* env, jobject javaWebViewCore, WebCore::Frame* m
     m_javaGlue->m_destroySurface = GetJMethod(env, clazz, "destroySurface", "(Lroamtouch/webkit/ViewManager$ChildView;)V");
     m_javaGlue->m_getContext = GetJMethod(env, clazz, "getContext", "()Landroid/content/Context;");
     m_javaGlue->m_sendFindAgain = GetJMethod(env, clazz, "sendFindAgain", "()V");
-    m_javaGlue->m_showRect = GetJMethod(env, clazz, "showRect", "(IIIIIIFFFF)V");
+//SAMSUNG CHANGES+
+	m_javaGlue->m_showRect = GetJMethod(env, clazz, "showRect", "(IIIIIIFFFFZIIII)V");
+//SAMSUNG CHANGES-
     m_javaGlue->m_centerFitRect = GetJMethod(env, clazz, "centerFitRect", "(IIII)V");
     m_javaGlue->m_setScrollbarModes = GetJMethod(env, clazz, "setScrollbarModes", "(II)V");
     //ROAMTOUCH CHANGE
     m_javaGlue->m_updateClipboard = GetJMethod(env, clazz, "updateClipboard", "(Ljava/lang/String;)V");
-
+    m_javaGlue->m_sendOrientationChangeEvent = GetJMethod(env, clazz, "sendOrientationChangeEvent", "()V"); //SAMSUNG FIX
+    m_javaGlue->m_HttpEquivhandle = GetJMethod(env, clazz, "HttpEquivhandle", "(Ljava/lang/String;)V"); //SAMSUNG CHANGE
     env->SetIntField(javaWebViewCore, gWebViewCoreFields.m_nativeClass, (jint)this);
 
     m_scrollOffsetX = m_scrollOffsetY = 0;
@@ -1041,6 +1060,25 @@ void WebViewCore::updateViewport()
     checkException(env);
 }
 
+//SAMSUNG CHANGES >>
+//Support for Meta Cache Tags
+void WebViewCore::HttpEquivhandle(const WebCore::String& url)
+{
+    DEBUG_NAV_UI_LOGD("%s", __FUNCTION__);
+    LOG_ASSERT(m_javaGlue->m_obj, "HttpEquivhandle");
+    JNIEnv* env = JSC::Bindings::getJNIEnv();
+    AutoJObject obj = m_javaGlue->object(env);
+    // if it is called during DESTROY is handled, the real object of WebViewCore
+    // can be gone. Check before using it.
+    if (!obj.get())
+        return;
+    jstring jUrlStr = env->NewString((unsigned short *)url.characters(), url.length());
+    env->CallVoidMethod(obj.get(), m_javaGlue->m_HttpEquivhandle, jUrlStr);
+    env->DeleteLocalRef(jUrlStr);
+    checkException(env);
+}
+//SAMSUNG CHANGES << 
+
 void WebViewCore::restoreScale(int scale)
 {
     DEBUG_NAV_UI_LOGD("%s", __FUNCTION__);
@@ -1168,9 +1206,307 @@ void WebViewCore::setGlobalBounds(int x, int y, int h, int v)
     m_mainFrame->view()->platformWidget()->setWindowBounds(x, y, h, v);
 }
 
+//SAMSUNG CHANGES+
+
+#define DEBUG_ZOOM_COORDS 1
+
+#ifdef DEBUG_ZOOM_COORDS
+int zoomSearchRect[4]; // x, y, w, h
+int zoomCenter[2];     // x, y
+int zoomNodeBounds[4]; // x, y, w, h
+#endif
+
+static WebCore::Node* findBestNode(WebCore::Node *rootNode, WebCore::IntRect& rect, int anchorX, int anchorY, WebCore::Node *startNode, WebCore::IntRect *groupRect) {
+    WTF::Vector<WebCore::Node*> stack; // don't recurse on C stack to avoid stack overflow and crash.
+    stack.append(rootNode);
+    const int rectArea = rect.width() * rect.height();
+    float constK = (float)rect.width() * (float)rect.height() / (32.0 * 32.0) + 1.0; // to ensure no div by zero
+    float bestNodeWeight = 0;
+    WebCore::Node *best = NULL;
+    WebCore::IntRect bestVisibleBounds;
+    bool hasGroup=false;
+
+	int left=groupRect->x(), right=groupRect->right(), top=groupRect->y(), bottom=groupRect->bottom();
+    while (stack.size() > 0) {
+        WebCore::Node *node = stack.last();
+        stack.removeLast();
+        for (Node* child = node->firstChild(); child; child=child->nextSibling()) {
+            stack.append(child);
+        }
+
+        WebCore::IntRect bounds = node->getRect();
+        if(groupRect->width()>=0 && groupRect->height() >=0){
+        	if((abs(bounds.x()-groupRect->x())<textPadding &&
+        			abs(bounds.y()-groupRect->y()-groupRect->height())<maxTextHeight/2) ||
+        			(bounds.width()<8*textPadding &&
+        			(abs(bounds.x()-right)<textPadding || abs(bounds.right()-left)<textPadding) &&
+        			abs(bounds.y()-groupRect->y())<textPadding/2)){
+        		DBG_NAV_LOGD("bounds: x=%d y=%d right=%d bottom=%d",
+                             bounds.x(), bounds.y(), bounds.right(), bounds.bottom());
+                DBG_NAV_LOGD("old group dimension, left=%d, top=%d, right=%d, bottom=%d", left, top, right, bottom);
+
+				if(bounds.x()<left){
+					left=bounds.x();
+				}
+				if(bounds.y()<top){
+					top=bounds.y();
+				}
+
+				if(bounds.right()>right){
+					right=bounds.right();
+				}
+
+				if(bounds.bottom()>bottom){
+					bottom=bounds.bottom();
+				}
+				hasGroup=true;
+        	}
+        }//group width and height >= 0
+        if(hasGroup)
+        	continue;
+        if (rect.y() + rect.height() < bounds.y()) {
+            // This for sure will not intersect with the rect
+            continue;
+        } else {
+            // Some children of this node may be outside of the right or bottom
+            // bounds of the node, so we must keep going.
+        }
+
+        if (bounds.intersects(rect)) {
+            bool useit = !node->isContainerNode();
+            if (!useit) {
+                Element* element = static_cast<Element*>(node);
+                useit =
+                    element->hasTagName(HTMLNames::areaTag) ||
+                    element->hasTagName(HTMLNames::imgTag) ||
+                    element->hasTagName(HTMLNames::inputTag) ||
+                    element->hasTagName(HTMLNames::textareaTag) ||
+                    element->hasTagName(HTMLNames::selectTag) ||
+                    element->hasTagName(HTMLNames::buttonTag);
+            }
+
+            if (useit) {
+                DBG_NAV_LOGD("node = %p: x=%d y=%d w=%d h=%d", node,
+                             bounds.x(), bounds.y(), bounds.width(), bounds.height());
+                WebCore::IntRect i = intersection(rect, bounds);
+                int iCenterX = i.x() + i.width() / 2;
+                int iCenterY = i.y() + i.height() / 2;
+
+                float intsSize = (float)i.width() * (float)i.height();
+                float diffX = (float)(iCenterX - anchorX);
+                float diffY = (float)(iCenterY - anchorY);
+                float distPlusK = constK + diffX * diffX + diffY * diffY;
+
+                float nodeWeight = intsSize / distPlusK;
+
+                bool better = false;
+
+                if (best == NULL) {
+                    better = true;
+                } else if (nodeWeight > bestNodeWeight) {
+                    better = true;
+                } else if (bestVisibleBounds.contains(i) && (i.width() * i.height() > (rectArea / 32))) {
+                    // We are going from a container to a child that's not too small. Use the child instead.
+                    better = true;
+                }
+
+                if (better) {
+                    DBG_NAV_LOGD("BEST -> weight = %f -> %f", (double)bestNodeWeight, (double)nodeWeight);
+                    best = node;
+                    bestNodeWeight = nodeWeight;
+                    bestVisibleBounds = i;
+                } else {
+                    DBG_NAV_LOGD("HIT -> weight = %f", (double)nodeWeight);
+                }
+            }
+        } else {
+            // Some children of this node may be outside of the right or bottom
+            // bounds of the node, so we must go through the loop below ...
+        }
+
+
+    }
+//	DBG_NAV_LOGD("new group dimension, left=%d, top=%d, right=%d, bottom=%d", left, top, right, bottom);
+    if(hasGroup){
+		groupRect->setX(left);
+		groupRect->setY(top);
+		groupRect->setWidth(right-left);
+		groupRect->setHeight(bottom-top);
+	//    DBG_NAV_LOGD("group dimensions: x=%d y=%d right=%d bottom=%d",
+	//                 groupRect->x(), groupRect->y(), groupRect->right(), groupRect->bottom());
+
+		if(groupRect->height()>maxTextHeight){
+			groupRect->setY(startNode->getRect().bottom()-maxTextHeight/2);
+			groupRect->setHeight(maxTextHeight);
+		}
+		best=NULL;
+    }else{
+    	groupRect->setX(0);
+    	groupRect->setY(0);
+    	groupRect->setWidth(0);
+    	groupRect->setHeight(0);
+    }
+    return best;
+}
+
+static WebCore::Node* findBestNode(WebCore::Node *startNode, int anchorX, int anchorY,
+                                   int viewportLeft, int viewportTop,
+                                   int screenWidth, int screenHeight, WebCore::IntRect *groupRect) {
+    WebCore::Node *doc, *best = NULL;
+    for (doc = startNode; doc && !doc->isDocumentNode(); doc=doc->parentNode()) {
+        ;
+    }
+    WebCore::IntRect rect(viewportLeft, viewportTop, screenWidth, screenHeight);
+
+#ifdef DEBUG_ZOOM_COORDS
+    zoomSearchRect[0] = rect.x();
+    zoomSearchRect[1] = rect.y();
+    zoomSearchRect[2] = rect.width();
+    zoomSearchRect[3] = rect.height();
+#endif
+
+    if (doc == NULL) {
+        best = startNode;
+    } else {
+        best = findBestNode(doc, rect, anchorX, anchorY, startNode, groupRect);
+        if (best == NULL) {
+            best = startNode;
+        }
+
+    }
+
+    if (best != startNode) {
+        DBG_NAV_LOGD("*********** OVERRIDE NODE %dx%d => %dx%d", startNode->getRect().width(),
+                     startNode->getRect().height(), best->getRect().width(), best->getRect().height());
+    }
+#ifdef DEBUG_ZOOM_COORDS
+    zoomCenter[0] = anchorX;
+    zoomCenter[1] = anchorY;
+
+    zoomNodeBounds[0] = best->getRect().x();
+    zoomNodeBounds[1] = best->getRect().y();
+    zoomNodeBounds[2] = best->getRect().width();
+    zoomNodeBounds[3] = best->getRect().height();
+#endif
+
+    return best;
+}
+
+
+void WebViewCore::getBestBlockRect(WebCore::IntRect* nodeBounds, int width, int height,
+		int screenWidth, float scale, int realScreenWidth, int screenHeight,
+		int anchorX, int anchorY, bool ignoreHeight,
+		bool needAnchorDiff, int viewportLeft, int viewportTop)
+{
+	DBG_NAV_LOGD("%s, screenWidth=%d", "getBestBlockRect", screenWidth);
+	WebCore::IntRect groupRect(0,0,0,0);
+	nodeBounds->setX(0);
+	nodeBounds->setY(0);
+	nodeBounds->setWidth(0);
+	nodeBounds->setHeight(0);
+	WebCore::Node* node = 0;
+	WebCore::IntPoint anchorPoint;
+	anchorPoint = WebCore::IntPoint(anchorX, anchorY);
+	if(m_mainFrame->loader()->isLoading()){
+//		DBG_NAV_LOG("IS still loading");
+		return;
+	}
+	WebCore::HitTestResult hitTestResult =
+			m_mainFrame->eventHandler()-> hitTestResultAtPoint(
+					anchorPoint, false, true);
+	node = hitTestResult.innerNode();
+	// sites like nytimes.com insert a non-standard tag <nyt_text>
+	// in the html. If it is the HitTestResult, it may have zero
+	// width and height. In this case, use its parent node.
+	if(node)
+		DBG_NAV_LOGD("node check, width=%d, height=%d", node->getRect().width(), node->getRect().height() == 0);
+	if(node && (node->getRect().width() == 0 || node->getRect().height() == 0))
+		node = node->parent();
+	if (node){
+		WebCore::IntRect bounds=getRenderBlockBounds(node);
+		DBG_NAV_LOG("node is not null from hitTestResult");
+		DBG_NAV_LOGD("bounds(x=%d, y=%d)",bounds.x(),bounds.y());
+		WebCore::Node* bestNode = 0;
+		if (bounds.width()<minTextWidth || bounds.height()<minTextHeight || (bounds.x()==0 && bounds.y()==0 && bounds.width()>=realScreenWidth && bounds.height()>=screenHeight)){
+			groupRect.setX(bounds.x());
+			groupRect.setY(bounds.y());
+			groupRect.setHeight(bounds.height());
+			groupRect.setWidth(bounds.width());
+			bestNode = findBestNode(node, anchorX, anchorY, viewportLeft,
+					viewportTop, realScreenWidth, screenHeight, &groupRect);
+			if(!node->isEqualNode(bestNode)){
+				node = bestNode;
+				bounds=getRenderBlockBounds(node);
+			}
+		}
+		DBG_NAV_LOGD("(x=%d,y=%d),groupWidth=%d, groupHeight=%d",groupRect.x(),groupRect.y(),groupRect.width(), groupRect.height());
+		if(groupRect.width()>0 && groupRect.height()>0){
+			nodeBounds->setX(groupRect.x());
+			nodeBounds->setY(groupRect.y());
+			nodeBounds->setWidth(groupRect.width());
+			nodeBounds->setHeight(groupRect.height());
+		}else if (node){
+			bool isImageNode=0;
+			if(node->isContainerNode()){
+				Element* element = static_cast<Element*>(node);
+				isImageNode=element->hasTagName(HTMLNames::imgTag);
+			}
+			if(!isImageNode ){
+				int textVolume=(anchorY-bounds.y())/maxTextHeight;
+				nodeBounds->setY(bounds.y()+textVolume*maxTextHeight);
+				nodeBounds->setHeight(bounds.height()>maxTextHeight?maxTextHeight:bounds.height());
+			}else{
+				nodeBounds->setY(bounds.y());
+				nodeBounds->setHeight(bounds.height());
+			}
+			nodeBounds->setX(bounds.x());
+			nodeBounds->setWidth(bounds.width());
+		}
+	}
+}
+//SAMSUNG CHANGES-
+
+
+
+void WebViewCore::updatePlugins( int mode, int viewleft, int viewtop, int viewright, int viewbottom, float scale, int anchorX, int anchorY )
+{
+
+	//LOGD( "updatePlugins %d %d %d %d %f", left, top, right, bottom, scale );
+
+    //ANPRectI visibleRect;
+    //visibleRect.left = left;
+    //visibleRect.top = top;
+    //visibleRect.right = right;
+    //visibleRect.bottom = bottom;
+
+    PluginWidgetAndroid** iter = m_plugins.begin();
+    PluginWidgetAndroid** stop = m_plugins.end();
+
+
+        //ANPEvent event;
+        //SkANP::InitEvent(&event, kLifecycle_ANPEventType);
+		
+        //event.data.lifecycle.action = kOffScreen_ANPLifecycleAction;
+
+	
+
+	
+    for (; iter < stop; ++iter) {
+        //(*iter)->sendEvent(event);//setVisibleScreen(visibleRect, scale);
+        if( mode == 0 )
+        	(*iter)->pluginView()->hide();
+	else
+		(*iter)->pluginView()->show();
+    }
+
+}
+
 void WebViewCore::setSizeScreenWidthAndScale(int width, int height,
     int screenWidth, float scale, int realScreenWidth, int screenHeight,
-    int anchorX, int anchorY, bool ignoreHeight)
+    int anchorX, int anchorY, bool ignoreHeight,
+//SAMSUNG CHANGES+
+	bool needAnchorDiff, int viewportLeft, int viewportTop)
+//SAMSUNG CHANGES-
 {
     WebCoreViewBridge* window = m_mainFrame->view()->platformWidget();
     int ow = window->width();
@@ -1179,6 +1515,13 @@ void WebViewCore::setSizeScreenWidthAndScale(int width, int height,
     int osw = m_screenWidth;
     int orsw = m_screenWidth * m_screenWidthScale / m_scale;
     int osh = m_screenHeight;
+//SAMSUNG CHANGES+
+	int oldAnchorX = 0;
+	int oldAnchorY = 0;
+	int newAnchorX = 0;
+	int newAnchorY = 0;
+//SAMSUNG CHANGES-
+
     DBG_NAV_LOGD("old:(w=%d,h=%d,sw=%d,scale=%g) new:(w=%d,h=%d,sw=%d,scale=%g)",
         ow, oh, osw, m_scale, width, height, screenWidth, scale);
     m_screenWidth = screenWidth;
@@ -1194,8 +1537,10 @@ void WebViewCore::setSizeScreenWidthAndScale(int width, int height,
     m_maxYScroll = (screenWidth * height / width) >> 2;
     if (ow != width || (!ignoreHeight && oh != height) || osw != screenWidth) {
         WebCore::RenderObject *r = m_mainFrame->contentRenderer();
-        DBG_NAV_LOGD("renderer=%p view=(w=%d,h=%d)", r,
-            realScreenWidth, screenHeight);
+//SAMSUNG CHANGES+
+		DBG_NAV_LOGD("renderer=%p view=(w=%d,h=%d), anchor=(%d,%d)", r,
+			realScreenWidth, screenHeight, anchorX, anchorY);
+//SAMSUNG CHANGES-
         if (r) {
             WebCore::IntPoint anchorPoint = WebCore::IntPoint(anchorX, anchorY);
             DBG_NAV_LOGD("anchorX=%d anchorY=%d", anchorX, anchorY);
@@ -1225,6 +1570,13 @@ void WebViewCore::setSizeScreenWidthAndScale(int width, int height,
                                 bounds.x(), bounds.y(), bounds.width(), bounds.height());
                     }
                 }
+//SAMSUNG CHANGES+
+				WebCore::IntRect dummyRect(-1,-1,-1,-1);
+				node = findBestNode(node, anchorX, anchorY, viewportLeft, viewportTop, realScreenWidth, screenHeight, &dummyRect);
+				bounds = node->getRect();
+				oldAnchorX = bounds.x();
+				oldAnchorY = bounds.y();
+//SAMSUNG CHANGES-
             }
             r->setNeedsLayoutAndPrefWidthsRecalc();
             m_mainFrame->view()->forceLayout();
@@ -1234,8 +1586,11 @@ void WebViewCore::setSizeScreenWidthAndScale(int width, int height,
                 DBG_NAV_LOGD("nb:(x=%d,y=%d,w=%d,"
                     "h=%d)", newBounds.x(), newBounds.y(),
                     newBounds.width(), newBounds.height());
-                if ((orsw && osh && bounds.width() && bounds.height())
-                    && (bounds != newBounds)) {
+//SAMSUNG CHANGES+
+				if (needAnchorDiff ||
+					 ((orsw && osh && bounds.width() && bounds.height())
+					  && (bounds != newBounds))) {
+//SAMSUNG CHANGES-
                     WebCore::FrameView* view = m_mainFrame->view();
                     // force left align if width is not changed while height changed.
                     // the anchorPoint is probably at some white space in the node
@@ -1249,13 +1604,26 @@ void WebViewCore::setSizeScreenWidthAndScale(int width, int height,
                         leftAlign ? 0.0 : (float) (anchorX - m_scrollOffsetX) / orsw;
                     const float yPercentInDoc = (float) (anchorY - bounds.y()) / bounds.height();
                     const float yPercentInView = (float) (anchorY - m_scrollOffsetY) / osh;
+//SAMSUNG CHANGES+
+					newAnchorX = newBounds.x();
+					newAnchorY = newBounds.y();
+//SAMSUNG CHANGES-
                     showRect(newBounds.x(), newBounds.y(), newBounds.width(),
                              newBounds.height(), view->contentsWidth(),
                              view->contentsHeight(),
                              xPercentInDoc, xPercentInView,
-                             yPercentInDoc, yPercentInView);
+                             yPercentInDoc, yPercentInView,
+//SAMSUNG CHANGES+
+                             needAnchorDiff, oldAnchorX, oldAnchorY, newAnchorX, newAnchorY);
+//SAMSUNG CHANGES-
+
                 }
             }
+            //SAMSUNG FIX GA0100087996 Facebook photo viewer orientation change issue>>
+            JNIEnv* env = JSC::Bindings::getJNIEnv();
+            env->CallVoidMethod(m_javaGlue->object(env).get(), m_javaGlue->m_sendOrientationChangeEvent);
+            checkException(env);
+            //SAMSUNG FIX <<
         }
     }
 
@@ -1912,6 +2280,16 @@ void WebViewCore::moveMouse(WebCore::Frame* frame, int x, int y)
     frame->eventHandler()->handleMouseMoveEvent(mouseEvent);
     updateCacheOnNodeChange();
 }
+//SAMSUNG CHANGE BEGIN : ADVANCED_COPY_PASTE
+WebCore::String WebViewCore::getSelectedText()
+{
+    	DEBUG_NAV_UI_LOGD("%s", __FUNCTION__);
+	WebCore::Frame* frame = m_mainFrame;
+	WebCore::String str = frame->selectedText();
+    	DEBUG_NAV_UI_LOGD("%s: End", __FUNCTION__);
+    	return str;
+}
+//SAMSUNG CHANGE END : ADVANCED_COPY_PASTE
 
 void WebViewCore::setSelection(int start, int end)
 {
@@ -1983,6 +2361,9 @@ void WebViewCore::replaceTextfieldText(int oldStart,
 void WebViewCore::passToJs(int generation, const WebCore::String& current,
     const PlatformKeyboardEvent& event)
 {
+    // SAMSUNG_FIX_GA0100080596 + 
+    m_textGeneration = generation;
+    // SAMSUNG_FIX_GA0100080596 -
     WebCore::Node* focus = currentFocus();
     if (!focus) {
         DBG_NAV_LOG("!focus");
@@ -2085,7 +2466,11 @@ static uint16_t* stringConverter(const WebCore::String& text)
 // Response to dropdown created for a listbox.
 class ListBoxReply : public WebCoreReply {
 public:
+#if ENABLE(WML)
+    ListBoxReply(WebCore::Element* select, WebCore::Frame* frame, WebViewCore* view)
+#else
     ListBoxReply(WebCore::HTMLSelectElement* select, WebCore::Frame* frame, WebViewCore* view)
+#endif    
         : m_select(select)
         , m_frame(frame)
         , m_viewImpl(view)
@@ -2106,9 +2491,15 @@ public:
             return;
         // Use a pointer to HTMLSelectElement's superclass, where
         // listToOptionIndex is public.
+#if ENABLE(WML)
+        WebCore::SelectElement* selectElement = WebCore::toSelectElement(m_select);
+        int optionIndex = selectElement->listToOptionIndex(index);
+        selectElement->setSelectedIndex(optionIndex, true);
+#else
         SelectElement* selectElement = m_select;
         int optionIndex = selectElement->listToOptionIndex(index);
         m_select->setSelectedIndex(optionIndex, true);
+#endif
         m_select->dispatchFormControlChangeEvent();
         m_viewImpl->contentInvalidate(m_select->getRect());
     }
@@ -2125,18 +2516,35 @@ public:
 
         // If count is 1 or 0, use replyInt.
         SkASSERT(count > 1);
-
+#if ENABLE(WML)
+        const WTF::Vector<Element*>& items = WebCore::toSelectElement(m_select)->listItems();
+#else
         const WTF::Vector<Element*>& items = m_select->listItems();
+#endif
         int totalItems = static_cast<int>(items.size());
         // Keep track of the position of the value we are comparing against.
         int arrayIndex = 0;
         // The value we are comparing against.
         int selection = array[arrayIndex];
+#if ENABLE(WML)
+        // SAMSUNG_WML_FIXES+
+        // http://spe.mobilephone.net/wit/wmlv2/formsubpost.wml
+        // http://spe.mobilephone.net/wit/wmlv2/formselect.wml
+        WebCore::OptionElement* option   = NULL;
+        // SAMSUNG_WML_FIXES-
+#else
         WebCore::HTMLOptionElement* option;
+#endif
         for (int listIndex = 0; listIndex < totalItems; listIndex++) {
             if (items[listIndex]->hasLocalName(WebCore::HTMLNames::optionTag)) {
+#if ENABLE(WML)
+                // SAMSUNG_WML_FIXES+
+                option = WebCore::toOptionElement(items[listIndex]);
+                // SAMSUNG_WML_FIXES-   
+#else
                 option = static_cast<WebCore::HTMLOptionElement*>(
                         items[listIndex]);
+#endif
                 if (listIndex == selection) {
                     option->setSelectedState(true);
                     arrayIndex++;
@@ -2153,7 +2561,11 @@ public:
     }
 private:
     // The select element associated with this listbox.
+#if ENABLE(WML)
+    WebCore::Element* m_select;
+#else
     WebCore::HTMLSelectElement* m_select;
+#endif
     // The frame of this select element, to verify that it is valid.
     WebCore::Frame* m_frame;
     // For calling invalidate and checking the select element's validity
@@ -2194,7 +2606,7 @@ void WebViewCore::openFileChooser(PassRefPtr<WebCore::FileChooser> chooser) {
 }
 
 void WebViewCore::listBoxRequest(WebCoreReply* reply, const uint16_t** labels, size_t count, const int enabled[], size_t enabledCount,
-        bool multiple, const int selected[], size_t selectedCountOrSelection)
+        bool multiple, const int selected[], size_t selectedCountOrSelection, const WebCore::Element * select/*SAMSUNG CHANGE*/ )
 {
     // If m_popupReply is not null, then we already have a list showing.
     if (m_popupReply != 0)
@@ -2216,7 +2628,10 @@ void WebViewCore::listBoxRequest(WebCoreReply* reply, const uint16_t** labels, s
     }
     env->ReleaseIntArrayElements(enabledArray, ptrArray, 0);
     checkException(env);
-
+	//SAMSUNG CHANGE >>
+    String nodeName = select->formControlName() ;
+    jstring jName = env->NewString((jchar*) nodeName.characters(), nodeName.length());
+	//SAMSUNG CHANGE <<
     if (multiple) {
         // Pass up an array representing which items are selected.
         jintArray selectedArray = env->NewIntArray(selectedCountOrSelection);
@@ -2229,14 +2644,14 @@ void WebViewCore::listBoxRequest(WebCoreReply* reply, const uint16_t** labels, s
         env->ReleaseIntArrayElements(selectedArray, selArray, 0);
 
         env->CallVoidMethod(m_javaGlue->object(env).get(),
-                m_javaGlue->m_requestListBox, labelArray, enabledArray,
-                selectedArray);
+                m_javaGlue->m_requestListBox, labelArray, jName/*SAMSUNG CHANGE*/, enabledArray,
+                selectedArray, (jint) select/*SAMSUNG CHANGE*/);
         env->DeleteLocalRef(selectedArray);
     } else {
         // Pass up the single selection.
         env->CallVoidMethod(m_javaGlue->object(env).get(),
-                m_javaGlue->m_requestSingleListBox, labelArray, enabledArray,
-                selectedCountOrSelection);
+                m_javaGlue->m_requestSingleListBox, labelArray, jName/*SAMSUNG CHANGE*/, enabledArray,
+                selectedCountOrSelection, (jint) select/*SAMSUNG CHANGE*/);
     }
 
     env->DeleteLocalRef(labelArray);
@@ -2396,7 +2811,12 @@ bool WebViewCore::handleMouseClick(WebCore::Frame* framePtr, WebCore::Node* node
         }
         WebCore::RenderObject* renderer = nodePtr->renderer();
         if (renderer && (renderer->isMenuList() || renderer->isListBox())) {
+#if ENABLE(WML)
+            WebCore::Element *elementPtr = static_cast<WebCore::Element*>(nodePtr) ;
+            WebCore::SelectElement* select = WebCore::toSelectElement(elementPtr);
+#else
             WebCore::HTMLSelectElement* select = static_cast<WebCore::HTMLSelectElement*>(nodePtr);
+#endif
             const WTF::Vector<WebCore::Element*>& listItems = select->listItems();
             SkTDArray<const uint16_t*> names;
             // Possible values for enabledArray.  Keep in Sync with values in
@@ -2411,6 +2831,26 @@ bool WebViewCore::handleMouseClick(WebCore::Frame* framePtr, WebCore::Node* node
             int size = listItems.size();
             bool multiple = select->multiple();
             for (int i = 0; i < size; i++) {
+#if ENABLE(WML)
+                if(WebCore::isOptionElement(listItems[i]) ){
+                    WebCore::OptionElement *op = WebCore::toOptionElement(listItems[i]);
+                    if(listItems[i]->isWMLElement()) {
+                        WebCore::WMLOptionElement* option = static_cast<WebCore::WMLOptionElement*>(listItems[i]);
+
+                        *enabledArray.append() = option->disabled() ? OPTION_DISABLED : OPTION_ENABLED;
+                    }
+                    else {
+                        WebCore::HTMLOptionElement* option = static_cast<WebCore::HTMLOptionElement*>(listItems[i]);
+
+                        *enabledArray.append() = option->disabled() ? OPTION_DISABLED : OPTION_ENABLED;
+                    }
+                    WebCore::String label = op->textIndentedToRespectGroupLabel() ;
+                    
+                    *names.append() = stringConverter(label);
+
+                    if (multiple && op->selected())
+                        *selectedArray.append() = i;
+#else
                 if (listItems[i]->hasTagName(WebCore::HTMLNames::optionTag)) {
                     WebCore::HTMLOptionElement* option = static_cast<WebCore::HTMLOptionElement*>(listItems[i]);
                     *names.append() = stringConverter(option->textIndentedToRespectGroupLabel());
@@ -2418,18 +2858,28 @@ bool WebViewCore::handleMouseClick(WebCore::Frame* framePtr, WebCore::Node* node
                     if (multiple && option->selected())
                         *selectedArray.append() = i;
                 } else if (listItems[i]->hasTagName(WebCore::HTMLNames::optgroupTag)) {
+#endif
+#if ENABLE(WML)
+                } else if ( WebCore::isOptionGroupElement(listItems[i]) ) {
+                    WebCore::OptionGroupElement* optGroup = WebCore::toOptionGroupElement(listItems[i]);
+#else
                     WebCore::HTMLOptGroupElement* optGroup = static_cast<WebCore::HTMLOptGroupElement*>(listItems[i]);
+#endif
                     *names.append() = stringConverter(optGroup->groupLabelText());
                     *enabledArray.append() = OPTGROUP;
                 }
             }
+#if ENABLE(WML)
+            WebCoreReply* reply = new ListBoxReply(elementPtr, elementPtr->document()->frame(), this);
+#else
             WebCoreReply* reply = new ListBoxReply(select, select->document()->frame(), this);
+#endif
             // Use a pointer to HTMLSelectElement's superclass, where
             // optionToListIndex is public.
             SelectElement* selectElement = select;
             listBoxRequest(reply, names.begin(), size, enabledArray.begin(), enabledArray.count(),
                     multiple, selectedArray.begin(), multiple ? selectedArray.count() :
-                    selectElement->optionToListIndex(select->selectedIndex()));
+                    selectElement->optionToListIndex(select->selectedIndex()), static_cast<WebCore::Element*>(nodePtr)/*SAMSUNG CHANGE*/);
             DBG_NAV_LOG("menu list");
             return true;
         }
@@ -2456,8 +2906,17 @@ bool WebViewCore::handleMouseClick(WebCore::Frame* framePtr, WebCore::Node* node
     if (focusNode) {
         WebCore::RenderObject* renderer = focusNode->renderer();
         if (renderer && (renderer->isTextField() || renderer->isTextArea())) {
+#if ENABLE(WML)
+            WebCore::InputElement *ie = WebCore::toInputElement(static_cast<WebCore::Element*>(focusNode));
+            bool ime = ie ? !ie->readOnly() : true ;
+#else
             bool ime = !(static_cast<WebCore::HTMLInputElement*>(focusNode))
                     ->readOnly();
+#endif
+            //SAMSUNG FIX GA0100076825 >>
+            m_frameCacheOutOfDate = true;
+            updateFrameCache();
+            //SAMSUNG FIX <<
             setFocusControllerActive(framePtr, ime);
             if (ime) {
                 RenderTextControl* rtc
@@ -2476,8 +2935,12 @@ void WebViewCore::popupReply(int index)
 {
     if (m_popupReply) {
         m_popupReply->replyInt(index);
-        Release(m_popupReply);
-        m_popupReply = 0;
+        //SAMSUNG CHANGE >>
+        if (index == -2) {
+            Release(m_popupReply);
+            m_popupReply = 0;
+        }
+        //SAMSUNG CHANGE <<
     }
 }
 
@@ -2780,12 +3243,18 @@ bool WebViewCore::validNodeAndBounds(Frame* frame, Node* node,
 
 void WebViewCore::showRect(int left, int top, int width, int height,
         int contentWidth, int contentHeight, float xPercentInDoc,
-        float xPercentInView, float yPercentInDoc, float yPercentInView)
+        float xPercentInView, float yPercentInDoc, float yPercentInView,
+//SAMSUNG CHANGES+
+		bool hasAnchorDiff, int oldAnchorX, int newAnchorX, int oldAnchorY, int newAnchorY)
+//SAMSUNG CHANGES-
 {
     JNIEnv* env = JSC::Bindings::getJNIEnv();
     env->CallVoidMethod(m_javaGlue->object(env).get(), m_javaGlue->m_showRect,
             left, top, width, height, contentWidth, contentHeight,
-            xPercentInDoc, xPercentInView, yPercentInDoc, yPercentInView);
+            xPercentInDoc, xPercentInView, yPercentInDoc, yPercentInView,
+//SAMSUNG CHANGES+
+			hasAnchorDiff, oldAnchorX, newAnchorX, oldAnchorY, newAnchorY);
+//SAMSUNG CHANGES-
     checkException(env);
 }
 
@@ -2805,6 +3274,558 @@ void WebViewCore::setScrollbarModes(ScrollbarMode horizontalMode, ScrollbarMode 
             horizontalMode, verticalMode);
     checkException(env);
 }
+
+
+//SAMSUNG CHANGE BEGIN : ADVANCED_COPY_PASTE
+
+int mSelectionDirection = WebCore::SelectionController::FORWARD;
+
+
+void WebViewCore::copyMoveSelection(int x, int y,  int controller, bool smartGranularity, bool selectionMove, float zoomLevel , int granularity)
+{
+    DEBUG_NAV_UI_LOGD("%s: x,y position: %d, %d", __FUNCTION__, x, y);
+    WebCore::Frame* frame = m_mainFrame;
+    WebCore::IntPoint contentsPoint = WebCore::IntPoint(x, y);
+    WebCore::IntPoint wndPoint = frame->view()->contentsToWindow(contentsPoint);
+
+        DEBUG_NAV_UI_LOGD("%s: second time click", __FUNCTION__);
+
+		//Set Direction 
+        if (selectionMove == false)
+        {
+            copySetSelectionDirection(controller);
+            if(frame->selectionGranularity() == WebCore::WordGranularity )
+            {
+            frame->setSelectionGranularity(WebCore::CharacterGranularity);
+            frame->selection()->expandUsingGranularity(WebCore::CharacterGranularity);
+            DEBUG_NAV_UI_LOGD("Changed from Word to character Granularity");
+            }else   if(frame->selectionGranularity() == WebCore::CharacterGranularity )
+            {
+          	  frame->selection()->expandUsingGranularity(WebCore::CharacterGranularity);
+           	  LOGD("Set the character Granularity");
+            }
+        }
+
+		if(smartGranularity == true){
+	        if(!inSameParagraph(WebCore::VisiblePosition(frame->selection()->base()), 
+	            WebCore::VisiblePosition(frame->selection()->extent())) 
+	             && frame->selectionGranularity() != WebCore::ParagraphGranularity)
+	        {
+	            frame->setSelectionGranularity(WebCore::ParagraphGranularity);
+	            DEBUG_NAV_UI_LOGD("Set Paragraph Granularity");
+	        } 
+	        else if(inSameParagraph(WebCore::VisiblePosition(frame->selection()->base()),
+	                WebCore::VisiblePosition(frame->selection()->extent())) 
+	                && frame->selectionGranularity() == WebCore::ParagraphGranularity)
+	        {
+	            frame->setSelectionGranularity(WebCore::CharacterGranularity);
+	            frame->selection()->expandUsingGranularity(WebCore::CharacterGranularity);
+	            DEBUG_NAV_UI_LOGD("Change from Paragraph to Character Granularity");
+	        }
+	         //Set In Paragraph mode when zoom level is less than 0.8
+	        if (zoomLevel < 0.8 && frame->selectionGranularity() != WebCore::ParagraphGranularity)
+	        {
+	            frame->setSelectionGranularity(WebCore::ParagraphGranularity);
+	            DEBUG_NAV_UI_LOGD("Set Paragraph Granularity for Less Zoom Level");
+	        }
+		}
+
+				
+	 WebCore::TextGranularity CurrGranulaity = frame->selectionGranularity() ;
+
+	//User Granularity Apply if Set 
+	if(granularity != -1 && CurrGranulaity == WebCore::CharacterGranularity){
+		frame->setSelectionGranularity((WebCore::TextGranularity) granularity );
+	   LOGD("Set  Granularity by client  %d",  granularity);
+	   webkitCopyMoveSelection(wndPoint, contentsPoint,  controller);
+	   frame->setSelectionGranularity((WebCore::TextGranularity) CurrGranulaity );
+	}  else{      
+           webkitCopyMoveSelection(wndPoint, contentsPoint, controller);
+	}
+
+    DEBUG_NAV_UI_LOGD("%s: End", __FUNCTION__);
+}
+
+void WebViewCore::clearTextSelection(int contentX, int contentY)
+{
+    DEBUG_NAV_UI_LOGD("%s: x,y position: %d, %d", __FUNCTION__, contentX, contentY);
+    WebCore::Frame* frame = m_mainFrame;
+    WebCore::FrameView *frameview = frame->view();
+    WebCore::IntPoint contentPoint = WebCore::IntPoint(contentX, contentY);
+    WebCore::IntPoint wndPoint = frame->view()->contentsToWindow(contentPoint);
+    
+    WebCore::PlatformMouseEvent pme(wndPoint, contentPoint, LeftButton, 
+                     WebCore::MouseEventPressed, 1, false, false, false, false, 0);
+
+    frameview->frame()->eventHandler()->handleMousePressEvent(pme);
+    DEBUG_NAV_UI_LOGD("%s: End", __FUNCTION__);
+}
+
+void WebViewCore::copySetSelectionDirection(int controller)
+{
+    DEBUG_NAV_UI_LOGD("%s: Set the Selection Direction", __FUNCTION__);
+
+    WebCore::Frame* frame = m_mainFrame;
+    frame->eventHandler()->setMousePressed(true);
+    switch(controller)
+    {
+        case 2:
+        case 5:
+            mSelectionDirection = SelectionController::FORWARD;
+            frame->selection()->willBeModified(SelectionController::EXTEND, SelectionController::FORWARD);
+        break;
+        
+        case 3:
+            mSelectionDirection = SelectionController::LEFT;
+            frame->selection()->willBeModified(SelectionController::EXTEND, SelectionController::LEFT);
+        break;
+        case 4:
+            mSelectionDirection = SelectionController::RIGHT;
+            frame->selection()->willBeModified(SelectionController::EXTEND, SelectionController::RIGHT);
+       break;       
+
+    case 1:
+    case 6:
+         mSelectionDirection = SelectionController::BACKWARD;
+            frame->selection()->willBeModified(SelectionController::EXTEND, SelectionController::BACKWARD);
+    break;
+       default:
+            DEBUG_NAV_UI_LOGD("%s: Invalid Direction: %d", __FUNCTION__, controller);
+            frame->eventHandler()->setMousePressed(false);
+        break;
+    }
+}
+
+void WebViewCore::webkitCopyMoveSelection(WebCore::IntPoint wndPoint, WebCore::IntPoint contentPoint, int controller)
+{
+    DEBUG_NAV_UI_LOGD("%s", __FUNCTION__);
+    WebCore::Frame* frame = m_mainFrame;
+    DEBUG_NAV_UI_LOGD("%s: Frame=%s", __FUNCTION__, frame);
+    WebCore::FrameView *frameview = frame->view();
+
+    if(frame->selectionGranularity() == WebCore::ParagraphGranularity)
+    {
+        DEBUG_NAV_UI_LOGD("%s: Moving in Paragraph Granularity", __FUNCTION__);
+        WebCore::IntRect box = WebCore::IntRect(0,0,0,0);
+        int left = 0, top = 0, right = 0, bottom = 0;
+
+         if (RefPtr<Range> range = frame->selection()->toNormalizedRange()) 
+        {
+            ExceptionCode ec = 0;
+            RefPtr<Range> tempRange = range->cloneRange(ec);
+            box = tempRange->boundingBox();
+            left = box.x();
+            top = box.y();
+            right = left + box.width();
+            bottom = top + box.height();
+            DEBUG_NAV_UI_LOGD("%s: BoundingRect:[%d, %d, %d, %d]", __FUNCTION__, box.x(), box.y(), box.width(), box.height());
+        } 
+        else
+        {
+            DEBUG_NAV_UI_LOGD("%s: Exception in getting Selection Region", __FUNCTION__);
+            return;
+        }
+        switch(mSelectionDirection)
+        {
+            case WebCore::SelectionController::FORWARD:
+            contentPoint=contentPoint.shrunkTo(WebCore::IntPoint(right, contentPoint.y()));
+            contentPoint=contentPoint.expandedTo(WebCore::IntPoint(left, top));
+            break;
+            
+            case WebCore::SelectionController::BACKWARD:
+                contentPoint=contentPoint.expandedTo(WebCore::IntPoint(left, contentPoint.y()));
+                contentPoint=contentPoint.shrunkTo(WebCore::IntPoint(right, bottom));
+            break;
+            
+            case WebCore::SelectionController::LEFT:
+                contentPoint=contentPoint.expandedTo(WebCore::IntPoint(contentPoint.x(), top));
+                contentPoint=contentPoint.shrunkTo(WebCore::IntPoint(right, bottom));
+            break;
+            
+            case WebCore::SelectionController::RIGHT:
+                contentPoint=contentPoint.shrunkTo(WebCore::IntPoint(contentPoint.x(), bottom));
+                contentPoint=contentPoint.expandedTo(WebCore::IntPoint(left, top));
+            break;
+            
+            default:
+            break;
+        }
+    }
+    else
+    {
+     DEBUG_NAV_UI_LOGD("%s: Character Granularity", __FUNCTION__);
+    }
+
+    DEBUG_NAV_UI_LOGD("%s: Point after expansion: %d, %d", __FUNCTION__, contentPoint.x(), contentPoint.y());
+    DEBUG_NAV_UI_LOGD("%s: WindowPoint: %d, %d", __FUNCTION__, wndPoint.x(), wndPoint.y());
+    WebCore::PlatformMouseEvent pme(wndPoint, contentPoint, LeftButton, 
+                            WebCore::MouseEventMoved, 0, false, true, false, false, 0);
+
+    frameview->frame()->eventHandler()->mouseMoved(pme);
+    frameview->frame()->eventHandler()->stopAutoscrollTimer();
+
+    DEBUG_NAV_UI_LOGD("%s: End", __FUNCTION__);
+    return;
+}
+
+bool WebViewCore::recordSelectionCopiedData(SkRegion* region, SkIRect* startRect,
+                                                        SkIRect* endRect, int granularity ){
+
+    DBG_SET_LOG("start");
+    WebCore::Frame* frame =  m_mainFrame;
+    WebCore::IntRect box, start, end;
+    int boxX, boxY, boxWidth, boxHeight, endX, endY, temp;
+    bool result = false;
+
+    m_contentMutex.lock();
+    if (RefPtr<Range> range = frame->selection()->toNormalizedRange()) 
+    {
+        ExceptionCode ec = 0;
+        RefPtr<Range> tempRange = range->cloneRange(ec);
+        box = tempRange->boundingBox();
+        DEBUG_NAV_UI_LOGD("%s: BoundingRect:[%d, %d, %d, %d]", __FUNCTION__, box.x(), box.y(), box.width(), box.height());
+
+        if (!box.isEmpty())
+        {
+            region->setRect(box.x(), box.y(), box.x() + box.width(), box.y() + box.height());
+            start = frame->firstRectForRange(tempRange.get());
+            DEBUG_NAV_UI_LOGD("%s: StartRect:[%d, %d, %d, %d]", __FUNCTION__, start.x(), start.y(), start.width(), start.height());
+            startRect->set(start.x(), start.y(), start.x() + start.width(),  start.y() + start.height());
+            
+            end = frame->lastRectForRange(tempRange.get());
+            DEBUG_NAV_UI_LOGD("%s: EndRect:[%d, %d, %d, %d]", __FUNCTION__, end.x(), end.y(), end.width(), end.height());
+            endRect->set(end.x(), end.y(), end.x() + end.width(),  end.y() + end.height());
+
+	     // Validation of BOUND RECT X and Y
+	     // Validate START and END RECTs assuming that BOUND RECT is correct
+	     boxX = box.x();
+	     boxY = box.y();
+	     boxWidth = box.width();
+	     boxHeight = box.height();
+            if (boxX < 0)
+            {
+                boxX = 0;
+            }
+	     if (boxY < 0)
+            {
+                boxY = 0;
+            }
+	     if (box.x() < 0 || box.y() < 0)
+	     {
+		  	region->setRect(boxX, boxY, boxX + boxWidth, boxY + boxHeight);
+	     }
+	   // Remove the validation : have side effect in selection bound rect 
+	   /*
+	     // If START RECT is not within BOUND REC,T push the START RECT to LEFT TOP corner of BOUND RECT
+	     // Also START RECT width and height should not be more than BOUND RECT width and height
+	     if (!(region->contains(*startRect)))
+     	     {
+     	         temp = start.height();
+     	     	  if (temp > boxHeight)
+     	  	  {
+     	  	  	temp = boxHeight;
+     	  	  }
+		  endX = start.width();
+	         if (endX > boxWidth)
+	         {
+	         	endX = boxWidth;
+	         }
+           	  startRect->set(boxX, boxY, boxX + boxWidth, boxY + temp);
+     	     }
+
+	     // If END RECT is not within BOUND RECT, push the END RECT to RIGHT BOTTOM corner of BOUND RECT
+	     // Also END RECT width and height should not be more than BOUND RECT width and height
+	     if (!(region->contains(*endRect)))
+     	     {
+     	     	   endX = boxX + boxWidth;
+		   endY = boxY + boxHeight;
+		   temp = end.height();
+		   if (temp > boxHeight)
+		   {
+		   	temp = boxHeight;
+		   }
+		   if (end.width() < boxWidth)
+	   	   {
+	   	   	endX = endX - end.width();
+	   	   }
+	   	   endY = endY - temp;
+     	          endRect->set(endX, endY, boxX + boxWidth, boxY + boxHeight);
+     	     }
+	*/
+            result = true;
+        }
+        else
+        {
+            DEBUG_NAV_UI_LOGD("%s: Selection Bound Rect is Empty", __FUNCTION__);
+            startRect->set(0, 0, 0, 0);
+            endRect->set(0, 0, 0, 0);
+        }
+    }
+    else{
+        DEBUG_NAV_UI_LOGD("%s: recordSelectionCopiedData  is false", __FUNCTION__);
+    }
+
+    granularity = frame->selectionGranularity();
+    DEBUG_NAV_UI_LOGD("%s: Granularity: %d", __FUNCTION__, granularity);
+
+    m_contentMutex.unlock();
+
+    DBG_SET_LOG("end");
+    return result;
+
+}
+
+
+int WebViewCore::getSelectionGranularity()
+{
+    WebCore::Frame* frame =  m_mainFrame;
+    return frame->selectionGranularity();
+}
+
+bool WebViewCore::selectClosestWord(int x , int y , float zoomLevel, bool flagGranularity){
+    DEBUG_NAV_UI_LOGD("%s: x,y position: %d, %d", __FUNCTION__, x, y);
+    WebCore::Frame* frame = m_mainFrame;
+    WebCore::IntPoint contentsPoint = WebCore::IntPoint(x, y);
+    WebCore::IntPoint wndPoint = frame->view()->contentsToWindow(contentsPoint);
+
+    if (!frame->eventHandler())
+    {
+        DEBUG_NAV_UI_LOGD("%s: Eventhandler is NULL", __FUNCTION__);
+        return false;
+    }
+    DEBUG_NAV_UI_LOGD("First time selection: Zoom Level: %f", zoomLevel);
+
+    if (zoomLevel >= 0.8)
+    {
+        WebCore::MouseEventType met1 = WebCore::MouseEventMoved;
+        WebCore::PlatformMouseEvent pme1(wndPoint, contentsPoint, NoButton, met1,
+                        false, false, false, false, false, 0);
+        return frame->eventHandler()->sendContextMenuEventForWordSelection(pme1, flagGranularity);
+    }
+    else
+    {
+        WebCore::MouseEventType met = WebCore::MouseEventPressed;
+        WebCore::PlatformMouseEvent pme(wndPoint, contentsPoint, LeftButton, met, 3, false, false, false, false, 0);
+        return frame->eventHandler()->handleMousePressEvent(pme);
+    }
+}
+
+//SAMSUNG CHANGE END : ADVANCED_COPY_PASTE
+
+
+//SAMSUNG CHANGE >>
+void WebViewCore::getWebFeedLinks ( Vector<WebFeedLink*>& out )
+{
+    WebCore::String typeRss ( "application/rss+xml" );
+    WebCore::String typeRdf ( "application/rdf+xml" );
+    WebCore::String typeAtom ( "application/atom+xml" );
+    WebCore::String relAlternate ( "alternate" );
+
+    WebCore::Frame* frame = m_mainFrame ;
+
+    LOGV ( "WebViewCore::getWebFeedLinks()" );
+
+    while ( frame != NULL )
+    {
+
+        Document* doc = frame->document() ;
+
+        RefPtr<WebCore::NodeList> links = doc->getElementsByTagName ( "link" ) ;
+        int length = links->length() ;
+
+        for ( int i = 0; i < length; i ++ )
+        {
+
+            WebCore::HTMLLinkElement *linkElement = static_cast<WebCore::HTMLLinkElement *> ( links->item ( i ) );
+            String type = linkElement->type() ;
+            String rel = linkElement->rel() ;
+
+            if ( ( ( type == typeRss ) || ( type == typeRdf ) || ( type == typeAtom ) ) && ( rel == relAlternate ) )
+            {
+                String url = linkElement->href() ;
+                String title = linkElement->getAttribute ( WebCore::HTMLNames::titleAttr ) ;
+
+                LOGV ( "WebViewCore::getWebFeedLinks() type=%s, url=%s, title = %s", type.latin1().data(), url.latin1().data(), title.latin1().data() );
+
+                out.append ( new WebFeedLink ( url, title, type) ) ;
+            }
+
+        }
+
+        frame = frame->tree()->traverseNext() ;
+    }
+}
+
+WebCore::IntRect toContainingView(const WebCore::RenderObject* renderer, const WebCore::IntRect& rendererRect)
+{
+    WebCore::IntRect result = rendererRect;
+    WebCore::RenderView *view = renderer->view() ;
+    LOGD("toContainingView: rendererRect(%d, %d, %d, %d)", result.x(), result.y(), result.width(), result.height());
+
+    if (view && view->frameView() ) {
+        WebCore::FrameView * frameView = view->frameView() ;
+        if (const WebCore::ScrollView* parentScrollView = frameView->parent()) {
+            if (parentScrollView->isFrameView()) {
+
+                const FrameView* parentView = static_cast<const WebCore::FrameView*>(parentScrollView);
+
+                // Get our renderer in the parent view
+                WebCore::RenderPart* renderer = frameView->frame()->ownerRenderer();
+                if (renderer) {
+                    WebCore::IntPoint point(rendererRect.location());
+
+                    // Add borders and padding
+                    point.move(renderer->borderLeft() + renderer->paddingLeft(),
+                        renderer->borderTop() + renderer->paddingTop());
+                    WebCore::IntPoint pt = WebCore::roundedIntPoint(renderer->localToAbsolute(point, false, true /* use transforms */));
+                    result.setLocation(pt);
+                }
+
+                //Let us verify the calculated location
+                WebCore::IntPoint test(rendererRect.location());
+                LOGD("toContainingView: test(%d, %d)", test.x(), test.y());                    
+                ScrollView* view = frameView;
+                //while (view) {
+                    LOGD("toContainingView: frame position(%d, %d)", view->x(), view->y());                    
+                    //test.move(view->x(), view->y());
+                    //test = _convertToContainingWindow(frameView, test) ;
+                    test = view->convertToContainingWindow(test);
+                    //view = view->parent();
+                //}
+                IntPoint scroll ;
+                while (view) {
+                    scroll.move(view->scrollX(), view->scrollY());
+                    view = view->parent();
+                }
+                test.move(scroll.x(), scroll.y()) ;
+
+                if (test.x() > result.x() || test.y() > result.y()) {
+                    LOGD("toContainingView: Inconsistant result(%d, %d, %d, %d), recalculating using frame positions...", result.x(), result.y(), result.width(), result.height());
+                    result.setLocation(test);
+                }
+            }
+            else {
+                result = frameView->Widget::convertToContainingView(result);
+            }
+        }
+    }
+
+    LOGD("toContainingView: result(%d, %d, %d, %d)", result.x(), result.y(), result.width(), result.height());
+    return result ;
+}
+
+//SAMSUNG CHANGES+
+WebCore::IntRect WebViewCore::getRenderBlockBounds(WebCore::Node* node)
+{
+    WebCore::IntRect result;
+    if (!node) {
+    	DBG_NAV_LOG("getRenderBlockBounds : HitTest Result Node is NULL!");
+        return result;
+    }
+    WebCore::String nodeName = node->nodeName() ;
+    WebCore::CString nodeNameLatin1 = nodeName.latin1() ;
+    DBG_NAV_LOGD("getRenderBlockBounds: node name = %s", nodeNameLatin1.data());
+    
+
+    WebCore::RenderObject *renderer = NULL ;
+    WebCore::RenderObject* nodeRenderer = node->renderer();
+    if (nodeRenderer != NULL) {
+    	DBG_NAV_LOGD("getRenderBlockBounds: nodeRenderer = %s", nodeRenderer->renderName());
+
+        if (nodeRenderer->isRenderPart()){
+            renderer = nodeRenderer ;
+        }
+        else if (!nodeRenderer->isRenderBlock() && !nodeRenderer->isRenderImage()) {
+            WebCore::RenderBlock *block = nodeRenderer->containingBlock() ;
+            if (block) {
+                renderer = block ;
+                //result = block->absoluteBoundingBoxRect() ;
+            }
+        }
+        else {
+            renderer = nodeRenderer ;
+            //result = nodeRenderer->absoluteBoundingBoxRect() ;
+        }
+    }
+    else if (node->hasTagName(HTMLNames::areaTag) ){
+        HTMLAreaElement *area = static_cast<HTMLAreaElement*>(node) ;
+
+        if (area->shape() == HTMLAreaElement::Rect
+            && node->parent() 
+            && node->parent()->hasTagName(HTMLNames::mapTag)) {
+
+            Node *map = node->parent() ;
+            if ( map->parent()) {
+                WebCore::RenderObject *r = map->parent()->renderer() ;
+                if (r->isRenderBlock()) {
+                    IntRect parentRect = r->absoluteBoundingBoxRect() ;
+                    result = area->rect() ;
+                    result.move(parentRect.x(), parentRect.y()) ;
+
+                    if (r->view() && r->view()->frameView()) 
+                        result = toContainingView(r, result) ;
+                        //result = static_cast<WebCore::Widget*>(r->view()->frameView())->convertToContainingView(result) ;
+                }
+            }
+        }
+    }    
+    
+    if (renderer) {
+        result = renderer->absoluteBoundingBoxRect() ;
+        result = toContainingView(renderer, result) ;
+    }    
+    
+    if ( renderer == NULL)
+    	DBG_NAV_LOG("getRenderBlockBounds: No render block found!");
+    else
+    	DBG_NAV_LOGD("getRenderBlockBounds: node=%p result(%d, %d, %d, %d)", node, result.x(), result.y(), result.width(), result.height());
+        
+    return result;
+
+}
+
+WebCore::IntRect WebViewCore::getRenderBlockBounds(const WebCore::IntPoint &pt)
+{
+    WebCore::IntRect result;
+    LOGD("getRenderBlockBounds: point=(%d, %d)", pt.x(), pt.y() );
+
+    WebCore::HitTestResult hitTestResult = m_mainFrame->eventHandler()->hitTestResultAtPoint(pt, false, true);
+
+    //dumpHitTestResult(hitTestResult) ;
+
+    WebCore::Node* node = hitTestResult.innerNode();
+    if (!node) {
+    	DBG_NAV_LOG("getRenderBlockBounds : HitTest Result Node is NULL!");
+        return result;
+    }else{
+    	return getRenderBlockBounds(node);
+    }
+}
+//SAMSUNG CHANGES-
+
+static jobject nativeGetBlockBounds(JNIEnv *env, jobject obj, jint x, jint y, jfloat scale)
+{
+#ifdef ANDROID_INSTRUMENT
+   TimeCounterAuto counter(TimeCounter::WebViewCoreTimeCounter);
+#endif
+    WebViewCore* viewImpl = GET_NATIVE_VIEW(env, obj);
+    LOG_ASSERT(viewImpl, "viewImpl not set in nativeSetSize");
+
+    WebCore::IntPoint pt(x,y) ;
+    WebCore::IntRect webRect = viewImpl->getRenderBlockBounds(pt);
+
+    jclass rectClass = env->FindClass("android/graphics/Rect");
+    LOG_ASSERT(rectClass, "Could not find Rect class!");
+
+    jmethodID init = env->GetMethodID(rectClass, "<init>", "(IIII)V");
+    LOG_ASSERT(init, "Could not find constructor for Rect");
+
+    jobject rect = env->NewObject(rectClass, init, webRect.x(),
+                        webRect.y(), webRect.right(), webRect.bottom());
+    return rect ;
+}
+
+//SAMSUNG CHANGE <<
 
 //----------------------------------------------------------------------
 // Native JNI methods
@@ -2831,9 +3852,37 @@ static void UpdateFrameCacheIfLoading(JNIEnv *env, jobject obj)
     GET_NATIVE_VIEW(env, obj)->updateFrameCacheIfLoading();
 }
 
+//SAMSUNG CHANGES+
+static jobject GetBestBlock(JNIEnv *env, jobject obj, jint width, jint height,
+                jint screenWidth, jfloat scale, jint realScreenWidth,
+                jint screenHeight, jint anchorX, jint anchorY, jboolean ignoreHeight,
+                jboolean needAnchorDiff, jint viewportLeft, jint viewportTop)
+{
+#ifdef ANDROID_INSTRUMENT
+        TimeCounterAuto counter(TimeCounter::WebViewCoreTimeCounter);
+#endif
+        WebViewCore* viewImpl = GET_NATIVE_VIEW(env, obj);
+        LOGV("webviewcore::nativeGetBestBlock(%u %u)\n viewImpl: %p", (unsigned) anchorX,
+                        (unsigned) anchorY, viewImpl);
+        LOG_ASSERT(viewImpl, "viewImpl not set in nativeSetSize");
+    jclass rectClass = env->FindClass("android/graphics/Rect");
+    jmethodID init = env->GetMethodID(rectClass, "<init>", "(IIII)V");
+    WebCore::IntRect webRect;
+        viewImpl->getBestBlockRect(&webRect, width, height, screenWidth, scale,
+                        realScreenWidth, screenHeight, anchorX, anchorY, ignoreHeight,
+                        needAnchorDiff, viewportLeft, viewportTop);
+    jobject rect = env->NewObject(rectClass, init, webRect.x(),
+        webRect.y(), webRect.right(), webRect.bottom());
+    return rect;
+}
+//SAMSUNG CHANGES-
+
 static void SetSize(JNIEnv *env, jobject obj, jint width, jint height,
         jint screenWidth, jfloat scale, jint realScreenWidth, jint screenHeight,
-        jint anchorX, jint anchorY, jboolean ignoreHeight)
+        jint anchorX, jint anchorY, jboolean ignoreHeight,
+//SAMSUNG CHANGES+
+		jboolean needAnchorDiff, jint viewportLeft, jint viewportTop)
+//SAMSUNG CHANGES-
 {
 #ifdef ANDROID_INSTRUMENT
     TimeCounterAuto counter(TimeCounter::WebViewCoreTimeCounter);
@@ -2842,9 +3891,17 @@ static void SetSize(JNIEnv *env, jobject obj, jint width, jint height,
     LOGV("webviewcore::nativeSetSize(%u %u)\n viewImpl: %p", (unsigned)width, (unsigned)height, viewImpl);
     LOG_ASSERT(viewImpl, "viewImpl not set in nativeSetSize");
     viewImpl->setSizeScreenWidthAndScale(width, height, screenWidth, scale,
-        realScreenWidth, screenHeight, anchorX, anchorY, ignoreHeight);
+        realScreenWidth, screenHeight, anchorX, anchorY, ignoreHeight,
+//SAMSUNG CHANGES+
+		needAnchorDiff, viewportLeft, viewportTop);
+//SAMSUNG CHANGES-
 }
 
+static void UpdatePlugins(JNIEnv *env, jobject obj, int mode, int viewleft, int viewtop, int viewright, int viewbottom, float scale, int anchorX, int anchorY )
+{
+    WebViewCore* viewImpl = GET_NATIVE_VIEW(env, obj);
+    viewImpl->updatePlugins(  mode, viewleft, viewtop, viewright, viewbottom, scale, anchorX, anchorY );
+}
 static void SetScrollOffset(JNIEnv *env, jobject obj, jint gen, jint x, jint y)
 {
 #ifdef ANDROID_INSTRUMENT
@@ -2974,6 +4031,7 @@ void WebViewCore::addVisitedLink(const UChar* string, int length)
         m_groupForVisitedLinks->addVisitedLink(string, length);
 }
 
+
 static bool RecordContent(JNIEnv *env, jobject obj, jobject region, jobject pt)
 {
 #ifdef ANDROID_INSTRUMENT
@@ -2986,6 +4044,7 @@ static bool RecordContent(JNIEnv *env, jobject obj, jobject region, jobject pt)
     GraphicsJNI::ipoint_to_jpoint(nativePt, env, pt);
     return result;
 }
+
 
 static void SplitContent(JNIEnv *env, jobject obj)
 {
@@ -3131,6 +4190,18 @@ static void MoveMouse(JNIEnv *env, jobject obj, jint frame,
     viewImpl->moveMouse((WebCore::Frame*) frame, x, y);
 }
 
+//SAMSUNG CHANGE >>
+static void MouseClick(JNIEnv *env, jobject obj, jint frame, jint node)
+{
+#ifdef ANDROID_INSTRUMENT
+    TimeCounterAuto counter(TimeCounter::WebViewCoreTimeCounter);
+#endif
+    WebViewCore* viewImpl = GET_NATIVE_VIEW(env, obj);
+    LOG_ASSERT(viewImpl, "viewImpl not set in %s", __FUNCTION__);
+    viewImpl->click((WebCore::Frame*) frame, (WebCore::Node*) node);
+}
+//SAMSUNG CHANGE <<
+
 static void MoveMouseIfLatest(JNIEnv *env, jobject obj, jint moveGeneration,
         jint frame, jint x, jint y)
 {
@@ -3207,6 +4278,22 @@ static void SetBackgroundColor(JNIEnv *env, jobject obj, jint color)
 
     viewImpl->setBackgroundColor((SkColor) color);
 }
+
+
+//SAMSUNG CHANGE BEGIN : ADVANCED_COPY_PASTE
+static jstring GetSelectedText(JNIEnv *env, jobject obj)
+{
+#ifdef ANDROID_INSTRUMENT
+    TimeCounterAuto counter(TimeCounter::WebViewCoreTimeCounter);
+#endif
+    WebViewCore* viewImpl = GET_NATIVE_VIEW(env, obj);
+    LOG_ASSERT(viewImpl, "viewImpl not set in %s", __FUNCTION__);
+    WebCore::String result = viewImpl->getSelectedText();
+    if (!result.isEmpty())
+        return WebCoreStringToJString(env, result);
+    return 0;
+}
+//SAMSUNG CHANGE END : ADVANCED_COPY_PASTE
 
 static void DumpDomTree(JNIEnv *env, jobject obj, jboolean useFile)
 {
@@ -3447,6 +4534,105 @@ static bool ValidNodeAndBounds(JNIEnv *env, jobject obj, int frame, int node,
             reinterpret_cast<Node*>(node), nativeRect);
 }
 
+//SAMSUNG CHANGE BEGIN : ADVANCED_COPY_PASTE
+static void CopyMoveSelection(JNIEnv *env, jobject obj, int x, int y, int controller, 
+										    bool ex, bool selectionMove, float zoomLevel, int granularity)
+{
+    WebViewCore* viewImpl = GET_NATIVE_VIEW(env, obj);
+    LOG_ASSERT(viewImpl, "view not set in %s", __FUNCTION__);
+    viewImpl->copyMoveSelection(x, y, controller, ex, selectionMove, zoomLevel, granularity);
+}
+
+static void ClearTextSelection(JNIEnv *env, jobject obj, int contentX, int contentY)
+{
+    WebViewCore* viewImpl = GET_NATIVE_VIEW(env, obj);
+    LOG_ASSERT(viewImpl, "view not set in %s", __FUNCTION__);
+    viewImpl->clearTextSelection(contentX, contentY);
+}
+static bool RecordSelectionCopiedData(JNIEnv *env, jobject obj, jobject region, jobject sRect,jobject eRect, jint value)
+{
+#ifdef ANDROID_INSTRUMENT
+    TimeCounterAuto counter(TimeCounter::WebViewCoreTimeCounter);
+#endif
+    WebViewCore* viewImpl = GET_NATIVE_VIEW(env, obj);
+    LOG_ASSERT(viewImpl, "viewImpl not set in RecordSelectionCopiedData");
+
+    SkRegion* nativeRegion = GraphicsJNI::getNativeRegion(env, region);
+    SkIRect nativeSRect;
+    SkIRect nativeERect;
+
+    bool result = viewImpl->recordSelectionCopiedData(nativeRegion, &nativeSRect,&nativeERect,value);
+    GraphicsJNI::set_jrect(env,sRect,nativeSRect.fLeft, nativeSRect.fTop,nativeSRect.fRight, nativeSRect.fBottom );
+    GraphicsJNI::set_jrect(env,eRect,nativeERect.fLeft, nativeERect.fTop,nativeERect.fRight, nativeERect.fBottom );
+
+
+    //GraphicsJNI::iRect_to_jRect(&nativeSRect, env,sRect);
+    //GraphicsJNI::iRect_to_jRect(&nativeERect, env,eRect);
+    return result;
+}
+
+static jint GetSelectionGranularity(JNIEnv *env, jobject obj)
+{
+	WebViewCore* viewImpl = GET_NATIVE_VIEW(env, obj);
+	LOG_ASSERT(viewImpl, "viewImpl not set in GetSelectionGranularity");
+	return viewImpl->getSelectionGranularity();
+}
+
+static bool SelectClosestWord(JNIEnv *env, jobject obj,int x, int y, float zoomLevel, bool flag)
+{
+	WebViewCore* viewImpl = GET_NATIVE_VIEW(env, obj);
+	LOG_ASSERT(viewImpl, "viewImpl not set in SelectClosestWord");
+	return viewImpl->selectClosestWord(x,y, zoomLevel, flag);
+
+}
+
+
+//SAMSUNG CHANGE END : ADVANCED_COPY_PASTE
+
+//SAMSUNG CHANGE >>
+static jobjectArray nativeGetWebFeedLinks ( JNIEnv* env, jobject obj )
+{
+    jclass fi_clazz = 0;
+    jmethodID initID = 0;
+    jobjectArray infos ;
+    int start = 0;
+    int limit = 0;
+    jobject urlobj,titleobj, typeobj;//, pathobj ;
+    Vector<WebFeedLink*> feedInfoList ;
+
+    WebViewCore* viewImpl = GET_NATIVE_VIEW(env, obj);
+
+    viewImpl->getWebFeedLinks ( feedInfoList ) ;
+
+    LOGV ( "WebViewCore::nativeGetWebFeedLinks() links count = %d", feedInfoList.size() );
+
+    fi_clazz = env->FindClass ( "roamtouch/webkit/WebFeedLink" );
+    initID = env->GetMethodID ( fi_clazz, "<init>", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V" );
+
+    infos = env->NewObjectArray ( feedInfoList.size(), fi_clazz, NULL );
+
+    for ( int i = 0; i <  feedInfoList.size(); i++ )
+    {
+        urlobj =env->NewString ( feedInfoList[i]->url().characters(), feedInfoList[i]->url().length() );
+        titleobj = env->NewString ( feedInfoList[i]->title().characters(), feedInfoList[i]->title().length() );
+        typeobj = env->NewString ( feedInfoList[i]->type().characters(), feedInfoList[i]->type().length() );
+        //pathobj = env->NewString(feedInfoList[i]->path().characters(), feedInfoList[i]->path().length());
+
+        jobject fi = env->NewObject ( fi_clazz, initID, urlobj, titleobj, typeobj );
+
+        env->SetObjectArrayElement ( infos, i, fi );
+
+        delete feedInfoList[i] ;
+
+        start = limit;
+    }
+
+    feedInfoList.clear() ;
+
+    return infos ;
+}
+//SAMSUNG CHANGE <<
+
 // ----------------------------------------------------------------------------
 
 /*
@@ -3471,8 +4657,14 @@ static JNINativeMethod gJavaWebViewCoreMethods[] = {
         (void*) SendListBoxChoices },
     { "nativeSendListBoxChoice", "(I)V",
         (void*) SendListBoxChoice },
-    { "nativeSetSize", "(IIIFIIIIZ)V",
-        (void*) SetSize },
+//SAMSUNG CHANGES+
+	{ "nativeSetSize", "(IIIFIIIIZZII)V",
+		(void*) SetSize },
+	{ "nativeGetBestBlock", "(IIIFIIIIZZII)Landroid/graphics/Rect;",
+		(void*) GetBestBlock},
+    { "nativeUpdatePlugins", "(IIIIIFII)V",
+        (void*) UpdatePlugins }, 		
+//SAMSUNG CHANGES-
     { "nativeSetScrollOffset", "(III)V",
         (void*) SetScrollOffset },
     { "nativeSetGlobalBounds", "(IIII)V",
@@ -3519,6 +4711,8 @@ static JNINativeMethod gJavaWebViewCoreMethods[] = {
         (void*) SplitContent },
     { "nativeSetBackgroundColor", "(I)V",
         (void*) SetBackgroundColor },
+    { "nativeGetSelectedText", "()Ljava/lang/String;",
+        (void*) GetSelectedText },
     { "nativeRegisterURLSchemeAsLocal", "(Ljava/lang/String;)V",
         (void*) RegisterURLSchemeAsLocal },
     { "nativeDumpDomTree", "(Z)V",
@@ -3551,6 +4745,24 @@ static JNINativeMethod gJavaWebViewCoreMethods[] = {
     { "nativeExecuteSelectionCommand", "(III)V", (void*) nativeExecuteSelectionCommand },
     { "nativeSetSelectionColor", "(IIII)V",(void*) nativeSetSelectionColor },
     //ROAMTOUCH CHANGE <<
+    //SAMSUNG CHANGES >>
+    { "nativeCopyMoveSelection", "(IIIZZFI)V",
+	 (void*) CopyMoveSelection },
+    { "nativeClearTextSelection", "(II)V",
+	 (void*) ClearTextSelection },
+    { "nativeRecordSelectionCopiedData", "(Landroid/graphics/Region;Landroid/graphics/Rect;Landroid/graphics/Rect;I)Z",
+	 (void*) RecordSelectionCopiedData },
+    { "nativeGetSelectionGranularity", "()I",
+	 (void*) GetSelectionGranularity },
+    { "nativeSelectClosestWord", "(IIFZ)Z",
+	 (void*) SelectClosestWord },
+    { "nativeGetWebFeedLinks", "()[Lroamtouch/webkit/WebFeedLink;",
+        (void*) nativeGetWebFeedLinks },
+    { "nativeMouseClick", "(II)V",
+        (void*) MouseClick },
+    { "nativeGetBlockBounds", "(IIF)Landroid/graphics/Rect;",
+        (void*) nativeGetBlockBounds }
+    //SAMSUNG CHANGES <<
 };
 
 int register_webviewcore(JNIEnv* env)

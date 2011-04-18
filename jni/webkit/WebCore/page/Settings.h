@@ -352,6 +352,10 @@ namespace WebCore {
 
         void setLoadDeferringEnabled(bool);
         bool loadDeferringEnabled() const { return m_loadDeferringEnabled; }
+	//SAMSUNG CHANGE BEGIN 
+	void setAdvancedSelectionEnabled(bool);
+	bool advancedSelectionEnabled() const { return m_advancedSelectionEnabled; }
+	//SAMSUNG CHANGE END
 
     private:
         Page* m_page;
@@ -466,6 +470,8 @@ namespace WebCore {
 #ifdef ANDROID_PLUGINS
         bool m_pluginsOnDemand : 1;
 #endif
+	//SAMSUNG CHANGE  
+	bool m_advancedSelectionEnabled : 1;
 
 #if USE(SAFARI_THEME)
         static bool gShouldPaintNativeControls;

@@ -30,6 +30,12 @@ namespace WebCore {
 class CDATASection : public Text {
 public:
     static PassRefPtr<CDATASection> create(Document*, const String&);
+#if ENABLE(WML)
+    // SAMSUNG_WML_FIXES+
+    virtual void attach();
+    // SAMSUNG_WML_FIXES-
+#endif
+
 
 private:
     CDATASection(Document*, const String&);

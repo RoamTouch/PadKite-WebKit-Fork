@@ -344,9 +344,19 @@ void MainResourceLoader::didReceiveResponse(const ResourceResponse& r)
     // reference to this object; one example of this is 3266216.
     RefPtr<MainResourceLoader> protect(this);
 
+#ifdef SAMSUNG_ANDROID_FORCE_HTML
+    if (request().forceHTML()) {
+        m_response = r;
+        m_response.setMimeType("text/html") ;
+        m_documentLoader->setResponse(m_response);
+    }
+    else 
+#endif
+    {
     m_documentLoader->setResponse(r);
 
     m_response = r;
+    }
 
     ASSERT(!m_waitingForContentPolicy);
     m_waitingForContentPolicy = true;

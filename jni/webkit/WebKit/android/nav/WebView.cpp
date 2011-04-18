@@ -24,6 +24,7 @@
  */
 
 #define LOG_TAG "webviewglue"
+#define LOG_NDEBUG 1
 
 #include "config.h"
 
@@ -68,6 +69,14 @@
 #include <JNIHelp.h>
 #include <jni.h>
 #include <ui/KeycodeLabels.h>
+
+//SAMSUNG CHANGE BEGIN : ADVANCED_COPY_PASTE
+#include "SkCornerPathEffect.h"
+#include "SkBlurMaskFilter.h"
+#include "SkEmbossMaskFilter.h"
+#include <FrameView.h>
+#include <visible_units.h>
+//SAMSUNG CHANGE END : ADVANCED_COPY_PASTE
 
 namespace android {
 
@@ -120,6 +129,15 @@ enum WebHitTestResultType {
         HIT_TEST_TYPE_END,
 };
 //ROAMTOUCH CHANGE <<
+enum SelectControler { // keep this in sync with WebView.java
+    SelectControlerNone = 0,
+    SelectControlerLeft = 1,
+    SelectControlerRight = 2,    
+    SelectControlerLeftMiddle = 3,
+    SelectControlerRightMiddle = 4,
+    SelectControlerBottomMiddle =5,
+    SelectControlerTopMiddle =6
+};
 
 struct JavaGlue {
     jweak       m_obj;
@@ -129,6 +147,8 @@ struct JavaGlue {
     jmethodID   m_scrollBy;
     jmethodID   m_sendMoveFocus;
     jmethodID   m_sendMoveMouse;
+    //SAMSUNG CHANGE
+    jmethodID   m_sendMouseClick;
     jmethodID   m_sendMoveMouseIfLatest;
     jmethodID   m_sendMotionUp;
     jmethodID   m_domChangedFocus;
@@ -164,6 +184,8 @@ WebView(JNIEnv* env, jobject javaWebView, int viewImpl) :
     m_javaGlue.m_overrideLoading = GetJMethod(env, clazz, "overrideLoading", "(Ljava/lang/String;)V");
     m_javaGlue.m_sendMoveFocus = GetJMethod(env, clazz, "sendMoveFocus", "(II)V");
     m_javaGlue.m_sendMoveMouse = GetJMethod(env, clazz, "sendMoveMouse", "(IIII)V");
+    //SAMSUNG CHANGE
+    m_javaGlue.m_sendMouseClick = GetJMethod(env, clazz, "sendMouseClick", "(II)V");
     m_javaGlue.m_sendMoveMouseIfLatest = GetJMethod(env, clazz, "sendMoveMouseIfLatest", "(Z)V");
     m_javaGlue.m_sendMotionUp = GetJMethod(env, clazz, "sendMotionUp", "(IIIII)V");
     m_javaGlue.m_domChangedFocus = GetJMethod(env, clazz, "domChangedFocus", "()V");
@@ -198,6 +220,13 @@ WebView(JNIEnv* env, jobject javaWebView, int viewImpl) :
     m_lastDxTime = 0;
     m_ringAnimationEnd = 0;
     m_rootLayer = 0;
+    //SAMSUNG CHANGE BEGIN : TEXT_SELECTION_FEATURE
+    //Default Initial values
+    m_red = 255;
+    m_green = 51;
+    m_blue = 204;
+    //SAMSUNG CHANGE END : TEXT_SELECTION_FEATURE
+
 }
 
 ~WebView()
@@ -496,6 +525,21 @@ void cursorRingBounds(WebCore::IntRect* bounds)
     }
     *bounds = WebCore::IntRect(0, 0, 0, 0);
 }
+
+//SAMSUNG CHANGE BEGIN : TEXT_SELECTION_FEATURE
+
+void setTextSelectionColor(int r, int g, int b)
+{
+	DBG_NAV_LOG("setTextSelectionColor");
+
+	m_red = r;
+    	m_green = g;
+    	m_blue = b;
+
+	DBG_NAV_LOG("setTextSelectionColor: end");
+}
+
+//SAMSUNG CHANGE END : TEXT_SELECTION_FEATURE
 
 void fixCursor()
 {
@@ -918,9 +962,11 @@ bool motionUp(int x, int y, int slop)
     viewInvalidate();
     if (!result->isTextInput()) {
         clearTextEntry();
-        setFollowedLink(true);
-        if (syntheticLink)
-            overrideUrlLoading(result->getExport());
+        if (!result->isSelect()) { /*SAMSUNG CHANGE*/
+            setFollowedLink(true);
+            if (syntheticLink)
+                overrideUrlLoading(result->getExport());
+        }
     }
     return pageScrolled;
 }
@@ -953,6 +999,16 @@ int getBlockLeftEdge(int x, int y, float scale)
         return root->getBlockLeftEdge(x, y, scale);
     return -1;
 }
+
+//SAMSUNG CHANGES+
+int getBlockWidth(int x, int y)
+{
+    CachedRoot* root = getFrameCache(AllowNewer);
+    if (root)
+        return root->getBlockWidth(x, y);
+    return -1;
+}
+//SAMSUNG CHANGES-
 
 void overrideUrlLoading(const WebCore::String& url)
 {
@@ -992,6 +1048,10 @@ String getSelection()
 {
     return m_selectText.getSelection();
 }
+
+int m_red, m_green, m_blue;
+SkIRect m_selStart, m_selEnd;
+SkRegion m_selRegion;
 
 void moveSelection(int x, int y, bool extendSelection)
 {
@@ -1041,6 +1101,21 @@ void sendMoveMouse(WebCore::Frame* framePtr, WebCore::Node* nodePtr, int x, int 
         (jint) framePtr, (jint) nodePtr, x, y);
     checkException(env);
 }
+//SAMSUNG CHANGE >>
+void sendMouseClick(WebCore::Frame* framePtr, WebCore::Node* nodePtr)
+{
+    DBG_NAV_LOGD("framePtr=%p nodePtr=%p", framePtr, nodePtr);
+    JNIEnv* env = JSC::Bindings::getJNIEnv();
+    AutoJObject obj = m_javaGlue.object(env);
+    // if it is called during or after DESTROY is handled, the real object of
+    // WebView can be gone. Check before using it.
+    if (!obj.get())
+        return;
+    env->CallVoidMethod(obj.get(), m_javaGlue.m_sendMouseClick,
+        (jint) framePtr, (jint) nodePtr);
+    checkException(env);
+}
+//SAMSUNG CHANGE <<
 
 void sendMoveMouseIfLatest(bool disableFocusController)
 {
@@ -1171,6 +1246,355 @@ void setRootLayer(LayerAndroid* layer)
     root->resetLayers();
     root->setRootLayer(m_rootLayer);
 }
+
+//SAMSUNG CHANGE BEGIN : TEXT_SELECTION_FEATURE
+void drawSelectionControls(SkCanvas* canvas, SkRegion* copyRegion,SkRect startRect, SkRect endRect,int ControllerRadius,
+                    bool pressed,int selectionGranularity, int controler)
+{
+    WebCore::Frame* frame = (WebCore::Frame*) m_viewImpl->mainFrame();
+    WebCore::FrameView *frameview = frame->view();
+    int sc = canvas->save();
+    DBG_NAV_LOGD("drawSelecionControls:Start Rect left=%f, top=%f, right=%f, bottom=%f", startRect.fLeft, startRect.fTop, startRect.fRight, startRect.fBottom);
+    DBG_NAV_LOGD("drawSelecionControls:End Rect left=%f, top=%f, right=%f, bottom=%f", endRect.fLeft, endRect.fTop, endRect.fRight, endRect.fBottom);
+
+	const SkColor SELECTED_BG_COLOR = SkColorSetARGB(0x80, 150, 203, 251);
+
+    if(selectionGranularity == WebCore::ParagraphGranularity){
+        SkPath path;
+        SkPaint paint;
+        SkRect Paragraphrect;
+        SkIRect temp = copyRegion->getBounds();	
+        Paragraphrect.set(temp);
+        float rOuterRing = ControllerRadius;
+        float triLength = rOuterRing/2;
+        float rInnerRing = rOuterRing/2 ;
+        float centerX = Paragraphrect.fLeft;
+        float centerY = (Paragraphrect.fTop + Paragraphrect.fBottom)/2;
+
+        DBG_NAV_LOGD("drawSelecionControls:Selection Bound Rect left=%f, top=%f, right=%f, bottom =%f", Paragraphrect.fLeft, 
+        Paragraphrect.fTop, Paragraphrect.fRight, Paragraphrect.fBottom);
+        
+        if(false == pressed){
+            paint.setAntiAlias(true);        
+			
+            paint.setColor(SELECTED_BG_COLOR);
+            path.addRect(SkIntToScalar(temp.fLeft), SkIntToScalar(temp.fTop), 
+            SkIntToScalar(temp.fRight), SkIntToScalar(temp.fBottom));
+            path.close();
+            canvas->drawPath(path, paint);
+            DrawSelectionParaController(canvas, centerX, centerY, rInnerRing,rOuterRing,triLength,pressed);
+            centerX = Paragraphrect.fRight;
+            centerY = (Paragraphrect.fTop + Paragraphrect.fBottom)/2;
+            DrawSelectionParaController(canvas, centerX, centerY, rInnerRing,rOuterRing,triLength,pressed);
+            centerX = (Paragraphrect.fLeft +   Paragraphrect.fRight)/2;
+            centerY = Paragraphrect.fBottom;
+            DrawSelectionParaController(canvas, centerX, centerY, rInnerRing,rOuterRing,triLength,pressed);
+
+            centerX = (Paragraphrect.fLeft +   Paragraphrect.fRight)/2;
+            centerY = Paragraphrect.fTop;
+            DrawSelectionParaController(canvas, centerX, centerY, rInnerRing,rOuterRing,triLength,pressed);
+        }else{
+			// kiwon98.lee Drawing selected area >>
+			SkPaint paintInner;
+			SkPath pathInner;
+			paintInner.setAntiAlias(true);
+
+			paintInner.setColor(SELECTED_BG_COLOR);
+			pathInner.addRect(SkIntToScalar(temp.fLeft), SkIntToScalar(temp.fTop), SkIntToScalar(temp.fRight), SkIntToScalar(temp.fBottom));
+			pathInner.close();
+			canvas->drawPath(pathInner, paintInner);
+			// << Drawing selected area
+
+            path.addRect(SkIntToScalar(Paragraphrect.fLeft), SkIntToScalar(Paragraphrect.fTop), 
+            SkIntToScalar(Paragraphrect.fRight), SkIntToScalar(Paragraphrect.fTop +2));
+            path.close();
+            path.addRect(SkIntToScalar(Paragraphrect.fLeft), SkIntToScalar(Paragraphrect.fTop), 
+            SkIntToScalar(Paragraphrect.fLeft+2), SkIntToScalar(Paragraphrect.fBottom));
+            path.close();
+            path.addRect(SkIntToScalar(Paragraphrect.fRight), SkIntToScalar(Paragraphrect.fBottom), 
+            SkIntToScalar(Paragraphrect.fLeft), SkIntToScalar(Paragraphrect.fBottom -2));
+            path.close();
+            path.addRect(SkIntToScalar(Paragraphrect.fRight), SkIntToScalar(Paragraphrect.fBottom), 
+            SkIntToScalar(Paragraphrect.fRight -2), SkIntToScalar(Paragraphrect.fTop));
+            path.close();
+            paint.setAntiAlias(true);
+            paint.setColor(SK_ColorBLUE);
+            paint.setStyle(SkPaint::kFill_Style);   
+            canvas->drawPath(path, paint);
+
+            switch (controler) {
+                    case SelectControlerLeftMiddle:
+                    centerX = Paragraphrect.fLeft;
+                    centerY = (Paragraphrect.fTop + Paragraphrect.fBottom)/2;
+                    break;
+                    
+                    case SelectControlerRightMiddle:
+                    centerX = Paragraphrect.fRight;
+                    centerY = (Paragraphrect.fTop + Paragraphrect.fBottom)/2;
+                    break;
+                    
+                    case SelectControlerBottomMiddle:
+                    centerX = (Paragraphrect.fLeft +   Paragraphrect.fRight)/2;
+                    centerY =  Paragraphrect.fBottom;
+                    break;
+
+                    case SelectControlerTopMiddle:
+                    centerX = (Paragraphrect.fLeft +   Paragraphrect.fRight)/2;
+                    centerY =  Paragraphrect.fTop;
+                    break;
+                    
+                    default:
+                    DBG_NAV_LOG("Selection controler not set!!! ");
+                   break;
+            }
+            DrawSelectionParaController(canvas, centerX, centerY, rInnerRing,rOuterRing,triLength,pressed);
+        }
+    }else{
+
+		// kiwon98.lee Drawing selected area >>
+		// To solve different selection color issue in paragraph mode,
+		// make engine color to transparent and fill selected area here.
+		SkPaint paintSelected;
+		paintSelected.setAntiAlias(true);
+		paintSelected.setColor(SELECTED_BG_COLOR);
+		paintSelected.setStyle(SkPaint::kFill_Style);
+
+		SkIRect rtStart;
+		SkIRect rtMiddle;
+		SkIRect rtEnd;
+
+		SkIRect rtSelected = copyRegion->getBounds();	
+
+		// Get selected area
+		rtStart.set( SkScalarRound(startRect.fLeft), SkScalarRound(startRect.fTop),
+							rtSelected.fRight, SkScalarRound(startRect.fBottom) );
+		rtMiddle.set( rtSelected.fLeft, SkScalarRound(startRect.fBottom),
+							rtSelected.fRight, SkScalarRound(endRect.fTop) );
+		rtEnd.set( rtSelected.fLeft, SkScalarRound(endRect.fTop),
+							SkScalarRound(endRect.fRight), SkScalarRound(endRect.fBottom) );
+
+		// Combine the rectangles
+		SkRegion regionSelection;
+		regionSelection.setRect( rtStart );
+		regionSelection.op( rtMiddle, SkRegion::kUnion_Op );
+		regionSelection.op( rtEnd, SkRegion::kUnion_Op );
+		
+		SkPath pathSelection;
+		regionSelection.getBoundaryPath( &pathSelection );
+
+		canvas->drawPath( pathSelection, paintSelected );
+		// << Drawing selected area
+
+		if ( SelectControlerNone != controler )
+		{
+		    SkPaint paint;
+		    float centerX, centerY, rInnerRing;
+		    float rOuterRing = ControllerRadius;
+		    float triLength = rOuterRing/2;
+		    rInnerRing = rOuterRing/3 ;
+		    centerX = endRect.fRight;
+		    centerY = endRect.fBottom + rOuterRing +2;
+		    SkRect rect1;
+		    SkRect rect2;
+		    rect1.set(startRect.fLeft, startRect.fTop, startRect.fLeft+2, startRect.fBottom);
+		    rect2.set(endRect.fLeft, endRect.fTop, endRect.fLeft + 2 , endRect.fBottom );
+		    paint.setAntiAlias(true);
+		    paint.setColor(SK_ColorBLUE);
+		    
+		    if(false == pressed){
+		     paint.setColor(SkColorSetRGB(46,169, 255));
+		    }
+		    paint.setStyle(SkPaint::kFill_Style);
+		    canvas->drawRect(rect1, paint);
+		    canvas->drawRect(rect2, paint);
+		    centerX = endRect.fLeft + 1; //Mid-point of endRect's width
+		    canvas->drawCircle(centerX, centerY, rInnerRing, paint);
+		    DrawSelectionMainController(canvas, centerX, centerY, rInnerRing,rOuterRing,triLength,pressed);
+
+		    centerX = startRect.fLeft +1;
+		    centerY = startRect.fTop - rOuterRing -3;            
+		    DrawSelectionLeftController(canvas, centerX, centerY, rInnerRing,rOuterRing,triLength,pressed);
+		}
+	}       
+		
+	canvas->restoreToCount(sc);
+}
+
+void DrawSelectionMainController(SkCanvas* canvas,float centerX, float centerY, float inner_radius, 
+            float outer_radius, float triLength, int preessed)
+{
+    SkPaint paint;
+    float radius, strokewidthby2;
+    //triangle
+    SkPath path;
+    float tridist = triLength * 0.866 ; // Perpendicular distance from triangle's apex to its bottom
+    float triX = 0;    // x coordinate of triangle's apex	
+    float triY = 0;    // y coordinate of triangle's apex	
+    radius = inner_radius;
+    paint.setStrokeJoin(SkPaint::kRound_Join);
+    paint.setARGB(0xff, 120,180, 200);
+    paint.setAntiAlias(true);
+
+    //draw the inner circle
+    canvas->drawCircle(centerX, centerY, radius, paint);
+
+    paint.setStrokeWidth(outer_radius - inner_radius);
+    paint.setStyle(SkPaint::kStroke_Style);
+    strokewidthby2 = (outer_radius - inner_radius) / 2.0f;
+    path.reset();
+    path.addCircle(centerX, centerY, (radius + strokewidthby2));
+    triX = centerX;
+    triY = centerY - radius - strokewidthby2 - tridist;
+    path.moveTo( triX, triY);
+    path.lineTo(triX - triLength/2, triY + tridist);
+    path.lineTo(triX + triLength/2, triY + tridist);
+    path.close();
+    //settings for 3d effect
+    SkEmbossMaskFilter::Light light;
+    light.fDirection[0] = SK_Scalar1/6;
+    light.fDirection[1] = SK_Scalar1/6;
+    light.fDirection[2] = SK_Scalar1/6;
+    light.fAmbient = 0x80;
+    light.fSpecular = 0x80;
+    SkEmbossMaskFilter* embossFilter = new SkEmbossMaskFilter(light, 1.0);
+    paint.setMaskFilter(embossFilter)->unref();
+    canvas->drawPath(path, paint);
+}
+
+
+void DrawSelectionLeftController(SkCanvas* canvas,float centerX, float centerY, float inner_radius, 
+            float outer_radius, float triLength, int preessed)
+{
+    SkPaint paint;
+    float radius, strokewidthby2;
+    //triangle
+    SkPath path;
+    float tridist = triLength * 0.866 ; // Perpendicular distance from triangle's apex to its bottom
+    float triX = 0;    // x coordinate of triangle's apex	
+    float triY = 0;    // y coordinate of triangle's apex	
+    radius = inner_radius;
+    paint.setStrokeJoin(SkPaint::kRound_Join);
+    paint.setARGB(0xff, 120, 180, 200);
+    paint.setAntiAlias(true);
+
+    //draw the inner circle
+    canvas->drawCircle(centerX, centerY, radius, paint);
+
+    paint.setStrokeWidth(outer_radius - inner_radius);
+    paint.setStyle(SkPaint::kStroke_Style);
+    strokewidthby2 = (outer_radius - inner_radius) / 2.0f;
+    path.reset();
+    path.addCircle(centerX, centerY, (radius + strokewidthby2));
+    
+    triX = centerX ;
+    triY = centerY +  radius + strokewidthby2 + tridist;
+    path.moveTo( triX, triY);
+    path.lineTo(triX - triLength/2, triY - tridist);
+    path.lineTo(triX + triLength/2, triY - tridist);
+    path.close();
+    //settings for 3d effect
+    SkEmbossMaskFilter::Light light;
+    light.fDirection[0] = SK_Scalar1/6;
+    light.fDirection[1] = SK_Scalar1/6;
+    light.fDirection[2] = SK_Scalar1/6;
+    light.fAmbient = 0x80;
+    light.fSpecular = 0x80;
+    SkEmbossMaskFilter* embossFilter = new SkEmbossMaskFilter(light, 1.0);
+    paint.setMaskFilter(embossFilter)->unref();
+    canvas->drawPath(path, paint);
+}
+
+
+void DrawSelectionParaController(SkCanvas* canvas,float centerX, float centerY, float inner_radius, 
+                        float outer_radius, float triLength, int preessed)
+{
+    SkPaint paint;
+    float radius, strokewidthby2;
+    //triangle
+    SkPath path;
+    radius = inner_radius;
+    paint.setStrokeJoin(SkPaint::kRound_Join);
+    paint.setARGB(0xff, 120, 180, 200);
+    paint.setAntiAlias(true);
+
+    //draw the inner circle
+    canvas->drawCircle(centerX, centerY, radius, paint);
+
+    paint.setStrokeWidth(outer_radius - inner_radius);
+    paint.setStyle(SkPaint::kStroke_Style);
+    strokewidthby2 = (outer_radius - inner_radius) / 2.0f;
+    path.reset();
+    path.addCircle(centerX, centerY, (radius + strokewidthby2));
+    path.close();
+    //settings for 3d effect
+    SkEmbossMaskFilter::Light light;
+    light.fDirection[0] = SK_Scalar1/6;
+    light.fDirection[1] = SK_Scalar1/6;
+    light.fDirection[2] = SK_Scalar1/6;
+    light.fAmbient = 0x80;
+    light.fSpecular = 0x80;
+    SkEmbossMaskFilter* embossFilter = new SkEmbossMaskFilter(light, 1.0);
+    paint.setMaskFilter(embossFilter)->unref();
+    canvas->drawPath(path, paint);
+}
+
+void getSelectioncontrol(SkPath* path, SkRect sRect, SkRect eRect, int paragraphGranularity, int ControlerRadius, int pressed,int ControlerValue)
+{
+    int rController = ControlerRadius;	
+    //ParaGraph Granularity : 
+    if(pressed == true ){
+        path->addRect(SkIntToScalar(sRect.fLeft), SkIntToScalar(sRect.fTop), 
+        SkIntToScalar(sRect.fRight), SkIntToScalar(sRect.fTop +2));
+        path->close();
+        path->addRect(SkIntToScalar(sRect.fLeft), SkIntToScalar(sRect.fTop), 
+        SkIntToScalar(sRect.fLeft+2), SkIntToScalar(sRect.fBottom));
+        path->close();
+        path->addRect(SkIntToScalar(sRect.fRight), SkIntToScalar(sRect.fBottom), 
+        SkIntToScalar(sRect.fLeft), SkIntToScalar(sRect.fBottom -2));
+        path->close();
+        path->addRect(SkIntToScalar(sRect.fRight), SkIntToScalar(sRect.fBottom), 
+        SkIntToScalar(sRect.fRight -2), SkIntToScalar(sRect.fTop));
+        path->close();
+
+        switch (ControlerValue) {
+            case SelectControlerLeftMiddle:
+            path->addCircle(SkIntToScalar(sRect.fLeft), SkIntToScalar((sRect.fTop + sRect.fBottom )/2),
+            SkIntToScalar(rController));
+            path->close();
+            break;
+            case SelectControlerRightMiddle:
+            path->addCircle(SkIntToScalar(sRect.fRight),
+            SkIntToScalar((sRect.fTop + sRect.fBottom )/2),SkIntToScalar(rController));
+            path->close();
+            break;
+            case SelectControlerBottomMiddle:
+            path->addCircle(SkIntToScalar((sRect.fLeft + sRect.fRight)/2),
+            SkIntToScalar(sRect.fBottom),SkIntToScalar(rController));
+            path->close();
+            break;
+            case SelectControlerTopMiddle:
+            path->addCircle(SkIntToScalar((sRect.fLeft + sRect.fRight)/2),
+            SkIntToScalar(sRect.fTop),SkIntToScalar(rController));
+            path->close();
+            break;
+            default:
+            DBG_NAV_LOG("Selection controler not set!!! ");
+        }
+
+}else{
+    path->addCircle(SkIntToScalar(sRect.fLeft), SkIntToScalar((sRect.fTop + sRect.fBottom )/2),SkIntToScalar(rController));
+    path->close();
+    path->addCircle(SkIntToScalar((sRect.fLeft + sRect.fRight)/2), SkIntToScalar(sRect.fBottom),SkIntToScalar(rController));
+    path->close();
+    path->addCircle(SkIntToScalar(sRect.fRight), SkIntToScalar((sRect.fTop + sRect.fBottom )/2),SkIntToScalar(rController));
+    path->close();
+    path->addCircle(SkIntToScalar((sRect.fLeft + sRect.fRight)/2), SkIntToScalar(sRect.fTop),SkIntToScalar(rController));
+    path->close();
+
+}
+
+}
+//SAMSUNG CHANGE END : TEXT_SELECTION_FEATURE
 
 private: // local state for WebView
     // private to getFrameCache(); other functions operate in a different thread
@@ -1999,6 +2423,17 @@ static jint nativeGetBlockLeftEdge(JNIEnv *env, jobject obj, jint x, jint y,
     return view->getBlockLeftEdge(x, y, scale);
 }
 
+//SAMSUNG CHANGES+
+static jint nativeGetBlockWidth(JNIEnv *env, jobject obj, jint x, jint y)
+{
+    WebView* view = GET_NATIVE_VIEW(env, obj);
+    LOG_ASSERT(view, "view not set in %s", __FUNCTION__);
+    if (!view)
+        return -1;
+    return view->getBlockWidth(x, y);
+}
+//SAMSUNG CHANGES-
+
 static void nativeDestroy(JNIEnv *env, jobject obj)
 {
     WebView* view = GET_NATIVE_VIEW(env, obj);
@@ -2034,6 +2469,113 @@ static bool nativeMoveCursorToNextTextInput(JNIEnv *env, jobject obj)
     view->getWebViewCore()->m_moveGeneration++;
     return true;
 }
+
+//SAMSUNG CHANGE >>
+static int nativeMoveCursorToInput(JNIEnv *env, jobject obj, jstring name, jint nodePointer, jint direction)
+{
+    WebView* view = GET_NATIVE_VIEW(env, obj);
+    LOG_ASSERT(view, "view not set in %s", __FUNCTION__);
+
+    CachedRoot* root = view->getFrameCache(WebView::DontAllowNewer);
+    if (!root)
+        return -1;
+
+    WebCore::String nodeName = to_string(env, name);
+
+    LOGD ( "WebView::nativeMoveCursorToInput root=%x, nodeName=%s, nodePointer=%x, direction=%x", 
+            root, nodeName.latin1().data(), nodePointer, direction);
+
+    const CachedFrame* cursorFrame = NULL;
+    const CachedNode* cursor = root->currentCursor(&cursorFrame);
+    if (!cursor) {
+        LOGD ( "WebView::nativeMoveCursorToInput current cursor is NULL");        
+        cursor = root->searchNode(nodeName, (void*)nodePointer, &cursorFrame) ;
+        if (!cursor ) {
+            LOGD ( "WebView::nativeMoveCursorToInput search result is NULL");        
+            return -1;
+        }
+    }
+    
+    if (!cursor->isTextInput() && !cursor->isSelect()) {
+        LOGD ( "WebView::nativeMoveCursorToInput focused node is not inputfield");        
+        return -1;
+    }
+    LOGD ( "WebView::nativeMoveCursorToInput cursor=%x, cursorFrame=%x", cursor, cursorFrame);
+    
+    const CachedFrame* nextFrame = NULL;
+    const CachedNode* next = NULL ;
+    if (direction == 0)
+        next = cursorFrame->nextInputField(cursor, &nextFrame, true);
+    else
+        next = cursorFrame->previousInputField(cursor, &nextFrame, true);
+        
+    if (!next) {
+        LOGD ( "WebView::nativeMoveCursorToInput next input field is NULL");        
+        return -1;
+    }
+    nodeName = next->name() ;
+    LOGD ( "WebView::nativeMoveCursorToInput next=%x, nextName=%s, nextFrame=%x", 
+        next, nodeName.latin1().data(), nextFrame);
+
+    const WebCore::IntRect& bounds = next->bounds(nextFrame);
+    root->rootHistory()->setMouseBounds(bounds);
+    view->getWebViewCore()->updateCursorBounds(root, nextFrame, next);
+    root->setCursor(const_cast<CachedFrame*>(nextFrame),
+            const_cast<CachedNode*>(next));
+
+    if (next->isTextInput()) {
+        WebCore::IntPoint pos;
+        root->getSimulatedMousePosition(&pos);
+        view->sendMoveFocus(static_cast<WebCore::Frame*>(nextFrame->framePointer()),
+            static_cast<WebCore::Node*>(next->nodePointer()));
+        view->getWebViewCore()->m_moveGeneration++;
+    
+    } else {
+        view->sendMouseClick(static_cast<WebCore::Frame*>(nextFrame->framePointer()),
+                static_cast<WebCore::Node*>(next->nodePointer()));
+    }
+    
+    if (!next->isInLayer())
+        view->scrollRectOnScreen(bounds);
+
+    if( next->isTextInput())
+        return 0 ;
+
+    return 1 ;
+}
+
+static jint nativeInputFieldAction(JNIEnv *env, jobject obj,  jstring nodeName, jint nodePointer)
+{
+    WebView* view = GET_NATIVE_VIEW(env, obj);
+    CachedRoot* root = view->getFrameCache(WebView::DontAllowNewer);
+    if (!root)
+        return static_cast<jint>(-1);
+    WebCore::String name = to_string(env, nodeName);
+    
+    return static_cast<jint>(root->cursorInputFieldAction(name, (void*)nodePointer));
+}
+
+static jobject nativeGetNodeBounds(JNIEnv *env, jobject obj, jstring nodeName, jint nodePointer)
+{
+    const CachedFrame* frame;
+    WebView* view = GET_NATIVE_VIEW(env, obj);
+    CachedRoot* root = view->getFrameCache(WebView::DontAllowNewer);
+    WebCore::String name = to_string(env, nodeName);
+
+    const CachedNode* node = root->searchNode(name, (void*)nodePointer, &frame) ;
+    if (!node) {
+        LOGD ( "WebView::nativeGetNodeBounds node is NULL");        
+    }
+    WebCore::IntRect bounds = node ? node->bounds(frame)
+        : WebCore::IntRect(0, 0, 0, 0);
+    jclass rectClass = env->FindClass("android/graphics/Rect");
+    jmethodID init = env->GetMethodID(rectClass, "<init>", "(IIII)V");
+    jobject rect = env->NewObject(rectClass, init, bounds.x(),
+        bounds.y(), bounds.right(), bounds.bottom());
+    return rect;
+}
+
+//SAMSUNG CHANGE <<
 
 static int nativeMoveGeneration(JNIEnv *env, jobject obj)
 {
@@ -2075,6 +2617,41 @@ static void dumpToFile(const char text[], void* file) {
     fwrite("\n", 1, 1, reinterpret_cast<FILE*>(file));
 }
 #endif
+
+//SAMSUNG CHANGE BEGIN : TEXT_SELECTION_FEATURE
+static void nativeSetTextSelectionColor(JNIEnv *env, jobject obj, jint r, jint g, jint b)
+{
+    DBG_NAV_LOG("nativeSetTextSelectionColor");
+    WebView* view = GET_NATIVE_VIEW(env, obj);
+    LOG_ASSERT(view, "view not set in %s", __FUNCTION__);
+    view->setTextSelectionColor(r,g,b);
+    DBG_NAV_LOG("nativeSetTextSelectionColor: End");
+}
+
+static void nativeDrawSelectionControls(JNIEnv *env, jobject obj, jobject canvas, jobject copyRegion, 
+					 jobject startRect, jobject endRect, jint zoomlevel, 
+				jboolean set,jint selectionGranularity, jint controlerValue)
+{
+	DBG_NAV_LOG("nativeDrawSelectionControls Begin");
+	SkCanvas* nativeCanvas = GraphicsJNI::getNativeCanvas(env, canvas);
+	WebView* view = GET_NATIVE_VIEW(env, obj);
+	SkRegion* nativeRegion = GraphicsJNI::getNativeRegion(env, copyRegion);
+
+   	int L, T, R, B;
+        SkRect nativeSRect, nativeERect;
+   	GraphicsJNI::get_jrect(env, startRect, &L, &T, &R, &B);
+	nativeSRect.iset( L, T, R, B);
+	GraphicsJNI::get_jrect(env, endRect, &L, &T, &R, &B);
+        nativeERect.iset( L, T, R, B);
+
+	view->drawSelectionControls(nativeCanvas, nativeRegion,nativeSRect, nativeERect,zoomlevel,set,selectionGranularity,controlerValue);
+	LOG_ASSERT(view, "view not set in %s", __FUNCTION__);
+	DBG_NAV_LOG("nativeDrawSelectionControls: End");
+}
+
+
+
+//SAMSUNG CHANGE END : TEXT_SELECTION_FEATURE
 
 static void nativeDumpDisplayTree(JNIEnv* env, jobject jwebview, jstring jurl)
 {
@@ -2273,6 +2850,20 @@ static JNINativeMethod gJavaWebViewMethods[] = {
     ,{ "nativeSetCursorPressedColors", "(II)V",
         (void*) nativeSetCursorPressedColors }
     //ROAMTOUCH CHANGE <<    
+//SAMSUNG CHANGES >
+    { "nativeInputFieldAction", "(Ljava/lang/String;I)I",
+        (void*) nativeInputFieldAction },
+    { "nativeMoveCursorToInput", "(Ljava/lang/String;II)I",
+        (void*) nativeMoveCursorToInput },
+    { "nativeGetNodeBounds", "(Ljava/lang/String;I)Landroid/graphics/Rect;",
+        (void*) nativeGetNodeBounds },
+    { "nativeSetTextSelectionColor", "(III)V",
+        (void*) nativeSetTextSelectionColor },
+	{ "nativeGetBlockWidth", "(II)I",
+		(void*) nativeGetBlockWidth },
+    { "nativeDrawSelectionControls", "(Landroid/graphics/Canvas;Landroid/graphics/Region;Landroid/graphics/Rect;Landroid/graphics/Rect;IZII)V",
+        (void*) nativeDrawSelectionControls }
+//SAMSUNG CHANGES <
 };
 
 int register_webview(JNIEnv* env)

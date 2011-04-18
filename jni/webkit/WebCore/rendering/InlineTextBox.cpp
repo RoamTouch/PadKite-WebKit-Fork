@@ -37,6 +37,8 @@
 #include "RenderTheme.h"
 #include "Text.h"
 #include "break_lines.h"
+#include "Settings.h"
+
 #include <wtf/AlwaysInline.h>
 
 using namespace std;
@@ -435,40 +437,47 @@ void InlineTextBox::paint(RenderObject::PaintInfo& paintInfo, int tx, int ty)
     Color selectionStrokeColor = textStrokeColor;
     float selectionStrokeWidth = textStrokeWidth;
     ShadowData* selectionShadow = textShadow;
-    if (haveSelection) {
-        // Check foreground color first.
-        Color foreground = paintInfo.forceBlackText ? Color::black : renderer()->selectionForegroundColor();
-        if (foreground.isValid() && foreground != selectionFillColor) {
-            if (!paintSelectedTextOnly)
-                paintSelectedTextSeparately = true;
-            selectionFillColor = foreground;
-        }
 
-        if (RenderStyle* pseudoStyle = renderer()->getCachedPseudoStyle(SELECTION)) {
-            ShadowData* shadow = paintInfo.forceBlackText ? 0 : pseudoStyle->textShadow();
-            if (shadow != selectionShadow) {
+    //SAMSUNG CHANGE BEGIN :  Advance Text Selection 
+    if( false ==( renderer()->document()->settings()  &&  renderer()->document()->settings()->advancedSelectionEnabled() )){
+        if (haveSelection) {
+            // Check foreground color first.
+            Color foreground = paintInfo.forceBlackText ? Color::black : renderer()->selectionForegroundColor();
+            if (foreground.isValid() && foreground != selectionFillColor) {
                 if (!paintSelectedTextOnly)
                     paintSelectedTextSeparately = true;
-                selectionShadow = shadow;
+                selectionFillColor = foreground;
             }
 
-            float strokeWidth = pseudoStyle->textStrokeWidth();
-            if (strokeWidth != selectionStrokeWidth) {
-                if (!paintSelectedTextOnly)
-                    paintSelectedTextSeparately = true;
-                selectionStrokeWidth = strokeWidth;
-            }
+            if (RenderStyle* pseudoStyle = renderer()->getCachedPseudoStyle(SELECTION)) {
+                ShadowData* shadow = paintInfo.forceBlackText ? 0 : pseudoStyle->textShadow();
+                if (shadow != selectionShadow) {
+                    if (!paintSelectedTextOnly)
+                        paintSelectedTextSeparately = true;
+                    selectionShadow = shadow;
+                }
 
-            Color stroke = paintInfo.forceBlackText ? Color::black : pseudoStyle->textStrokeColor();
-            if (!stroke.isValid())
-                stroke = pseudoStyle->color();
-            if (stroke != selectionStrokeColor) {
-                if (!paintSelectedTextOnly)
-                    paintSelectedTextSeparately = true;
-                selectionStrokeColor = stroke;
+                float strokeWidth = pseudoStyle->textStrokeWidth();
+                if (strokeWidth != selectionStrokeWidth) {
+                    if (!paintSelectedTextOnly)
+                        paintSelectedTextSeparately = true;
+                    selectionStrokeWidth = strokeWidth;
+                }
+
+                Color stroke = paintInfo.forceBlackText ? Color::black : pseudoStyle->textStrokeColor();
+                if (!stroke.isValid())
+                    stroke = pseudoStyle->color();
+                if (stroke != selectionStrokeColor) {
+                    if (!paintSelectedTextOnly)
+                        paintSelectedTextSeparately = true;
+                    selectionStrokeColor = stroke;
+                }
             }
         }
     }
+    //SAMSUNG END  
+
+
 
     int baseline = renderer()->style(m_firstLine)->font().ascent();
     IntPoint textOrigin(m_x + tx, m_y + ty + baseline);

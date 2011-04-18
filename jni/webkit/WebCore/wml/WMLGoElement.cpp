@@ -38,7 +38,11 @@
 #include "WMLPostfieldElement.h"
 #include "WMLTimerElement.h"
 #include "WMLVariables.h"
-
+#if ENABLE(WMLSCRIPT)
+#include "DocLoader.h"
+#include "WMLScriptInterface.h"
+#include "CachedWMLScript.h"
+#endif
 namespace WebCore {
 
 using namespace WMLNames;
@@ -63,6 +67,22 @@ void WMLGoElement::deregisterPostfieldElement(WMLPostfieldElement* postfield)
 
 void WMLGoElement::parseMappedAttribute(MappedAttribute* attr)
 {
+
+#if ENABLE(WMLSCRIPT)
+    if (attr->name() == HTMLNames::hrefAttr) {
+        String urlStr = WMLScript::getScriptURL(attr->value(), document()) ;
+        if ( !urlStr.isEmpty() ) {
+            WMLScriptLoader::m_script = document()->docLoader()->requestWMLScript(urlStr, getAttribute(HTMLNames::charsetAttr));
+            WMLScriptLoader::m_wmlDoc = static_cast<WMLDocument *>(document()) ;
+            WMLScriptLoader::m_script->addClient(static_cast<WMLScriptLoader*>(this)) ;
+            return ;
+        }
+        else {
+            WMLTaskElement::parseMappedAttribute(attr);
+        }
+    }
+    else
+#endif
     if (attr->name() == HTMLNames::methodAttr)
         m_formDataBuilder.parseMethodType(attr->value());
     else if (attr->name() == HTMLNames::enctypeAttr)
@@ -109,8 +129,32 @@ void WMLGoElement::executeTask()
     if (WMLTimerElement* eventTimer = card->eventTimer())
         eventTimer->stop();
 
+#if ENABLE(WMLSCRIPT)
+    //if ( url.string().endsWith(":home")) {
+    //  WMLDocument *doc = static_cast<WMLDocument *>(document()) ;
+    //  doc->frame()->loader()->getFromHomepage() ; 
+    //  return ; 
+    //}
+    //else {
+    String scriptURL = WMLScript::getScriptURL(url.string(), this->document()) ;
+    if(!scriptURL.isEmpty()) {
+
+        String urlFragment = WMLScript::getScriptFragment(url.string()) ;
+
+        Node *parent = parentNode() ;
+        ASSERT (parent) ;
+        if (parent->hasTagName(oneventTag))
+            document->scriptInterface()->setWmlsecOnEventParams(scriptURL, urlFragment) ;
+        else
+            document->scriptInterface()->exeScript(scriptURL, urlFragment);
+        return;
+    }
+
+    //}
+#endif
+
     // FIXME: 'newcontext' handling not implemented for external cards
-    bool inSameDeck = document->url().path() == url.path();
+    bool inSameDeck = ((document->url().path() == url.path()) && (document->url().query() == url.query())); //SAMSUNG FIX
     if (inSameDeck && url.hasFragmentIdentifier()) {
         if (WMLCardElement* card = WMLCardElement::findNamedCardInDocument(document, url.fragmentIdentifier())) {
             if (card->isNewContext())
@@ -175,10 +219,14 @@ void WMLGoElement::prepareGETRequest(ResourceRequest& request, const KURL& url)
         return;
 
     RefPtr<FormData> data = createFormData(CString());
-
-    KURL remoteURL(url);
-    remoteURL.setQuery(data->flattenToString());
-    request.setURL(remoteURL);
+    // SAMSUNG_WML_FIXES+
+    // http://218.248.40.195/vswap2/interface/ExamineTest?id=wml/events/intrinsics/1&ts=0051
+    if (m_postfieldElements.size()>0) {
+        KURL remoteURL(url);
+        remoteURL.setQuery(data->flattenToString());
+        request.setURL(remoteURL);
+    }
+    // SAMSUNG_WML_FIXES-
 }
 
 PassRefPtr<FormData> WMLGoElement::createFormData(const CString& boundary)
@@ -209,11 +257,16 @@ PassRefPtr<FormData> WMLGoElement::createFormData(const CString& boundary)
         } else
             m_formDataBuilder.addKeyValuePairAsFormData(encodedData, key, value);
     }
+    // SAMSUNG_WML_FIXES+
+    // http://218.248.40.195/vswap2/interface/ExamineTest?id=wml/events/intrinsics/1&ts=0051
+    // Check if we have some encoded data before appending it.
+    if (encodedData.size()>0) {
+        if (m_formDataBuilder.isMultiPartForm())
+            m_formDataBuilder.addBoundaryToMultiPartHeader(encodedData, boundary, true);
 
-    if (m_formDataBuilder.isMultiPartForm())
-        m_formDataBuilder.addBoundaryToMultiPartHeader(encodedData, boundary, true);
-
-    result->appendData(encodedData.data(), encodedData.size());
+        result->appendData(encodedData.data(), encodedData.size());
+    }    
+    // SAMSUNG_WML_FIXES-
     return result;
 }
 

@@ -25,7 +25,9 @@
 
 #include "WMLDoElement.h"
 #include "WMLErrorHandling.h"
+#include "WMLEventHandlingElement.h"
 #include "WMLNames.h"
+#include "WMLOnEventElement.h"
 
 namespace WebCore {
 
@@ -57,6 +59,25 @@ void WMLNoopElement::insertedIntoDocument()
 
         ASSERT(!doElement->attached());
         doElement->attach();
+    // SAMSUNG_WML_FIXES+
+	} else if (parent->hasTagName(oneventTag)) {
+		WMLOnEventElement* onEventElement = static_cast<WMLOnEventElement*>(parent);
+		WMLIntrinsicEventType eventType = onEventElement->eventType() ;
+
+		onEventElement->setNoop(true) ;
+
+		if(eventType != WMLIntrinsicEventUnknown) {
+			WMLEventHandlingElement* eventHandlingElement = WMLOnEventElement::eventHandlingParent(onEventElement->parentNode());
+			if (!eventHandlingElement)
+				return;
+
+			WMLIntrinsicEventHandler* eventHandler = eventHandlingElement->eventHandler() ;
+			if (!eventHandler)
+				return;
+
+			eventHandler->deregisterIntrinsicEvent(eventType);
+		}
+    // SAMSUNG_WML_FIXES-
     } else if (parent->hasTagName(anchorTag))
         reportWMLError(document(), WMLErrorForbiddenTaskInAnchorElement);
 }

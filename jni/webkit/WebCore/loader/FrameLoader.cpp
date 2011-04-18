@@ -355,6 +355,14 @@ void FrameLoader::urlSelected(const ResourceRequest& request, const String& pass
 
     FrameLoadRequest frameRequest(request, target);
 
+#ifdef SAMSUNG_ANDROID_FORCE_HTML
+    if (request.url() == String("android:forcehtml")) {
+        frameRequest.resourceRequest().setForceHTML(true) ;
+        frameRequest.resourceRequest().setURL(url()) ;
+        lockBackForwardList = true ;
+    }
+#endif
+
     if (referrerPolicy == NoReferrer)
         m_suppressOpenerInNewFrame = true;
     else if (frameRequest.resourceRequest().httpReferrer().isEmpty())
@@ -1788,10 +1796,13 @@ void FrameLoader::loadInSameDocument(const KURL& url, SerializedScriptValue* sta
     // Otherwise, the parent frame may think we never finished loading.
     started();
     
-    if (hashChange) {
+	// <samsung> shkim - merge webkit latest code Changeset 55555
+    //if (hashChange) {
+    // We need to scroll to the fragment whether or not a hash change occurred, since
+    // the user might have scrolled since the previous navigation.
         if (FrameView* view = m_frame->view())
             view->scrollToFragment(m_URL);
-    }
+    //}
     
     m_isComplete = false;
     checkCompleted();
@@ -1917,12 +1928,20 @@ void FrameLoader::loadFrameRequest(const FrameLoadRequest& request, bool lockHis
     if (request.resourceRequest().httpMethod() == "POST")
         loadPostRequest(request.resourceRequest(), referrer, request.frameName(), lockHistory, loadType, event, formState.get(), request.resourceRequest().getUserGesture());
     else
-        loadURL(request.resourceRequest().url(), referrer, request.frameName(), lockHistory, loadType, event, formState.get(), request.resourceRequest().getUserGesture());
+        loadURL(request.resourceRequest().url(), referrer, request.frameName(), lockHistory, loadType, event, formState.get(), request.resourceRequest().getUserGesture()
+#ifdef SAMSUNG_ANDROID_FORCE_HTML
+        , request.resourceRequest().forceHTML()
+#endif
+        );
 #else
     if (request.resourceRequest().httpMethod() == "POST")
         loadPostRequest(request.resourceRequest(), referrer, request.frameName(), lockHistory, loadType, event, formState.get());
     else
-        loadURL(request.resourceRequest().url(), referrer, request.frameName(), lockHistory, loadType, event, formState.get());
+        loadURL(request.resourceRequest().url(), referrer, request.frameName(), lockHistory, loadType, event, formState.get()
+#ifdef SAMSUNG_ANDROID_FORCE_HTML
+        , request.resourceRequest().forceHTML()
+#endif
+        );
 #endif
 
     // FIXME: It's possible this targetFrame will not be the same frame that was targeted by the actual
@@ -1941,10 +1960,18 @@ void FrameLoader::loadFrameRequest(const FrameLoadRequest& request, bool lockHis
 
 #ifdef ANDROID_USER_GESTURE
 void FrameLoader::loadURL(const KURL& newURL, const String& referrer, const String& frameName, bool lockHistory, FrameLoadType newLoadType,
-    PassRefPtr<Event> event, PassRefPtr<FormState> prpFormState, bool userGesture)
+    PassRefPtr<Event> event, PassRefPtr<FormState> prpFormState, bool userGesture
+#ifdef SAMSUNG_ANDROID_FORCE_HTML
+    , bool forceHTML
+#endif
+    )
 #else
 void FrameLoader::loadURL(const KURL& newURL, const String& referrer, const String& frameName, bool lockHistory, FrameLoadType newLoadType,
-    PassRefPtr<Event> event, PassRefPtr<FormState> prpFormState)
+    PassRefPtr<Event> event, PassRefPtr<FormState> prpFormState
+#ifdef SAMSUNG_ANDROID_FORCE_HTML
+    , bool forceHTML
+#endif
+    )
 #endif
 {
     RefPtr<FormState> formState = prpFormState;
@@ -1953,6 +1980,9 @@ void FrameLoader::loadURL(const KURL& newURL, const String& referrer, const Stri
     ResourceRequest request(newURL);
 #ifdef ANDROID_USER_GESTURE
     request.setUserGesture(userGesture);
+#endif
+#ifdef SAMSUNG_ANDROID_FORCE_HTML
+    request.setForceHTML(forceHTML);
 #endif
     if (!referrer.isEmpty()) {
         request.setHTTPReferrer(referrer);

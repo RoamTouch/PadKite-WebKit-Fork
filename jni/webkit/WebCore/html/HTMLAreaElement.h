@@ -52,6 +52,12 @@ public:
     bool noHref() const;
     void setNoHref(bool);
 
+    //SAMSUNG CHANGE >>
+    enum Shape { Default, Poly, Rect, Circle, Unknown };
+	Shape shape() const { return m_shape; }
+	IntRect rect() const;
+	//SAMSUNG CHANGE <<
+
 private:
     HTMLAreaElement(const QualifiedName&, Document*);
 
@@ -65,7 +71,7 @@ private:
     virtual void updateFocusAppearance(bool /*restorePreviousSelection*/);
     virtual void dispatchBlurEvent();
     
-    enum Shape { Default, Poly, Rect, Circle, Unknown };
+    //enum Shape { Default, Poly, Rect, Circle, Unknown }; //SAMSUNG CHANGE
     Path getRegion(const IntSize&) const;
 
     OwnPtr<Path> m_region;

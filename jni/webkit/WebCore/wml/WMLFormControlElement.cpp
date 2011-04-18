@@ -76,6 +76,14 @@ void WMLFormControlElement::recalcStyle(StyleChange change)
         renderer()->updateFromElement();
 }
 
+//SAMSUNG_WML_FIX +
+String WMLFormControlElement::name() const
+{
+    return parseValueSubstitutingVariableReferences(getAttribute(HTMLNames::nameAttr));
+}
+//SAMSUNG_WML_FIX -
+
+
 }
 
 #endif

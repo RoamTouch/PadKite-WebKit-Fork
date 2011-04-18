@@ -51,6 +51,16 @@ js_binding_scripts := $(addprefix $(LOCAL_PATH)/,\
 
 FEATURE_DEFINES := ENABLE_ORIENTATION_EVENTS=1 ENABLE_TOUCH_EVENTS=1 ENABLE_DATABASE=1 ENABLE_OFFLINE_WEB_APPLICATIONS=1 ENABLE_DOM_STORAGE=1 ENABLE_VIDEO=1 ENABLE_GEOLOCATION=1 ENABLE_CONNECTION=1 ENABLE_APPLICATION_INSTALLED=1
 
+ifeq ($(ENABLE_WML), true)
+FEATURE_DEFINES := $(FEATURE_DEFINES) ENABLE_WML=1
+endif
+ifeq ($(ENABLE_XSLT), true)
+FEATURE_DEFINES := $(FEATURE_DEFINES) ENABLE_XSLT=1
+endif
+ifeq ($(ENABLE_XPATH), true)
+FEATURE_DEFINES := $(FEATURE_DEFINES) ENABLE_XPATH=1
+endif
+
 # CSS
 GEN := \
     $(intermediates)/css/JSCSSCharsetRule.h \
@@ -557,6 +567,18 @@ $(GEN): PRIVATE_CUSTOM_TOOL = perl -I $(PRIVATE_PATH)/bindings/scripts $< --tags
 $(GEN): $(LOCAL_PATH)/dom/make_names.pl $(LOCAL_PATH)/html/HTMLTagNames.in $(LOCAL_PATH)/html/HTMLAttributeNames.in
 	$(transform-generated-source)
 LOCAL_GENERATED_SOURCES += $(GEN)
+
+# WML tag and attribute names
+ifeq ($(ENABLE_WML), true)
+GEN:= $(intermediates)/WMLNames.cpp $(intermediates)/WMLElementFactory.cpp
+$(GEN): PRIVATE_PATH := $(LOCAL_PATH)
+$(GEN): PRIVATE_CUSTOM_TOOL = perl -I $(PRIVATE_PATH)/bindings/scripts $< --tags $(wml_tags) --attrs $(wml_attrs)  --extraDefines "$(FEATURE_DEFINES)" --factory --wrapperFactory --output $(dir $@)
+$(GEN): wml_tags := $(LOCAL_PATH)/wml/WMLTagNames.in
+$(GEN): wml_attrs := $(LOCAL_PATH)/wml/WMLAttributeNames.in
+$(GEN): $(LOCAL_PATH)/dom/make_names.pl $(wml_tags) $(wml_attrs)
+	$(transform-generated-source)
+LOCAL_GENERATED_SOURCES += $(GEN)
+endif
 
 # SVG tag and attribute names
 

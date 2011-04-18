@@ -206,6 +206,10 @@ namespace WebCore {
 
         IntRect firstRectForRange(Range*) const;
 
+        /* SAMSUNG CHANGE - Advanced Copy paste feature: Begin */
+        IntRect lastRectForRange(Range* range) const;
+        /* SAMSUNG CHANGE - Advanced Copy paste feature: End */
+
         void respondToChangedSelection(const VisibleSelection& oldSelection, bool closeTyping);
         bool shouldChangeSelection(const VisibleSelection& oldSelection, const VisibleSelection& newSelection, EAffinity, bool stillSelecting) const;
 

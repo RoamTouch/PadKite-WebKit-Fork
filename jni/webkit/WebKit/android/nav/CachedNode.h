@@ -110,6 +110,11 @@ public:
     bool isAnchor() const { return mType == ANCHOR_CACHEDNODETYPE; }
     bool isCursor() const { return mIsCursor; }
     bool isArea() const { return mType == AREA_CACHEDNODETYPE; }
+	//SAMSUNG CHANGE >>
+    bool isSelect() const { return mType == SELECT_CACHEDNODETYPE; }
+    const WebCore::String& name() const { return mName; }
+    void setName(const WebCore::String& name) { mName = name; }
+	//SAMSUNG CHANGE <<
     bool isFocus() const { return mIsFocus; }
     bool isFrame() const { return mType == FRAME_CACHEDNODETYPE; }
     bool isHidden() const { return mIsHidden; }
@@ -194,8 +199,9 @@ private:
     friend class CacheBuilder;
     WebCore::String mExport;
     WebCore::String mToolTip; //RoamTouch Change
-    WebCore::String mName;
     WebCore::IntSize mVideoSize;
+	//SAMSUNG CHANGE
+    WebCore::String mName;
     WebCore::IntRect mBounds;
     WebCore::IntRect mHitBounds;
     WebCore::IntRect mOriginalAbsoluteBounds;

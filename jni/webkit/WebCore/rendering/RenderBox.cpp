@@ -980,7 +980,8 @@ void RenderBox::mapLocalToContainer(RenderBoxModelObject* repaintContainer, bool
     } else
         fixed |= isFixedPos;
     
-    IntSize containerOffset = offsetFromContainer(o);
+    //Samsung - patch from r54784
+	IntSize containerOffset = offsetFromContainer(o, roundedIntPoint(transformState.mappedPoint()));
 
     bool preserve3D = useTransforms && (o->style()->preserves3D() || style()->preserves3D());
     if (useTransforms && shouldUseTransformFromContainer(o)) {
@@ -1021,7 +1022,7 @@ void RenderBox::mapAbsoluteToLocalPoint(bool fixed, bool useTransforms, Transfor
 
     o->mapAbsoluteToLocalPoint(fixed, useTransforms, transformState);
 
-    IntSize containerOffset = offsetFromContainer(o);
+    IntSize containerOffset = offsetFromContainer(o, IntPoint());     //Samsung - patch from r54784
 
     bool preserve3D = useTransforms && (o->style()->preserves3D() || style()->preserves3D());
     if (useTransforms && shouldUseTransformFromContainer(o)) {
@@ -1031,8 +1032,8 @@ void RenderBox::mapAbsoluteToLocalPoint(bool fixed, bool useTransforms, Transfor
     } else
         transformState.move(-containerOffset.width(), -containerOffset.height(), preserve3D ? TransformState::AccumulateTransform : TransformState::FlattenTransform);
 }
-
-IntSize RenderBox::offsetFromContainer(RenderObject* o) const
+//Samsung - patch from r54784
+IntSize RenderBox::offsetFromContainer(RenderObject* o, const IntPoint& point) const
 {
     ASSERT(o == container());
 
@@ -1041,14 +1042,11 @@ IntSize RenderBox::offsetFromContainer(RenderObject* o) const
         offset += relativePositionOffset();
 
     if (!isInline() || isReplaced()) {
-        RenderBlock* cb;
-        if (o->isBlockFlow() && style()->position() != AbsolutePosition && style()->position() != FixedPosition
-                && (cb = toRenderBlock(o))->hasColumns()) {
-            IntRect rect(x(), y(), 1, 1);
-            cb->adjustRectForColumns(rect);
-            offset.expand(rect.x(), rect.y());
-        } else
-            offset.expand(x(), y());
+        //Samsung - patch from r54784 begin	
+        if (style()->position() != AbsolutePosition && style()->position() != FixedPosition)
+            o->adjustForColumns(offset, IntPoint(point.x() + x(), point.y() + y()));
+        //Samsung - patch from r54784 end
+        offset.expand(x(), y());
     }
 
     if (o->hasOverflowClip())

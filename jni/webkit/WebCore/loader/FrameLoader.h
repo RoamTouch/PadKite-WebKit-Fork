@@ -420,12 +420,20 @@ private:
     void loadPostRequest(const ResourceRequest&, const String& referrer,                // Called by loadFrameRequest, calls loadWithNavigationAction
         const String& frameName, bool lockHistory, FrameLoadType, PassRefPtr<Event>, PassRefPtr<FormState>, bool);
     void loadURL(const KURL&, const String& referrer, const String& frameName,          // Called by loadFrameRequest, calls loadWithNavigationAction or dispatches to navigation policy delegate
-        bool lockHistory, FrameLoadType, PassRefPtr<Event>, PassRefPtr<FormState>, bool);
+        bool lockHistory, FrameLoadType, PassRefPtr<Event>, PassRefPtr<FormState>, bool
+#ifdef SAMSUNG_ANDROID_FORCE_HTML
+            , bool forceHTML = false
+#endif			
+            );
 #else
     void loadPostRequest(const ResourceRequest&, const String& referrer,                // Called by loadFrameRequest, calls loadWithNavigationAction
         const String& frameName, bool lockHistory, FrameLoadType, PassRefPtr<Event>, PassRefPtr<FormState>);
     void loadURL(const KURL&, const String& referrer, const String& frameName,          // Called by loadFrameRequest, calls loadWithNavigationAction or dispatches to navigation policy delegate
-        bool lockHistory, FrameLoadType, PassRefPtr<Event>, PassRefPtr<FormState>);                                                         
+        bool lockHistory, FrameLoadType, PassRefPtr<Event>, PassRefPtr<FormState>                                                         
+#ifdef SAMSUNG_ANDROID_FORCE_HTML
+            , bool forceHTML = false
+#endif			
+            );                                                         
 #endif
 
     bool shouldReload(const KURL& currentURL, const KURL& destinationURL);

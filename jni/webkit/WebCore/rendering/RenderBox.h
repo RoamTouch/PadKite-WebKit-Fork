@@ -172,8 +172,8 @@ public:
     int overrideWidth() const;
     int overrideHeight() const;
     virtual void setOverrideSize(int);
-
-    virtual IntSize offsetFromContainer(RenderObject*) const;
+    //Samsung - patch from r54784
+    virtual IntSize offsetFromContainer(RenderObject*, const IntPoint&) const;
     
     int calcBorderBoxWidth(int width) const;
     int calcBorderBoxHeight(int height) const;

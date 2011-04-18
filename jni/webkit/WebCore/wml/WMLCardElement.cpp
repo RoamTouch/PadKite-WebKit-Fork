@@ -30,15 +30,25 @@
 #include "NodeList.h"
 #include "Page.h"
 #include "RenderStyle.h"
+#include "Settings.h"
 #include "WMLDocument.h"
 #include "WMLDoElement.h"
 #include "WMLInputElement.h"
 #include "WMLIntrinsicEventHandler.h"
 #include "WMLNames.h"
+#include "WMLOnEventElement.h" // SAMSUNG_WML_FIXES+
 #include "WMLSelectElement.h"
 #include "WMLTemplateElement.h"
 #include "WMLTimerElement.h"
 #include "WMLVariables.h"
+#if ENABLE(WMLSCRIPT)
+#include "DocLoader.h"
+#include "WMLScriptInterface.h"
+#include "CachedWMLScript.h"
+#endif
+#if PLATFORM(ANDROID)
+#include "WebViewCore.h"
+#endif
 
 namespace WebCore {
 
@@ -163,7 +173,30 @@ void WMLCardElement::handleIntrinsicEventIfNeeded()
                 hasIntrinsicEvent = true;
         }
     }
- 
+    // SAMSUNG_WML_FIXES+
+    // http://spe.mobilephone.net/wit/wmlv2/structemp.wml
+	if (hasIntrinsicEvent) {
+		RefPtr<NodeList> children = childNodes();
+
+		if (children) {
+			unsigned length = children->length();
+			for (unsigned i = 0; i < length; ++i) {
+				Node* child = children->item(i);
+				if (!child->isElementNode())
+					continue;
+
+				if (child->hasTagName(oneventTag)) {
+					WMLOnEventElement* onEventElement = static_cast<WMLOnEventElement*>(child);
+					if (onEventElement->eventType() == eventType && onEventElement->isNoop()) {
+						hasIntrinsicEvent = false;
+						break;
+					}
+				}
+			}
+		}
+	}
+    // SAMSUNG_WML_FIXES-
+
     if (hasIntrinsicEvent)
         eventHandler->triggerIntrinsicEvent(eventType);
 
@@ -205,8 +238,22 @@ void WMLCardElement::handleDeckLevelTaskOverridesIfNeeded()
     it = templateDoElements.begin();
     end = templateDoElements.end();
 
-    for (; it != end; ++it)
-        (*it)->setActive(!cardDoElementNames.contains((*it)->name()));
+    // SAMSUNG_WML_FIXES+
+    // http://spe.mobilephone.net/wit/wmlv2/navdo.wml
+	//for (; it != end; ++it)
+	//    (*it)->setActive(!cardDoElementNames.contains((*it)->name()));
+	for (; it != end; ++it) {
+		bool active = !cardDoElementNames.contains((*it)->name()) ;
+		if((*it)->isActive() != active) {
+			(*it)->setActive(active);
+			if ((*it)->attached())
+				(*it)->detach();
+
+			ASSERT(!(*it)->attached());
+			(*it)->attach();
+		}
+	}
+    // SAMSUNG_WML_FIXES-
 }
 
 void WMLCardElement::parseMappedAttribute(MappedAttribute* attr)
@@ -231,6 +278,24 @@ void WMLCardElement::parseMappedAttribute(MappedAttribute* attr)
     if (eventType == WMLIntrinsicEventUnknown)
         return;
 
+#if ENABLE(WMLSCRIPT)
+    String url;
+    if(eventType == WMLIntrinsicEventOnEnterForward)
+        url = getAttribute(WMLNames::onenterforwardAttr);
+    else if(eventType == WMLIntrinsicEventOnTimer)
+        url = getAttribute(WMLNames::ontimerAttr);
+
+    if (!url.isEmpty()) {
+        String urlStr = WMLScript::getScriptURL(url, document()) ;
+        if ( !urlStr.isEmpty() ) {
+            WMLScriptLoader::m_script = document()->docLoader()->requestWMLScript(urlStr, getAttribute(HTMLNames::charsetAttr));
+            WMLScriptLoader::m_wmlDoc = static_cast<WMLDocument *>(document()) ;
+            WMLScriptLoader::m_script->addClient(static_cast<WMLScriptLoader*>(this)) ;
+            return ;
+        }
+    }
+#endif
+
     // Register intrinsic event in card
     RefPtr<WMLIntrinsicEvent> event = WMLIntrinsicEvent::create(document(), attr->value());
 
@@ -246,8 +311,18 @@ void WMLCardElement::insertedIntoDocument()
     // The first card inserted into a document, is visible by default.
     if (!m_isVisible) {
         RefPtr<NodeList> nodeList = document->getElementsByTagName("card");
-        if (nodeList && nodeList->length() == 1 && nodeList->item(0) == this)
+        if (nodeList && nodeList->length() == 1 && nodeList->item(0) == this) {
             m_isVisible = true;
+    // SAMSUNG_WML_FIXES+
+#ifdef ANDROID_META_SUPPORT
+        // fit wml sites directly in the screen
+        if (Page *p = document->page())
+            p->settings()->setMetadataSettings("width", "device-width");
+        if (FrameView* frameView = document->view())
+            android::WebViewCore::getWebViewCore(frameView)->updateViewport();
+#endif			
+    // SAMSUNG_WML_FIXES+
+        }
     }
 
     // For the WML layout tests we embed WML content in a XHTML document. Navigating to different cards
@@ -338,7 +413,17 @@ WMLCardElement* WMLCardElement::determineActiveCard(Document* doc)
 
     // Update the document title
     doc->setTitle(activeCard->title());
+#if ENABLE(WMLSCRIPT)
+    static_cast<WMLDocument*>(doc)->setActiveCardId(activeCard->getIDAttribute()) ;
+#endif
 
+    // SAMSUNG_WML_FIXES+
+    // Set the active activeCard in the Document object
+    static_cast<WMLDocument*>(doc)->setActiveCard(activeCard);
+
+    // Set the active activeCard in the WMLPageState object
+    //pageState->setActiveCard(activeCard);
+    // SAMSUNG_WML_FIXES-
     return activeCard;
 }
 

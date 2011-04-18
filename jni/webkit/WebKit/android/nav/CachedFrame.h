@@ -120,6 +120,14 @@ public:
 #endif
     WebCore::IntRect localBounds(const CachedNode* ,
         const WebCore::IntRect& ) const;
+	//SAMSUNG CHANGE >>
+    const CachedNode* nextInputField(const CachedNode* start,
+        const CachedFrame** framePtr, bool includeTextAreas) const;
+    const CachedNode* previousInputField(const CachedNode* start,
+        const CachedFrame** framePtr, bool includeTextAreas) const;
+    const CachedNode* searchNode(const WebCore::String & nodeName, 
+        void * nodePtr, const CachedFrame** framePtr) const;
+	//SAMSUNG CHANGE <<
     const CachedFrame* parent() const { return mParent; }
     CachedFrame* parent() { return mParent; }
     SkPicture* picture(const CachedNode* ) const;
@@ -141,6 +149,7 @@ public:
             : 0;
     }
     const CachedNode* validDocument() const;
+	
 protected:
     const CachedNode* nextTextField(const CachedNode* start,
         const CachedFrame** framePtr, bool* found) const;

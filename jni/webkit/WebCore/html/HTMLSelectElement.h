@@ -74,7 +74,8 @@ public:
     void setLength(unsigned, ExceptionCode&);
 
     Node* namedItem(const AtomicString& name);
-    Node* item(unsigned index);
+    //SAMSUNG WML FIX
+    virtual Node* item(unsigned index);
 
     CollectionCache* collectionInfo() { m_collectionInfo.checkConsistency(); return &m_collectionInfo; }
 

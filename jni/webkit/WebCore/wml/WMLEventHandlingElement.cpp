@@ -79,6 +79,12 @@ void WMLEventHandlingElement::deregisterDoElement(WMLDoElement* doElement)
 
 WMLEventHandlingElement* toWMLEventHandlingElement(WMLElement* element)
 {
+    // SAMSUNG_WML_FIXES+
+    // http://spe.mobilephone.net/wit/wmlv2/navdo.wml
+    if(!element)
+        return 0;
+    // SAMSUNG_WML_FIXES-   
+            
     if (!element->isWMLElement())
         return 0;
 
@@ -88,7 +94,11 @@ WMLEventHandlingElement* toWMLEventHandlingElement(WMLElement* element)
         return static_cast<WMLOptionElement*>(element);
     else if (element->hasTagName(templateTag))
         return static_cast<WMLTemplateElement*>(element);
-
+    // SAMSUNG_WML_FIXES+
+    // http://spe.mobilephone.net/wit/wmlv2/navdo.wml
+    else 
+        return toWMLEventHandlingElement(static_cast<WMLElement*>(element->parentElement()));           
+    // SAMSUNG_WML_FIXES-   
     return 0;
 }
 

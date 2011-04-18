@@ -235,5 +235,18 @@ String HTMLAreaElement::target() const
 {
     return getAttribute(targetAttr);
 }
+//SAMSUNG CHANGE >>
+IntRect HTMLAreaElement::rect() const
+{
+	IntRect result ;
+	if (m_shape == Rect) {
+		result.setX(m_coords[0].rawValue()) ;
+		result.setY(m_coords[1].rawValue()) ;
+		result.setWidth(m_coords[2].rawValue() - result.x()) ;
+		result.setHeight(m_coords[3].rawValue() - result.y()) ;
+	}
+	return result;
+}
+//SAMSUNG CHANGE <<
 
 }

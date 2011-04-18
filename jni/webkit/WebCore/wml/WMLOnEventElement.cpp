@@ -38,6 +38,7 @@ using namespace WMLNames;
 WMLOnEventElement::WMLOnEventElement(const QualifiedName& tagName, Document* doc)
     : WMLElement(tagName, doc)
     , m_type(WMLIntrinsicEventUnknown)
+    , m_isNoop(false) // SAMSUNG_WML_FIXES+
 {
 }
 
@@ -59,8 +60,10 @@ void WMLOnEventElement::parseMappedAttribute(MappedAttribute* attr)
     } else
         WMLElement::parseMappedAttribute(attr);
 }
-
-static inline WMLEventHandlingElement* eventHandlingParent(Node* parent)
+// SAMSUNG_WML_FIXES+
+//static inline WMLEventHandlingElement* eventHandlingParent(Node* parent)
+WMLEventHandlingElement* WMLOnEventElement::eventHandlingParent(Node* parent)
+// SAMSUNG_WML_FIXES-
 {
     if (!parent || !parent->isWMLElement())
         return 0;
@@ -70,7 +73,7 @@ static inline WMLEventHandlingElement* eventHandlingParent(Node* parent)
 
 void WMLOnEventElement::registerTask(WMLTaskElement* task)
 {
-    if (m_type == WMLIntrinsicEventUnknown)
+    if (m_type == WMLIntrinsicEventUnknown || m_isNoop) // SAMSUNG_WML_FIXES+
         return;
 
     // Register intrinsic event to the event handler of the owner of onevent element 

@@ -576,6 +576,19 @@ protected:
     const int mViewRight;
 };
 
+//SAMSUNG CHANGES+
+class WidthCheck : public CenterCheck {
+public:
+    WidthCheck(int x, int y, int width) : CenterCheck(x, y, width) {
+
+    }
+    int width() {
+        doRect(); // process the final line of text
+        return mHitRight - mHitLeft;
+    }
+};
+//SAMSUNG CHANGES-
+
 class ImageCanvas : public SkCanvas {
 public:
     ImageCanvas(SkBounder* bounder) : mURI(NULL) {
@@ -726,6 +739,25 @@ int CachedRoot::checkForCenter(int x, int y) const
     return centerCheck.center();
 }
 
+//SAMSUNG CHANGES+
+int CachedRoot::getBlockWidth(int x, int y) const
+{
+    int width = mViewBounds.width();
+    WidthCheck widthCheck(x + width - mViewBounds.x(), y - mViewBounds.y(),
+        width);
+    BoundsCanvas checker(&widthCheck);
+    SkBitmap bitmap;
+    bitmap.setConfig(SkBitmap::kARGB_8888_Config, width * 3,
+        mViewBounds.height());
+    checker.setBitmapDevice(bitmap);
+    checker.translate(SkIntToScalar(width - mViewBounds.x()),
+        SkIntToScalar(-mViewBounds.y()));
+    checker.drawPicture(*mPicture);
+    return widthCheck.width();
+}
+//SAMSUNG CHANGES-
+
+
 void CachedRoot::checkForJiggle(int* xDeltaPtr) const
 {
     int xDelta = *xDeltaPtr;
@@ -773,7 +805,72 @@ void CachedRoot::draw(FindCanvas& canvas) const
     canvas.drawLayers(mRootLayer);
 #endif
 }
+//SAMSUNG CHANGE >>
+int CachedRoot::cursorInputFieldAction(const WebCore::String& nodeName, void * nodePointer) const
+{
 
+    const CachedFrame* cursorFrame;
+    const CachedNode* cursor = currentCursor(&cursorFrame);
+    int action = FORM_INPUT_NONE ;
+    if (!cursor) {
+        LOGD("cursorInputFieldAction : No node under current cursor") ;
+        // Error case.  The cursor has no action, because there is no node under
+        // the cursor
+        
+        cursor = searchNode(nodeName, (void*)nodePointer, &cursorFrame) ;
+        /*cursor = currentFocus();
+        if (!cursor) {
+            LOGD("cursorInputFieldAction : No input field is focused") ;
+            cursor = searchNode(nodeName, (void*)nodePointer) ;
+        }*/
+
+        if (!cursor) {
+            LOGD("cursorInputFieldAction : Search result is NULL") ;
+            return action;        
+        }
+    }
+    if ( (!cursor->isTextInput() && !cursor->isSelect())) {
+        LOGD("cursorInputFieldAction : Focused node is not an inputfield") ;
+        return action;        
+    }
+    LOGD ( "cursorInputFieldAction cursor=%x, cursorFrame=%x", cursor, cursorFrame);
+    const CachedNode* prev = NULL ;
+    const CachedNode* next = NULL ;
+    /*const CachedNode* firstInputfield = nextInputField(0, 0, false);
+    if (!firstInputfield) {
+        // Error case.  There are no textfields in this tree.
+        return action;
+    }*/
+    prev = cursorFrame->previousInputField(cursor, &cursorFrame, true);
+    if (prev) {
+        // There is a textfield/area after the cursor, so the textfield under
+        // the cursor should have the NEXT action
+        if (prev->isTextInput())
+            action |= FORM_INPUT_PREV_TEXT ;
+        else
+            action |= FORM_INPUT_PREV_SELECT ;
+    }
+    // Now find the next textfield/area starting with the cursor
+    next = cursorFrame->nextInputField(cursor, &cursorFrame, true) ;
+    if (next) {
+        // There is a textfield/area after the cursor, so the textfield under
+        // the cursor should have the NEXT action
+        if (next->isTextInput())
+            action |= FORM_INPUT_NEXT_TEXT ;
+        else
+            action |= FORM_INPUT_NEXT_SELECT ;
+    }
+    else {
+        // If this line is reached, we know that the textfield under the cursor is
+        // the last one.  Make it GO to allow a submit
+        action |= FORM_INPUT_GO;
+    }
+    LOGD ( "cursorInputFieldAction next=%x, prev=%x, action=%d", next, prev, action);
+
+    return action ;
+}
+
+//SAMSUNG CHANGE <<
 const CachedNode* CachedRoot::findAt(const WebCore::IntRect& rect,
     const CachedFrame** framePtr, int* x, int* y, bool checkForHidden) const
 {

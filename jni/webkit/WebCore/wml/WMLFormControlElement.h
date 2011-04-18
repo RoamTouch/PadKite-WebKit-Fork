@@ -43,6 +43,9 @@ public:
 
     virtual void attach();
     virtual void recalcStyle(StyleChange);
+	//SAMSUNG_WML_FIX +
+    String name() const;
+	//SAMSUNG_WML_FIX -
 
 private:
     bool m_valueMatchesRenderer;

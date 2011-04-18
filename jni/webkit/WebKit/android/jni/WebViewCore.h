@@ -76,6 +76,56 @@ namespace android {
     class CachedRoot;
     class ListBoxReply;
 
+//SAMSUNG CHANGE+
+	enum nodeDimension {
+		maxTextHeight = 180,
+		minTextHeight = 60,
+		minTextWidth = 100,
+		textPadding = 10,
+	};
+//SAMSUNG CHANGE-
+
+//SAMSUNG CHANGE +
+class WebFeedLink{
+    public:
+        WebFeedLink() { }
+
+        WebFeedLink(const String& url, const String& title, const String& type)
+            :mUrl(url) 
+            ,mTitle(title)
+            ,mType(type)
+        {
+        }
+        
+        WebFeedLink(const WebFeedLink& info)
+        {
+            mUrl = info.mUrl ;
+            mTitle = info.mTitle;
+            mType = info.mType;
+        }
+        
+        WebFeedLink& operator=(const WebFeedLink& info)
+        {
+            mUrl = info.mUrl ;
+            mTitle = info.mTitle;
+            mType = info.mType;
+            return *this;
+        }
+        
+        void setUrl(const String& url) { mUrl=url ; }
+        const String& url() const { return mUrl ; }
+        void setTitle(const String& title) { mTitle = title ; }
+        const String& title() const { return mTitle ; }
+        void setType(const String& type) { mType = type ; }
+        const String& type() const { return mType ; }
+        
+    private:
+        String mUrl;
+        String mTitle;
+        String mType;
+    };
+//SAMSUNG CHANGE -    
+
     class WebCoreReply : public WebCoreRefObject {
     public:
         virtual ~WebCoreReply() {}
@@ -167,6 +217,11 @@ namespace android {
          * Notify the view to update the viewport.
          */
         void updateViewport();
+        
+	/**
+         * SAMSUNG CHANGE--Support for Meta Cache Tags
+	 */
+        void HttpEquivhandle(const WebCore::String& url);
 
         /**
          * Notify the view to restore the screen width, which in turn restores
@@ -263,6 +318,11 @@ namespace android {
         WebCore::String retrieveAnchorText(WebCore::Frame* frame, WebCore::Node* node);
         WebCore::String requestLabel(WebCore::Frame* , WebCore::Node* );
 
+	
+	//SAMSUNG CHANGE BEGIN : ADVANCED_COPY_PASTE
+		WebCore::String getSelectedText();
+	//SAMSUNG CHANGE END : ADVANCED_COPY_PASTE
+	
         // Create a single picture to represent the drawn DOM (used by navcache)
         void recordPicture(SkPicture* picture);
 
@@ -279,9 +339,21 @@ namespace android {
 
         void setGlobalBounds(int x, int y, int h, int v);
 
+//SAMSUNG CHANGES+
+		void getBestBlockRect(WebCore::IntRect* nodeBounds, int width, int height,
+						int screenWidth, float scale, int realScreenWidth, int screenHeight,
+						int anchorX, int anchorY, bool ignoreHeight,
+						bool needAnchorDiff, int viewportLeft, int viewportTop);
+//SAMSUNG CHANGES-
+
         void setSizeScreenWidthAndScale(int width, int height, int screenWidth,
             float scale, int realScreenWidth, int screenHeight, int anchorX,
-            int anchorY, bool ignoreHeight);
+            int anchorY, bool ignoreHeight,
+//SAMSUNG CHANGES+
+			bool needAnchorDiff, int viewportLeft, int viewportTop);
+//SAMSUNG CHANGES-
+
+        void updatePlugins( int mode, int viewleft, int viewtop, int viewright, int viewbottom, float scale, int anchorX, int anchorY );
 
         /**
          * Handle key events from Java.
@@ -433,8 +505,21 @@ namespace android {
         // pinned at the screen position (xPercentInView, yPercentInView).
         void showRect(int left, int top, int width, int height, int contentWidth,
             int contentHeight, float xPercentInDoc, float xPercentInView,
-            float yPercentInDoc, float yPercentInView);
+            float yPercentInDoc, float yPercentInView,
+//SAMSUNG CHANGES+
+			bool hasAnchorDiff, int oldAnchorX, int newAnchorX, int oldAnchorY, int newAnchorY);
+//SAMSUNG CHANGES-
 
+
+        //SAMSUNG CHANGE +
+        // Get the list of feed links in the webpage
+        void getWebFeedLinks(Vector<WebFeedLink*>& out);
+        
+        WebCore::IntRect getRenderBlockBounds(const WebCore::IntPoint& pt);
+//SAMSUNG CHANGES+
+		WebCore::IntRect getRenderBlockBounds(WebCore::Node* node);
+//SAMSUNG CHANGES-
+        //SAMSUNG CHANGE -
         // Scale the rect (x, y, width, height) to make it just fit and centered
         // in the current view.
         void centerFitRect(int x, int y, int width, int height);
@@ -492,6 +577,20 @@ namespace android {
         WTF::Vector<Container> m_buttons;
         bool isPaused() const { return m_isPaused; }
         void setIsPaused(bool isPaused) { m_isPaused = isPaused; }
+
+	 //SAMSUNG CHANGE BEGIN : ADVANCED_COPY_PASTE
+
+	 void copyMoveSelection(int x, int y,  int controller, bool smartSelection, bool selectionMove, float zoomLeve, int granularity);
+	 void clearTextSelection(int contentX, int contentY);
+	 void copySetSelectionDirection(int controller);
+	 void webkitCopyMoveSelection(WebCore::IntPoint wndPoint, WebCore::IntPoint contentPoint, int controller);
+	 const SkRegion& getSelectionRegion();
+	 bool recordSelectionCopiedData(SkRegion* region, SkIRect* startRect,
+					SkIRect* endRect, int granularity);
+	 int getSelectionGranularity();
+	 bool selectClosestWord(int x, int y, float zoomLevel, bool smartSelection);
+	 
+	 //SAMSUNG CHANGE END : ADVANCED_COPY_PASTE
         // end of shared members
 
         // internal functions
@@ -506,7 +605,8 @@ namespace android {
 
         void listBoxRequest(WebCoreReply* reply, const uint16_t** labels,
                 size_t count, const int enabled[], size_t enabledCount,
-                bool multiple, const int selected[], size_t selectedCountOrSelection);
+                bool multiple, const int selected[], size_t selectedCountOrSelection,
+                const WebCore::Element * select);
 
         friend class ListBoxReply;
         struct JavaGlue;

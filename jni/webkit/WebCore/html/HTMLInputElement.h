@@ -96,7 +96,8 @@ public:
     virtual bool isChecked() const { return checked() && (inputType() == CHECKBOX || inputType() == RADIO); }
     virtual bool isIndeterminate() const { return indeterminate(); }
     
-    bool readOnly() const { return isReadOnlyFormControl(); }
+    //SAMSUNG FIX
+    virtual bool readOnly() const { return isReadOnlyFormControl(); }
 
     virtual bool isTextFormControl() const { return isTextField(); }
 

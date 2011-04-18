@@ -156,6 +156,24 @@ void WMLInputElement::setValue(const String& value, bool sendChangeEvent)
     InputElement::notifyFormStateChanged(this);
 }
 
+// SAMSUNG_WML_FIXES+
+// wml/struct/control/input/format/1
+void WMLInputElement::setValuePreserveSelectionPos(const String& value)
+{
+    //InputElement::updatePlaceholderVisibility(m_data, this, this);
+    setFormControlValueMatchesRenderer(false);
+    m_data.setValue(constrainValue(value));
+    if (inDocument())
+        document()->updateStyleIfNeeded();
+    if (renderer())
+        renderer()->updateFromElement();
+    setNeedsStyleRecalc();
+
+    InputElement::notifyFormStateChanged(this);
+}
+// SAMSUNG_WML_FIXES-
+
+
 void WMLInputElement::setValueForUser(const String& value)
 {
     /* InputElement class defines pure virtual function 'setValueForUser', which 
@@ -180,7 +198,7 @@ bool WMLInputElement::saveFormControlState(String& result) const
 void WMLInputElement::restoreFormControlState(const String& state)
 {
     ASSERT(!m_isPasswordField); // should never save/restore password fields
-    setValue(state);
+    setValue(state, true);
 }
 
 void WMLInputElement::select()
@@ -252,20 +270,29 @@ bool WMLInputElement::appendFormData(FormDataList& encoding, bool)
 
 void WMLInputElement::reset()
 {
-    setValue(String());
+    setValue(String(), true);
 }
 
 void WMLInputElement::defaultEventHandler(Event* evt)
 {
     bool clickDefaultFormButton = false;
-
+    String filteredString;
     if (evt->type() == eventNames().textInputEvent && evt->isTextEvent()) {
         TextEvent* textEvent = static_cast<TextEvent*>(evt);
         if (textEvent->data() == "\n")
             clickDefaultFormButton = true;
-        else if (renderer() && !isConformedToInputMask(textEvent->data()[0], toRenderTextControl(renderer())->text().length() + 1))
-            // If the inputed char doesn't conform to the input mask, stop handling 
+    // SAMSUNG_WML_FIXES+
+    // wml/struct/control/input/format/1    
+    // else if (renderer() && !isConformedToInputMask(textEvent->data()[0], toRenderTextControl(renderer())->text().length() + 1))
+    else if (renderer()) {
+        WMLElement::defaultEventHandler(evt);
+        if (evt->defaultHandled()) {
+            filteredString = filterInvalidChars((toRenderTextControl(renderer()))->text());
+            setValuePreserveSelectionPos(filteredString);
             return;
+        }
+     }
+     // SAMSUNG_WML_FIXES-
     }
 
     if (evt->type() == eventNames().keydownEvent && evt->isKeyboardEvent() && focused() && document()->frame()
@@ -364,8 +391,8 @@ void WMLInputElement::initialize()
  
         pageSate->storeVariable(nameVariable, variableValue);
     }
-    setValue(variableValue);
- 
+    setValue(variableValue, true);
+
     if (!hasAttribute(WMLNames::emptyokAttr)) {
         if (m_formatMask.isEmpty() || 
             // check if the format codes is just "*f"
@@ -426,6 +453,20 @@ String WMLInputElement::validateInputMask(const String& inputMask)
     return inputMask;
 }
 
+// SAMSUNG_WML_FIXES+
+String WMLInputElement::filterInvalidChars(const String& inputChars)
+{
+      String filteredString;
+      unsigned charCount = 0;
+      for (unsigned i = 0; i < inputChars.length(); ++i) {
+        if (isConformedToInputMask(inputChars[i], charCount+1, false)) {
+        filteredString.append(inputChars[i]);
+        charCount++;
+    }
+      }
+      return filteredString;
+}
+// SAMSUNG_WML_FIXES-
 bool WMLInputElement::isConformedToInputMask(const String& inputChars)
 {
     for (unsigned i = 0; i < inputChars.length(); ++i)
