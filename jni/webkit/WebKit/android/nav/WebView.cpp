@@ -2099,7 +2099,7 @@ static jobject nativeGetHitTestResultAtPoint(JNIEnv *env, jobject obj,
         } else if (result->isInput()) {
             type = WebView::HIT_TEST_INPUT_TYPE;
             extraString = result->getToolTip();
-        } else if (result->isSelect()) {
+        } else if (result->isRTSelect()) {
             type = WebView::HIT_TEST_SELECT_TYPE;
         } else if (result->isText()) {
             type = WebView::HIT_TEST_TEXT_TYPE;

@@ -131,7 +131,7 @@ public:
     //ROAMTOUCH CHANGE - begin
     bool isText() const { return mIsText; }
     bool isVideo() const { return mIsVideo; }
-    bool isSelect() const { return mIsSelect; }
+    bool isRTSelect() const { return mIsSelect; }
     bool isInput() const { return mIsInput; }
     const WebCore::String& getToolTip() const { return mToolTip; }
     const WebCore::IntSize& getVideoSize() const { return mVideoSize; }
