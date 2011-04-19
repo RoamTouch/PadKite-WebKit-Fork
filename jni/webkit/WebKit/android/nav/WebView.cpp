@@ -148,7 +148,7 @@ struct JavaGlue {
     jmethodID   m_sendMoveFocus;
     jmethodID   m_sendMoveMouse;
     //SAMSUNG CHANGE
-    jmethodID   m_sendMouseClick;
+/*    jmethodID   m_sendMouseClick;*/
     jmethodID   m_sendMoveMouseIfLatest;
     jmethodID   m_sendMotionUp;
     jmethodID   m_domChangedFocus;
@@ -185,7 +185,7 @@ WebView(JNIEnv* env, jobject javaWebView, int viewImpl) :
     m_javaGlue.m_sendMoveFocus = GetJMethod(env, clazz, "sendMoveFocus", "(II)V");
     m_javaGlue.m_sendMoveMouse = GetJMethod(env, clazz, "sendMoveMouse", "(IIII)V");
     //SAMSUNG CHANGE
-    m_javaGlue.m_sendMouseClick = GetJMethod(env, clazz, "sendMouseClick", "(II)V");
+/*    m_javaGlue.m_sendMouseClick = GetJMethod(env, clazz, "sendMouseClick", "(II)V");*/
     m_javaGlue.m_sendMoveMouseIfLatest = GetJMethod(env, clazz, "sendMoveMouseIfLatest", "(Z)V");
     m_javaGlue.m_sendMotionUp = GetJMethod(env, clazz, "sendMotionUp", "(IIIII)V");
     m_javaGlue.m_domChangedFocus = GetJMethod(env, clazz, "domChangedFocus", "()V");
@@ -1102,7 +1102,7 @@ void sendMoveMouse(WebCore::Frame* framePtr, WebCore::Node* nodePtr, int x, int 
     checkException(env);
 }
 //SAMSUNG CHANGE >>
-void sendMouseClick(WebCore::Frame* framePtr, WebCore::Node* nodePtr)
+/*void sendMouseClick(WebCore::Frame* framePtr, WebCore::Node* nodePtr)
 {
     DBG_NAV_LOGD("framePtr=%p nodePtr=%p", framePtr, nodePtr);
     JNIEnv* env = JSC::Bindings::getJNIEnv();
@@ -1114,7 +1114,7 @@ void sendMouseClick(WebCore::Frame* framePtr, WebCore::Node* nodePtr)
     env->CallVoidMethod(obj.get(), m_javaGlue.m_sendMouseClick,
         (jint) framePtr, (jint) nodePtr);
     checkException(env);
-}
+}*/
 //SAMSUNG CHANGE <<
 
 void sendMoveMouseIfLatest(bool disableFocusController)
@@ -2530,10 +2530,10 @@ static int nativeMoveCursorToInput(JNIEnv *env, jobject obj, jstring name, jint 
             static_cast<WebCore::Node*>(next->nodePointer()));
         view->getWebViewCore()->m_moveGeneration++;
     
-    } else {
+    }/* else {
         view->sendMouseClick(static_cast<WebCore::Frame*>(nextFrame->framePointer()),
                 static_cast<WebCore::Node*>(next->nodePointer()));
-    }
+    }*/
     
     if (!next->isInLayer())
         view->scrollRectOnScreen(bounds);
@@ -2848,10 +2848,10 @@ static JNINativeMethod gJavaWebViewMethods[] = {
     ,{ "nativeSetCursorInnerColors", "(IIII)V",
         (void*) nativeSetCursorInnerColors }
     ,{ "nativeSetCursorPressedColors", "(II)V",
-        (void*) nativeSetCursorPressedColors },
+        (void*) nativeSetCursorPressedColors }
     //ROAMTOUCH CHANGE <<    
 //SAMSUNG CHANGES >
-    { "nativeInputFieldAction", "(Ljava/lang/String;I)I",
+/*    { "nativeInputFieldAction", "(Ljava/lang/String;I)I",
         (void*) nativeInputFieldAction },
     { "nativeMoveCursorToInput", "(Ljava/lang/String;II)I",
         (void*) nativeMoveCursorToInput },
@@ -2862,7 +2862,7 @@ static JNINativeMethod gJavaWebViewMethods[] = {
 	{ "nativeGetBlockWidth", "(II)I",
 		(void*) nativeGetBlockWidth },
     { "nativeDrawSelectionControls", "(Landroid/graphics/Canvas;Landroid/graphics/Region;Landroid/graphics/Rect;Landroid/graphics/Rect;IZII)V",
-        (void*) nativeDrawSelectionControls }
+        (void*) nativeDrawSelectionControls }*/
 //SAMSUNG CHANGES <
 };
 

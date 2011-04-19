@@ -270,8 +270,8 @@ struct WebViewCore::JavaGlue {
     jmethodID   m_setScrollbarModes;
     //ROAMTOUCH CHANGE
     jmethodID   m_updateClipboard;
-    jmethodID   m_sendOrientationChangeEvent; //SAMSUNG FIX
-    jmethodID   m_HttpEquivhandle; //SAMSUNG CHANGE
+/*    jmethodID   m_sendOrientationChangeEvent; //SAMSUNG FIX
+    jmethodID   m_HttpEquivhandle; //SAMSUNG CHANGE*/
     AutoJObject object(JNIEnv* env) {
         return getRealObject(env, m_obj);
     }
@@ -324,11 +324,9 @@ WebViewCore::WebViewCore(JNIEnv* env, jobject javaWebViewCore, WebCore::Frame* m
     m_javaGlue->m_scrollTo = GetJMethod(env, clazz, "contentScrollTo", "(II)V");
     m_javaGlue->m_scrollBy = GetJMethod(env, clazz, "contentScrollBy", "(IIZ)V");
     m_javaGlue->m_contentDraw = GetJMethod(env, clazz, "contentDraw", "()V");
-    //SAMSUNG CHANGE
-    m_javaGlue->m_requestListBox = GetJMethod(env, clazz, "requestListBox", "([Ljava/lang/String;Ljava/lang/String;[I[II)V");
+    m_javaGlue->m_requestListBox = GetJMethod(env, clazz, "requestListBox", "([Ljava/lang/String;[I[I)V");
     m_javaGlue->m_openFileChooser = GetJMethod(env, clazz, "openFileChooser", "()Ljava/lang/String;");
-    //SAMSUNG CHANGE
-    m_javaGlue->m_requestSingleListBox = GetJMethod(env, clazz, "requestListBox", "([Ljava/lang/String;Ljava/lang/String;[III)V");
+    m_javaGlue->m_requestSingleListBox = GetJMethod(env, clazz, "requestListBox", "([Ljava/lang/String;[II)V");
     m_javaGlue->m_jsAlert = GetJMethod(env, clazz, "jsAlert", "(Ljava/lang/String;Ljava/lang/String;)V");
     m_javaGlue->m_jsConfirm = GetJMethod(env, clazz, "jsConfirm", "(Ljava/lang/String;Ljava/lang/String;)Z");
     m_javaGlue->m_jsPrompt = GetJMethod(env, clazz, "jsPrompt", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
@@ -362,15 +360,13 @@ WebViewCore::WebViewCore(JNIEnv* env, jobject javaWebViewCore, WebCore::Frame* m
     m_javaGlue->m_destroySurface = GetJMethod(env, clazz, "destroySurface", "(Lroamtouch/webkit/ViewManager$ChildView;)V");
     m_javaGlue->m_getContext = GetJMethod(env, clazz, "getContext", "()Landroid/content/Context;");
     m_javaGlue->m_sendFindAgain = GetJMethod(env, clazz, "sendFindAgain", "()V");
-//SAMSUNG CHANGES+
-	m_javaGlue->m_showRect = GetJMethod(env, clazz, "showRect", "(IIIIIIFFFFZIIII)V");
-//SAMSUNG CHANGES-
+    m_javaGlue->m_showRect = GetJMethod(env, clazz, "showRect", "(IIIIIIFFFF)V");
     m_javaGlue->m_centerFitRect = GetJMethod(env, clazz, "centerFitRect", "(IIII)V");
     m_javaGlue->m_setScrollbarModes = GetJMethod(env, clazz, "setScrollbarModes", "(II)V");
     //ROAMTOUCH CHANGE
     m_javaGlue->m_updateClipboard = GetJMethod(env, clazz, "updateClipboard", "(Ljava/lang/String;)V");
-    m_javaGlue->m_sendOrientationChangeEvent = GetJMethod(env, clazz, "sendOrientationChangeEvent", "()V"); //SAMSUNG FIX
-    m_javaGlue->m_HttpEquivhandle = GetJMethod(env, clazz, "HttpEquivhandle", "(Ljava/lang/String;)V"); //SAMSUNG CHANGE
+//    m_javaGlue->m_sendOrientationChangeEvent = GetJMethod(env, clazz, "sendOrientationChangeEvent", "()V"); //SAMSUNG FIX
+//    m_javaGlue->m_HttpEquivhandle = GetJMethod(env, clazz, "HttpEquivhandle", "(Ljava/lang/String;)V"); //SAMSUNG CHANGE
     env->SetIntField(javaWebViewCore, gWebViewCoreFields.m_nativeClass, (jint)this);
 
     m_scrollOffsetX = m_scrollOffsetY = 0;
@@ -1062,7 +1058,7 @@ void WebViewCore::updateViewport()
 
 //SAMSUNG CHANGES >>
 //Support for Meta Cache Tags
-void WebViewCore::HttpEquivhandle(const WebCore::String& url)
+/*void WebViewCore::HttpEquivhandle(const WebCore::String& url)
 {
     DEBUG_NAV_UI_LOGD("%s", __FUNCTION__);
     LOG_ASSERT(m_javaGlue->m_obj, "HttpEquivhandle");
@@ -1076,7 +1072,7 @@ void WebViewCore::HttpEquivhandle(const WebCore::String& url)
     env->CallVoidMethod(obj.get(), m_javaGlue->m_HttpEquivhandle, jUrlStr);
     env->DeleteLocalRef(jUrlStr);
     checkException(env);
-}
+}*/
 //SAMSUNG CHANGES << 
 
 void WebViewCore::restoreScale(int scale)
@@ -1620,9 +1616,9 @@ void WebViewCore::setSizeScreenWidthAndScale(int width, int height,
                 }
             }
             //SAMSUNG FIX GA0100087996 Facebook photo viewer orientation change issue>>
-            JNIEnv* env = JSC::Bindings::getJNIEnv();
+/*            JNIEnv* env = JSC::Bindings::getJNIEnv();
             env->CallVoidMethod(m_javaGlue->object(env).get(), m_javaGlue->m_sendOrientationChangeEvent);
-            checkException(env);
+            checkException(env);*/
             //SAMSUNG FIX <<
         }
     }
@@ -2644,14 +2640,14 @@ void WebViewCore::listBoxRequest(WebCoreReply* reply, const uint16_t** labels, s
         env->ReleaseIntArrayElements(selectedArray, selArray, 0);
 
         env->CallVoidMethod(m_javaGlue->object(env).get(),
-                m_javaGlue->m_requestListBox, labelArray, jName/*SAMSUNG CHANGE*/, enabledArray,
-                selectedArray, (jint) select/*SAMSUNG CHANGE*/);
+                m_javaGlue->m_requestListBox, labelArray, enabledArray,
+                selectedArray);
         env->DeleteLocalRef(selectedArray);
     } else {
         // Pass up the single selection.
         env->CallVoidMethod(m_javaGlue->object(env).get(),
-                m_javaGlue->m_requestSingleListBox, labelArray, jName/*SAMSUNG CHANGE*/, enabledArray,
-                selectedCountOrSelection, (jint) select/*SAMSUNG CHANGE*/);
+                m_javaGlue->m_requestSingleListBox, labelArray, enabledArray,
+                selectedCountOrSelection);
     }
 
     env->DeleteLocalRef(labelArray);
@@ -3251,9 +3247,7 @@ void WebViewCore::showRect(int left, int top, int width, int height,
     JNIEnv* env = JSC::Bindings::getJNIEnv();
     env->CallVoidMethod(m_javaGlue->object(env).get(), m_javaGlue->m_showRect,
             left, top, width, height, contentWidth, contentHeight,
-            xPercentInDoc, xPercentInView, yPercentInDoc, yPercentInView,
-//SAMSUNG CHANGES+
-			hasAnchorDiff, oldAnchorX, newAnchorX, oldAnchorY, newAnchorY);
+            xPercentInDoc, xPercentInView, yPercentInDoc, yPercentInView);
 //SAMSUNG CHANGES-
     checkException(env);
 }
@@ -4657,13 +4651,15 @@ static JNINativeMethod gJavaWebViewCoreMethods[] = {
         (void*) SendListBoxChoices },
     { "nativeSendListBoxChoice", "(I)V",
         (void*) SendListBoxChoice },
+    { "nativeSetSize", "(IIIFIIIIZ)V",
+        (void*) SetSize },
 //SAMSUNG CHANGES+
-	{ "nativeSetSize", "(IIIFIIIIZZII)V",
+/*	{ "nativeSetSize", "(IIIFIIIIZZII)V",
 		(void*) SetSize },
 	{ "nativeGetBestBlock", "(IIIFIIIIZZII)Landroid/graphics/Rect;",
 		(void*) GetBestBlock},
     { "nativeUpdatePlugins", "(IIIIIFII)V",
-        (void*) UpdatePlugins }, 		
+        (void*) UpdatePlugins }, 		*/
 //SAMSUNG CHANGES-
     { "nativeSetScrollOffset", "(III)V",
         (void*) SetScrollOffset },
@@ -4711,8 +4707,8 @@ static JNINativeMethod gJavaWebViewCoreMethods[] = {
         (void*) SplitContent },
     { "nativeSetBackgroundColor", "(I)V",
         (void*) SetBackgroundColor },
-    { "nativeGetSelectedText", "()Ljava/lang/String;",
-        (void*) GetSelectedText },
+/*    { "nativeGetSelectedText", "()Ljava/lang/String;",
+        (void*) GetSelectedText },*/
     { "nativeRegisterURLSchemeAsLocal", "(Ljava/lang/String;)V",
         (void*) RegisterURLSchemeAsLocal },
     { "nativeDumpDomTree", "(Z)V",
@@ -4743,10 +4739,10 @@ static JNINativeMethod gJavaWebViewCoreMethods[] = {
         (void*) ValidNodeAndBounds },
     //ROAMTOUCH CHANGE >>    
     { "nativeExecuteSelectionCommand", "(III)V", (void*) nativeExecuteSelectionCommand },
-    { "nativeSetSelectionColor", "(IIII)V",(void*) nativeSetSelectionColor },
+    { "nativeSetSelectionColor", "(IIII)V",(void*) nativeSetSelectionColor }
     //ROAMTOUCH CHANGE <<
     //SAMSUNG CHANGES >>
-    { "nativeCopyMoveSelection", "(IIIZZFI)V",
+/*    { "nativeCopyMoveSelection", "(IIIZZFI)V",
 	 (void*) CopyMoveSelection },
     { "nativeClearTextSelection", "(II)V",
 	 (void*) ClearTextSelection },
@@ -4761,7 +4757,7 @@ static JNINativeMethod gJavaWebViewCoreMethods[] = {
     { "nativeMouseClick", "(II)V",
         (void*) MouseClick },
     { "nativeGetBlockBounds", "(IIF)Landroid/graphics/Rect;",
-        (void*) nativeGetBlockBounds }
+        (void*) nativeGetBlockBounds }*/
     //SAMSUNG CHANGES <<
 };
 

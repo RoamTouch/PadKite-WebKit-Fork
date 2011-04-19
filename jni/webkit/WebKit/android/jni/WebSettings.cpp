@@ -115,7 +115,7 @@ struct FieldIds {
         mUseDoubleTree = env->GetFieldID(clazz, "mUseDoubleTree", "Z");
         mPageCacheCapacity = env->GetFieldID(clazz, "mPageCacheCapacity", "I");
       //SAMSUNG CHANGE
-        mAdvanceTextSelection =  env->GetFieldID(clazz, "mAdvanceTextSelection", "Z");
+        //mAdvanceTextSelection =  env->GetFieldID(clazz, "mAdvanceTextSelection", "Z");
 
         LOG_ASSERT(mLayoutAlgorithm, "Could not find field mLayoutAlgorithm");
         LOG_ASSERT(mTextSize, "Could not find field mTextSize");
@@ -153,7 +153,7 @@ struct FieldIds {
         LOG_ASSERT(mUseDoubleTree, "Could not find field mUseDoubleTree");
         LOG_ASSERT(mPageCacheCapacity, "Could not find field mPageCacheCapacity");
         //SAMSUNG CHANGE	
-        LOG_ASSERT(mAdvanceTextSelection, "Could not find field mAdvanceTextSelection");
+//        LOG_ASSERT(mAdvanceTextSelection, "Could not find field mAdvanceTextSelection");
 
         jclass c = env->FindClass("java/lang/Enum");
         LOG_ASSERT(c, "Could not find Enum class!");
@@ -216,7 +216,7 @@ struct FieldIds {
     jfieldID mDatabasePathHasBeenSet;
 #endif
     //SAMSUNG CHANGE
-    jfieldID mAdvanceTextSelection;
+//    jfieldID mAdvanceTextSelection;
 
 };
 
@@ -391,7 +391,7 @@ public:
         }
 #endif
         //SAMSUNG CHANGE	
-         flag = env->GetBooleanField(obj, gFieldIds->mAdvanceTextSelection);
+         flag = false; //env->GetBooleanField(obj, gFieldIds->mAdvanceTextSelection);
          s->setAdvancedSelectionEnabled(flag);
 
         flag = env->GetBooleanField(obj, gFieldIds->mGeolocationEnabled);

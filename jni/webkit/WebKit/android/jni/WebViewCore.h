@@ -221,7 +221,7 @@ class WebFeedLink{
 	/**
          * SAMSUNG CHANGE--Support for Meta Cache Tags
 	 */
-        void HttpEquivhandle(const WebCore::String& url);
+//        void HttpEquivhandle(const WebCore::String& url);
 
         /**
          * Notify the view to restore the screen width, which in turn restores

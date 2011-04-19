@@ -2378,13 +2378,13 @@ void Document::processHttpEquiv(const String& equiv, const String& content)
             frame->redirectScheduler()->scheduleLocationChange(blankURL(), String());
        		 }
 	 // SAMSUNG CHANGE- no-cache, no-store add compareString.	Pineone.SoobinPark  2010.07.26 ADD START
-	} else if ((equalIgnoringCase(equiv, "Cache-Control")) ||(equalIgnoringCase(equiv, "Pragma"))) {
+/*	} else if ((equalIgnoringCase(equiv, "Cache-Control")) ||(equalIgnoringCase(equiv, "Pragma"))) {
 			if((equalIgnoringCase(content.substring(0,8), "no-cache")) ||(equalIgnoringCase(content.substring(0,8), "no-store"))) { 
 				if (FrameView* frameView = view()) {
 					android::WebViewCore::getWebViewCore(frameView)->HttpEquivhandle(url().string());
 			}
 		}
-	// no-cache, no-store add compareString.	Pineone.SoobinPark  2010.07.26 ADD END
+	// no-cache, no-store add compareString.	Pineone.SoobinPark  2010.07.26 ADD END*/
 	}    
 }
 
